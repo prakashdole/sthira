@@ -415,3 +415,6 @@ class ObjectionsAppealsService:
 
 # Global singleton instance
 objections_appeals_service = ObjectionsAppealsService()
+
+# Alias for convenience
+objections_service = objections_appeals_service
