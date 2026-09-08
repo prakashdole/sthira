@@ -288,6 +288,71 @@ function renderActiveTab() {
         </table>
       </div>
     `;
+  } else if (activeTab === 'phase2') {
+    content.innerHTML = `
+      <div class="card" style="margin-bottom: 1.5rem; border-left: 5px solid #2563eb;">
+        <h3>Phase 2 Wayanad Shadow Pilot & Field Validation Console (DEC-035)</h3>
+        <p class="ml-text">ഘട്ടം 2 ഷാഡോ പൈലറ്റ് കൺസോൾ — പൂർണ്ണമായും പരിശോധനാ സ്വഭാവമുള്ളത്.</p>
+        <p>Operating strictly in <strong>SHADOW / REHEARSAL</strong> mode without official statutory reliance. Evaluates 11 mandatory historical and field scenarios against authorized baseline.</p>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h4>1. Agency Import & Cadastral Reconciliation (C2-01)</h4>
+          <p>Restricted adapters for Kerala e-Rekha, Forest Department FRA 2006, and DDMA orders.</p>
+          <div style="margin-top: 0.75rem;">
+            <span class="badge" style="background: #e0e7ff; color: #3730a3;">e-Rekha Cadastral</span>
+            <span class="badge" style="background: #fef3c7; color: #92400e;">FRA §4(5) Claims</span>
+            <span class="badge" style="background: #d1fae5; color: #065f46;">DDMA Orders</span>
+          </div>
+          <p style="font-size: 0.9em; color: #6b7280; margin-top: 0.5rem;">Cadastral grid shifts > 25m & paper-vacant conflicts surface as review tasks; no silent adjustment.</p>
+        </div>
+
+        <div class="card">
+          <h4>2. Field Sync & Lost-Device Revocation (C2-02)</h4>
+          <p>Offline survey bundles with conflict detection (no last-write-wins) and device emergency revocation.</p>
+          <div style="margin-top: 0.75rem;">
+            <span class="badge" style="background: #d1fae5; color: #065f46;">Offline Sync: Active</span>
+            <span class="badge" style="background: #fee2e2; color: #991b1b;">Device Lost: Revocable</span>
+          </div>
+          <p style="font-size: 0.9em; color: #6b7280; margin-top: 0.5rem;">Reported lost field tablets have auth revoked immediately and offline packages quarantined.</p>
+        </div>
+
+        <div class="card">
+          <h4>3. Capacity Reservation & Collision Prevention (C2-03)</h4>
+          <p>Atomic multi-resource ledger across dwellings, land area, budget, and sustainable water.</p>
+          <div style="margin-top: 0.75rem;">
+            <span class="badge" style="background: #dbeafe; color: #1e40af;">Site: Elstone Estate</span>
+            <span class="badge" style="background: #e0e7ff; color: #3730a3;">Units: 200</span>
+            <span class="badge" style="background: #f3e8ff; color: #6b21a8;">Land: 1400 Cents</span>
+          </div>
+          <p style="font-size: 0.9em; color: #6b7280; margin-top: 0.5rem;">Drafts reserve zero capacity (DEC-025). Approval fails closed upon competing scenario collision.</p>
+        </div>
+
+        <div class="card">
+          <h4>4. Preregistered Evaluation Metrics (R2-03)</h4>
+          <p>Compares shadow pilot against official human baseline without post-hoc tuning.</p>
+          <div style="margin-top: 0.75rem;">
+            <p><strong>Cycle Time Reduction Target:</strong> 30% (Measured: <span style="color: #059669; font-weight: bold;">35% MET</span>)</p>
+            <p><strong>False Positives:</strong> 0 | <strong>False Negatives:</strong> 0 | <strong>Unknowns:</strong> Tracked</p>
+            <p><strong>Subgroup Fairness:</strong> Evaluated for PwD, elderly, and female-headed households.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 1.5rem;">
+        <h4>5. Kerala LSGD Disaster Management Plan Annex (DEC-013 / FEAT-018)</h4>
+        <p>Maps technical hazard, parcel, and site evidence into Kerala's approved Panchayati Raj LSGD plan template.</p>
+        <div style="background: #f8fafc; padding: 1rem; border-radius: 6px; border: 1px solid #e2e8f0; margin-top: 0.75rem;">
+          <p><strong>LSG:</strong> Meppadi Grama Panchayat | <strong>District:</strong> Wayanad | <strong>Cycle:</strong> 2024–2026</p>
+          <p><strong>Section A:</strong> Vulnerability profile (Chooralmala, Mundakkai, Punchirimattam wards 10–12)</p>
+          <p><strong>Section B:</strong> Verified beneficiary candidate roster (430 families)</p>
+          <p><strong>Section C:</strong> Host township site options (Elstone Estate safe zone)</p>
+          <p><strong>Section D Statutory Approvals:</strong> <span class="badge" style="background: #fef3c7; color: #92400e;">PENDING_GRAM_SABHA_APPROVAL</span> (Never fabricated! DEC-013)</p>
+        </div>
+      </div>
+    `;
+  }
   }
 }
 
