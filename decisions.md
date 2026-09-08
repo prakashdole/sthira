@@ -55,6 +55,7 @@ A material change must add or supersede a decision rather than rewrite the old r
 | DEC-032 | Build with public/synthetic data first; block real decisions on agency and field evidence | ACCEPTED |
 | DEC-033 | Phase 0 research findings and closure of baseline operational decisions | ACCEPTED |
 | DEC-034 | PKG-0C shared domain contracts and Ponytail modular architecture | ACCEPTED |
+| DEC-035 | Phase 2 Wayanad Shadow Pilot, Evaluation Protocols, and Rehearsal Architecture | ACCEPTED |
 
 ### 2.1 Approval provenance
 
@@ -417,6 +418,24 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Consequences:** All domain packages import from `punarvas.core`. Database changes must preserve bitemporal valid/system times and hash audit continuity.
 - **Evidence:** `architecture.md` §5 & §6; `trd.md` §3; `rules.md` RUL-001–083.
 - **Review trigger:** Introduction of external distributed event brokers or multi-region database replication.
+
+### DEC-035 — Phase 2 Wayanad Shadow Pilot, Evaluation Protocols, and Rehearsal Architecture
+
+- **Status:** ACCEPTED.
+- **Context:** `phases.md` §5 & §12.5 define Phase 2 (`PH-2`) as a 12–16 week shadow pilot and field validation exercise operating strictly without official decision reliance. Operational decisions ODN-004 through ODN-009, ODN-016, and ODN-022 require explicit boundaries for household criteria, site multi-criteria calibration, allocation solver objective hierarchy, tie-breaking, reservation locking, offline survey conflict resolution, and Kerala LSGD DM Plan annex integration.
+- **Decision:** Establish the Phase 2 shadow pilot and rehearsal architecture:
+  1. *Operating Mode & Advisory Envelope:* All Phase 2 workflows, reports, and exports are tagged with `AuthorityState.ANALYTICAL` or `SHADOW` markers. Official decisions remain with DDMA/SDMA.
+  2. *Preregistered Evaluation & Metric Tracking (R2-03):* Implement evaluation protocol comparing shadow dossiers to official human baselines across cycle time (targeting 30% reduction), false positive/negative rates, unknown rates, subgroup fairness (disability, female-headed, elderly), and rank sensitivity.
+  3. *Agency Import & Reconciliation Adapters (C2-01):* Build strict adapters for Land Revenue (Bhulekh/ULPIN), Forest Department (FRA 2006 claims), and Disaster Management orders. Surface cadastral offset errors and version conflicts without silent auto-reconciliation.
+  4. *Offline Field Survey & Device Revocation (C2-02 / FEAT-008):* Support mobile package export, localized sync with conflict detection (last-write-wins rejected in favor of explicit manual conflict review), and cryptographic token revocation for lost/stolen field devices.
+  5. *Sensitivity Analysis & Capacity Reservation Ledger (C2-03 / FEAT-014/024):* Implement AHP weight perturbation ($w \pm 20\%$) and rank reversal detection. Provide atomic capacity reservation ledger with concurrent race condition detection and fail-closed locking for dwelling, land, budget, and water resources across competing scenarios.
+  6. *Kerala LSGD Annex Generation & Delivery Tracking (C2-04 / FEAT-018/023/025):* Generate Annexures for Kerala Local Self Government Disaster Management Plans preserving unverified participatory fields as incomplete. Model delivery milestones (sanction, construction, service readiness, handover, occupation).
+  7. *11 Mandatory PH-2 Scenarios Rehearsal (C2-05 / I2-01):* Build an end-to-end rehearsal test harness validating all 11 required scenarios in `phases.md` §5.
+- **Why:** Prevents unvalidated automated decision making, safeguards affected citizens' rights, ensures algorithmic accountability, and satisfies all 83 normative rules.
+- **Rejected:** Silent automated cadastral adjustments; live capacity booking from draft scenarios; single composite ranking score; replacing participatory LSG meetings with database-generated text.
+- **Consequences:** Prepares system for controlled live deployment (Phase 3) while keeping production boundary protected.
+- **Evidence:** `phases.md` §5 & §12.5, `rules.md` RUL-001–083, `trd.md` FR-042–075, Disaster Management Act 2005 §31/§65, Kerala G.O. (Ms) 6/2018/DMD.
+- **Review trigger:** Formal evaluation board review at Phase 2 exit gate before Phase 3 authorization.
 
 ## 4. Explicit research corrections adopted
 
