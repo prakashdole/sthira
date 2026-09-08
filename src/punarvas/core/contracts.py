@@ -43,7 +43,7 @@ class GeographyScope(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     state: str = "Kerala"
-    district: str = "Wayanad"
+    district: Optional[str] = "Wayanad"
     taluk: Optional[str] = None
     lsg_name: Optional[str] = None  # Local Self Government / Grama Panchayat / Municipality
     village: Optional[str] = None

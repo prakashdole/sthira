@@ -12,6 +12,7 @@ from punarvas.core.contracts import (
     APIResponseEnvelope,
     AdvisoryEnvelope,
     GeoPoint,
+    GeographyScope,
     UserContext,
 )
 from punarvas.core.enums import (
