@@ -58,6 +58,9 @@ A material change must add or supersede a decision rather than rewrite the old r
 | DEC-035 | Phase 2 Wayanad Shadow Pilot, Evaluation Protocols, and Rehearsal Architecture | ACCEPTED |
 | DEC-036 | Kerala Multi-District Scaling, Policy Inheritance, and Row-Level Isolation | ACCEPTED |
 | DEC-037 | Multi-State Tenant Adaptation and Cross-State Leakage Prevention | ACCEPTED |
+| DEC-038 | National NDMA Sovereign Relocation Clearinghouse and Inter-State Federation | ACCEPTED |
+| DEC-039 | Controlled Live Wayanad Operations, Recovery Harness, and Delivery Completion Verification | ACCEPTED |
+
 
 ### 2.1 Approval provenance
 
@@ -469,7 +472,41 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Evidence:** `phases.md` §8 & §12.8, Disaster Management Act 2005 §14/§22, National Disaster Management Plan (NDMP), MeitY GIGW 3.0.
 - **Review trigger:** Notification of new State Disaster Management Rules or expansion to a third state.
 
+### DEC-038 — National NDMA Sovereign Relocation Clearinghouse and Inter-State Federation (Phase 6)
+
+- **Status:** ACCEPTED.
+- **Context:** While Kerala (Wayanad/Idukki) and Uttarakhand (Joshimath/Chamoli) operate under their respective SDMAs, severe disaster events frequently traverse state boundaries (e.g., Western Ghats debris corridors across Kerala/Tamil Nadu/Karnataka, or Upper Ganga/Himalayan glacial lake outburst corridors). National Disaster Management Authority (NDMA) requires nationwide situational awareness, inter-state mutual-aid coordination, and NDRF allocation tracking without usurping state constitutional data sovereignty.
+- **Decision:**
+  1. Implement `NationalClearinghouseService` establishing a federated clearinghouse between SDMAs and NDMA under Disaster Management Act 2005 §3 & §6.
+  2. Model cross-border hazard corridors (e.g. `CORR-WG-01` for Western Ghats Nilgiri-Wayanad, `CORR-HIM-02` for Upper Ganga Glacial & Subsidence Corridor).
+  3. Support inter-state relocation and mutual-aid requests (`InterStateRelocationRequest`) with explicit role verification (`RoleType.GOVERNMENT_APPROVER`), preventing unauthorized claims.
+  4. Enforce State Data Sovereignty: SDMAs retain exclusive custody of restricted personal, beneficiary, and parcel records. Only de-identified macro totals and cryptographically signed audit manifests (`NationalRegistryManifest`) are federated to NDMA.
+  5. Provide trilingual localization parity across English, Malayalam, and Hindi (`RUL-055`, GIGW 3.0).
+- **Why:** Delivers nationwide disaster relocation clearinghouse capability while upholding federalism, statutory state rights, and data minimization under DPDP Rules 2025.
+- **Rejected:** Centralized national database holding individual household PII; bypassing SDMA statutory approval; unverified verbal inter-state mutual aid.
+- **Consequences:** Inter-state coordination requires formal digital requests and state-level cryptographic manifest federation.
+- **Evidence:** Disaster Management Act 2005 §3, §6, §14; National Disaster Management Plan (NDMP); `rules.md` RUL-001, RUL-002, RUL-050–058.
+### DEC-039 — Controlled Live Wayanad Operations, Recovery Harness, and Delivery Completion Verification (PH-3)
+
+- **Status:** ACCEPTED.
+- **Context:** `phases.md` §6 & §12.6 define Phase 3 (`PH-3`) as a bounded live Wayanad deployment maintaining human statutory authority, multi-layer operational controls, tamper-evident auditability, automated disaster recovery verification, and post-approval delivery tracking.
+- **Decision:**
+  1. *Step-Up MFA Authentication (AT-28 / RUL-054):* Enforce cryptographically signed step-up tokens with time-bounded validity (default 300s) for privileged actions: `APPROVE_DECISION`, `PUBLISH_PROJECTION`, `EXPORT_RESTRICTED_DATA`, `ACTIVATE_POLICY`, and `BREAK_GLASS`.
+  2. *Audited Break-Glass Emergency Bypass (NFR-013 / RUL-047):* Support time-bounded emergency sessions (max 60 minutes) requiring explicit substantive justification, category tag, and approving authority reference, automatically broadcasting high-priority tamper-evident audit alerts.
+  3. *Coordinated Disaster Recovery Verification (NFR-032 / AT-27):* Verify relational database snapshot hashes, object store inventories, and append-only SHA-256 audit ledger atomically. Any missing referenced evidence object or checkpoint mismatch immediately fails restore and blocks authoritative writes.
+  4. *Read-Only Degraded Mode Controller (NFR-006):* Implement circuit breaker allowing read-only access to approved historical records while blocking mutations and new allocations during broker or connectivity outages.
+  5. *Manual Continuity Reconciler:* Support parallel paper-based/offline statutory decisions during communication disruptions, reconciling them into the system with bitemporal valid time and offline notice references.
+  6. *Post-Approval Physical Delivery Tracker (RUL-072 / AT-22):* Enforce 8-stage physical milestone progression (`FUNDING_SANCTIONED` &rarr; `UNIT_CONSTRUCTED` &rarr; `SERVICES_FUNCTIONAL` &rarr; `DEFECTS_CLEARED` &rarr; `BENEFICIARY_ACCEPTED` &rarr; `POSSESSION_HANDED_OVER` &rarr; `OCCUPIED` &rarr; `FOLLOW_UP_COMPLETED`). Approval is NEVER counted as completed relocation! Unresolved defects strictly block handover.
+  7. *Decision Provenance DAG Reconstruction (R3-01 / FEAT-020):* Enable independent auditors to cryptographically reconstruct sampled decisions from raw source checksums, policy versions, and solver seeds.
+  8. *Pre-Publication Disclosure Review (FEAT-019 / RUL-075 / AT-23):* Automate threat-model verification before public dossier release: enforce $k$-anonymity ($k \ge 5$), suppress small cells, detect differencing attacks between publication rounds, and generalize coordinates.
+  9. *Controlled Live Rollback:* Halt live operations and revoke active projections while strictly preserving read-only audit records and lawful statutory decisions.
+- **Why:** Protects vulnerable disaster-affected citizens, prevents unevidenced administrative claims, and ensures business continuity during extreme natural emergencies.
+- **Rejected:** Treating administrative approval as completed relocation; unrestricted emergency access without audit alerts; unverified disaster recovery restarts.
+- **Evidence:** `phases.md` §6 & §12.6, `rules.md` RUL-001–083, `trd.md` NFR-006, NFR-013, NFR-032, AT-22, AT-23, AT-27, AT-28.
+- **Review trigger:** Completion of six-month controlled live deployment window before Kerala scaling expansion.
+
 ## 4. Explicit research corrections adopted
+
 
 | Transcript claim/implication | Baseline correction | Decisions/rules |
 | --- | --- | --- |

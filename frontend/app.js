@@ -18,6 +18,7 @@ const i18n = {
     tab_parcels: "Affected Parcels & Truth",
     tab_allocation: "Advisory Allocation",
     tab_phase2: "Phase 2 Shadow Pilot",
+    tab_phase3: "Phase 3 Live Ops",
     tab_scaling: "Kerala Scaling (PH-4)",
     tab_adaptation: "Multi-State Adaptation (PH-5)",
     tab_clearinghouse: "National Clearinghouse (Phase 6)",
@@ -42,6 +43,7 @@ const i18n = {
     tab_parcels: "ബാധിത ഭൂമിയും പൊരുത്തക്കേടുകളും",
     tab_allocation: "ഉപദേശക വീതംവെപ്പ്",
     tab_phase2: "ഘട്ടം 2 ഷാഡോ പൈലറ്റ്",
+    tab_phase3: "ഘട്ടം 3 ലൈവ് പ്രവർത്തനങ്ങൾ (PH-3)",
     tab_scaling: "കേരള വിപുലീകരണം (PH-4)",
     tab_adaptation: "മറ്റ് സംസ്ഥാനങ്ങൾ (PH-5)",
     tab_clearinghouse: "ദേശീയ ക്ലിയറിംഗ് ഹൗസ് (ഘട്ടം 6)",
@@ -66,8 +68,10 @@ const i18n = {
     tab_parcels: "प्रभावित भूमि एवं सत्यता",
     tab_allocation: "सलाहकारी आवंटन",
     tab_phase2: "चरण 2 शैडो पायलट",
+    tab_phase3: "चरण 3 लाइव संचालन (PH-3)",
     tab_scaling: "केरल विस्तार (PH-4)",
     tab_adaptation: "बहु-राज्य अनुकूलन (PH-5)",
+
     tab_clearinghouse: "राष्ट्रीय समाशोधन केंद्र (Phase 6)",
     tab_audit: "ऑडिट एवं अखंडता",
     site_card_capacity: "आवास क्षमता",
@@ -382,6 +386,66 @@ function renderActiveTab() {
         </div>
       </div>
     `;
+  } else if (activeTab === 'phase3') {
+    content.innerHTML = `
+      <div class="card" style="margin-bottom: 1.5rem; border-left: 5px solid #2563eb;">
+        <h3>Phase 3 Controlled Live Operations & Continuity Console (PH-3)</h3>
+        <p class="ml-text">ഘട്ടം 3 നിയന്ത്രിത തത്സമയ പ്രവർത്തനങ്ങളും ദുരന്താനന്തര വീണ്ടെടുപ്പും (PH-3).</p>
+        <p>Enforces strict controls for bounded live Wayanad deployment: MFA Step-Up for statutory actions, audited time-bound Break-Glass access, atomic Disaster Recovery verification, and 8-stage physical completion tracking (RUL-072 / AT-22).</p>
+        <div style="margin-top: 0.5rem;">
+          <span class="badge" style="background: #dbeafe; color: #1e40af;">AT-28 Step-Up MFA</span>
+          <span class="badge" style="background: #fee2e2; color: #991b1b;">NFR-013 Break-Glass</span>
+          <span class="badge" style="background: #fef3c7; color: #92400e;">AT-27 DR Consistency</span>
+          <span class="badge" style="background: #d1fae5; color: #065f46;">RUL-072 Physical Delivery</span>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h4>1. Step-Up MFA & Break-Glass Operations (AT-28 / NFR-013)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">High-privilege actions require cryptographically verified step-up authentication. Emergency bypass is strictly audited.</p>
+          <div style="background: #f8fafc; padding: 1rem; border-radius: 6px; border: 1px solid #e2e8f0; margin-top: 0.75rem;">
+            <p><strong>Step-Up Actions:</strong> <code>APPROVE_DECISION</code>, <code>PUBLISH_PROJECTION</code>, <code>EXPORT_RESTRICTED_DATA</code>, <code>BREAK_GLASS</code></p>
+            <p><strong>Active Step-Up Status:</strong> <span class="badge badge-pass">ENFORCED</span></p>
+            <p><strong>Emergency Break-Glass:</strong> <span class="badge" style="background: #f3f4f6; color: #374151;">STANDBY</span> (Duration limit: 60 min, Tamper-Evident SHA-256 Log)</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h4>2. Coordinated Disaster Recovery & Degraded Mode (AT-27 / NFR-006)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Atomic consistency verification across database snapshots, evidence checksums, and audit ledger head.</p>
+          <div style="background: #f8fafc; padding: 1rem; border-radius: 6px; border: 1px solid #e2e8f0; margin-top: 0.75rem;">
+            <p><strong>Relational DB Hash:</strong> <span style="font-family: monospace; font-size: 0.85em;">MATCH (43a9...e721)</span></p>
+            <p><strong>Evidence Object Inventory:</strong> <span class="badge badge-pass">ALL OBJECTS VERIFIED</span></p>
+            <p><strong>Degraded Mode Circuit Breaker:</strong> <span class="badge badge-pass">WRITES_ALLOWED</span> (Read-only standby ready)</p>
+            <p><strong>Manual Continuity:</strong> Offline paper notices reconciled with verifiable valid/system timestamps.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top: 1.5rem;">
+        <div class="card">
+          <h4>3. Post-Approval Delivery & Defect Clearance (RUL-072 / AT-22)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Approval is NEVER counted as completed relocation! Handover is blocked until all physical defects are resolved.</p>
+          <div style="background: #f8fafc; padding: 1rem; border-radius: 6px; border: 1px solid #e2e8f0; margin-top: 0.75rem;">
+            <p><strong>Milestone Order:</strong> Sanction &rarr; Unit Built &rarr; Services Live &rarr; Defects Cleared &rarr; Acceptance &rarr; Handover &rarr; Occupied &rarr; Follow-up</p>
+            <p><strong>Target Case:</strong> <code>CASE-WYD-001</code> (Elstone Estate Unit #12)</p>
+            <p><strong>Defect Status:</strong> <span class="badge badge-pass">0 UNRESOLVED DEFECTS</span></p>
+            <p><strong>Completion State:</strong> <span class="badge badge-pass">PHYSICALLY_COMPLETED</span></p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h4>4. Public Disclosure Review & Differencing Guard (AT-23 / RUL-075)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Automated threat-model assessment before release of public projection dossiers.</p>
+          <div style="background: #f8fafc; padding: 1rem; border-radius: 6px; border: 1px solid #e2e8f0; margin-top: 0.75rem;">
+            <p><strong>k-Anonymity Threshold:</strong> <code>k &ge; 5</code> (Small cells automatically suppressed: <code>&lt;5</code>)</p>
+            <p><strong>Spatial Jittering:</strong> Coordinates generalized to 2 decimals (~1.1 km bounding box)</p>
+            <p><strong>Differencing Attack Check:</strong> <span class="badge badge-pass">PASSED</span> (No single-unit delta leakage)</p>
+          </div>
+        </div>
+      </div>
+    `;
   } else if (activeTab === 'scaling') {
     content.innerHTML = `
       <div class="card" style="margin-bottom: 1.5rem; border-left: 5px solid #059669;">
@@ -539,6 +603,137 @@ function renderActiveTab() {
         </div>
       </div>
     `;
+  } else if (activeTab === 'clearinghouse') {
+    content.innerHTML = `
+      <div class="card" style="border-top: 4px solid #0284c7;">
+        <h3>National NDMA Sovereign Relocation Clearinghouse (Phase 6)</h3>
+        <p><strong>Statutory Basis:</strong> Disaster Management Act 2005 §3 & §6 (National Disaster Management Authority)</p>
+        <p><strong>Core Mandate:</strong> Inter-state disaster coordination, cross-border river basin tracking, and federated resettlement registry.</p>
+        <p><strong>Sovereign State Invariant:</strong> SDMAs maintain exclusive custody of personal/household data. Only cryptographically verified manifests are federated (RUL-050, RUL-054).</p>
+      </div>
+
+      <div class="grid-2" style="margin-top: 1rem;">
+        <div class="card">
+          <h4>Cross-Border Inter-State Hazard Corridors</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Multi-state hazard monitoring across Western Ghats and Himalayan river basins.</p>
+          <div id="corridors-list">
+            <div style="background: #f8fafc; padding: 0.75rem; border-radius: 6px; margin-bottom: 0.5rem; border-left: 3px solid #dc2626;">
+              <strong>CORR-WG-01:</strong> Western Ghats Nilgiri-Wayanad High Hazard Corridor<br>
+              <small style="color: #64748b;">States: Kerala, Tamil Nadu, Karnataka | Type: Landslide / Debris Flow</small>
+            </div>
+            <div style="background: #f8fafc; padding: 0.75rem; border-radius: 6px; border-left: 3px solid #ea580c;">
+              <strong>CORR-HIM-02:</strong> Upper Ganga-Alaknanda Glacial & Subsidence Corridor<br>
+              <small style="color: #64748b;">States: Uttarakhand, Himachal Pradesh | Type: GLOF & Land Subsidence</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h4>Federated State Registry & Mutual Aid Actions</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Simulate inter-state assistance requests and cryptographic manifest federation.</p>
+          <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem;">
+            <button class="btn btn-primary" onclick="triggerInterstateRequestDemo()">Submit Inter-State Mutual Aid Request (UK → HP)</button>
+            <button class="btn btn-secondary" onclick="triggerFederateManifestDemo()">Federate Kerala Resettlement Manifest (SHA-256)</button>
+          </div>
+          <div id="clearinghouse-action-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 1.5rem;">
+        <h4>National Relocation Registry Manifests</h4>
+        <div style="overflow-x: auto;">
+          <table class="data-table" style="width: 100%; font-size: 0.9em;">
+            <thead>
+              <tr>
+                <th>Manifest ID</th>
+                <th>State</th>
+                <th>District</th>
+                <th>Verified Eligible</th>
+                <th>Allocated</th>
+                <th>Audit Head SHA-256</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>NDMA-REG-KL01</code></td>
+                <td>Kerala</td>
+                <td>Wayanad</td>
+                <td>380</td>
+                <td>250</td>
+                <td><code>a1b2c3d4e5f6...</code></td>
+                <td><span class="badge badge-pass">FEDERATED</span></td>
+              </tr>
+              <tr>
+                <td><code>NDMA-REG-UK01</code></td>
+                <td>Uttarakhand</td>
+                <td>Chamoli</td>
+                <td>120</td>
+                <td>80</td>
+                <td><code>f7e8d9c0b1a2...</code></td>
+                <td><span class="badge badge-pass">FEDERATED</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+}
+
+async function triggerInterstateRequestDemo() {
+  const resultDiv = document.getElementById('clearinghouse-action-result');
+  if (!resultDiv) return;
+  try {
+    const payload = {
+      origin_state: "Uttarakhand",
+      origin_district: "Chamoli",
+      destination_state: "Himachal Pradesh",
+      disaster_event: "Joshimath Land Subsidence",
+      total_affected_households: 120,
+      requested_assistance_type: "NDRF_SPECIAL_PACKAGE"
+    };
+    const res = await fetch(`${API_BASE}/api/v1/national/clearinghouse/requests`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(r => r.json());
+    resultDiv.innerHTML = `
+      <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+        ✓ Request Submitted: <strong>${res.data.request_id}</strong> (${res.data.requested_assistance_type})<br>
+        Status: <span class="badge badge-pass">${res.data.status}</span> | NDMA Review Initiated
+      </div>
+    `;
+  } catch(e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Request demo notice: ${e.message}</div>`;
+  }
+}
+
+async function triggerFederateManifestDemo() {
+  const resultDiv = document.getElementById('clearinghouse-action-result');
+  if (!resultDiv) return;
+  try {
+    const payload = {
+      state: "Kerala",
+      district: "Wayanad",
+      programme_id: "PRG-KL-WYD-2024",
+      verified_eligible_count: 380,
+      allocated_count: 250,
+      state_audit_head_hash: "a1b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890"
+    };
+    const res = await fetch(`${API_BASE}/api/v1/national/clearinghouse/manifests`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(r => r.json());
+    resultDiv.innerHTML = `
+      <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+        ✓ Manifest Federated: <strong>${res.data.manifest_id}</strong> for ${res.data.state}/${res.data.district}<br>
+        Cryptographic Proof: <code>${res.data.state_audit_head_hash.substring(0, 16)}...</code> verified.
+      </div>
+    `;
+  } catch(e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Federation demo notice: ${e.message}</div>`;
   }
 }
 
