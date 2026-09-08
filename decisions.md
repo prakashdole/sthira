@@ -448,47 +448,60 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 ### DEC-036 — Kerala Multi-District Scaling, Policy Inheritance, and Row-Level Isolation (PH-4)
 
 - **Status:** ACCEPTED.
-- **Context:** `phases.md` §7 & §12.7 mandate scaling across Kerala districts (e.g., Idukki, Alappuzha, Malappuram) through repeatable configuration rather than shared unrestricted access. Cross-district data or policy assumptions (e.g. Wayanad debris flow parameters applied to Alappuzha coastal backwaters) must never leak.
+- **Context:** `phases.md` §7 & §12.7 mandate scaling across Kerala districts (e.g., Idukki, Alappuzha, Malappuram) through repeatable configuration rather than shared unrestricted access. Cross-district data or policy assumptions (e.g., applying Wayanad steep debris flow parameters to Alappuzha coastal backwaters, or treating estate worker housing in Devikulam like agricultural homesteads in Meppadi) must never leak.
 - **Decision:**
-  1. Implement `DistrictProfile` and `DistrictOnboardingService` providing dynamic configuration for each district's unique hazard profile, authority names, local road/water standards, and active schemes.
-  2. Implement policy inheritance with strict local override rules: State base policy defines mandatory governance gates, while district-specific hazard thresholds (e.g. steep mountain tea slopes vs coastal inundation) override baseline without polluting sibling districts.
-  3. Enforce strict row-level and geography isolation (RUL-054): DDMA officers in District A cannot query or modify casework in District B.
-  4. Provide state-level oversight (`KSDMA`) through de-identified, privacy-safe aggregates only (RUL-052).
-- **Why:** Prevents dangerous geographic policy misapplication and maintains constitutional and statutory district autonomy under the Disaster Management Act 2005.
-- **Rejected:** Hardcoding Wayanad parameters as statewide defaults; unrestricted multi-district user access; raw database sharing between DDMAs.
-- **Consequences:** Each district requires an onboarding manifest and independent validation pack.
-- **Evidence:** `phases.md` §7, `rules.md` RUL-017, RUL-018, RUL-054, Disaster Management Act 2005 §30/§31.
+  1. *Config-Driven District Profiles (`DistrictProfile`, `DistrictConfig`):* Implement dynamic district registration in `punarvas.modules.programme.district_service` and `punarvas.modules.scaling.service`. Each district declares its lead authority (e.g., DDMA Idukki), primary hazard profile, minimum road width, JJM LPCD threshold, and active resettlement schemes.
+  2. *Policy Inheritance with Isolated Local Overrides:* The state base policy establishes invariant hard gates (e.g., 55 LPCD lean-season water, verified title clearance, FRA Grama Sabha consent). Districts inherit the base policy and apply explicit local overrides without polluting sibling district profiles or the global base.
+  3. *Row-Level and Geography Isolation (`RUL-054`):* Enforce isolation at the core contract layer via `verify_district_tenant_access(user, district_id)`. DDMA caseworkers in Wayanad (`Kerala/Wayanad`) are rejected with `UnauthorizedGeographyAccessError` (HTTP 403) if querying or modifying casework in Idukki (`Kerala/Idukki`).
+  4. *Privacy-Safe Statewide SDMA Dashboard (`RUL-050`, `RUL-052`):* Implement `KSDMA` macro oversight providing state-level aggregate counts (total eligible, township allocations, self-relocation assistance, sanctioned budget). To protect citizen anonymity and prevent re-identification, cell suppression is strictly applied: any aggregate count $< 5$ is suppressed to `"<5"` (`STATEWIDE_PUBLIC_AGGREGATE`).
+  5. *Independent Reference District Fixtures:* Model `fixtures/idukki_fixture.json` and `fixtures/synthetic_idukki.json` for Devikulam / Pettimudi landslide runout, tea plantation worker habitations, and Kuttiyar Valley site.
+- **Why We Wrote the Code This Way:**
+  - *Statutory Autonomy:* Under §30 and §31 of the Disaster Management Act 2005, the District Authority is the primary statutory body for disaster mitigation and rehabilitation. Hardcoding one district's parameters as statewide defaults would be legally void and physically dangerous.
+  - *Zero Bloat & Test Speed (Ponytail):* Implemented via pure Python stdlib thread-safe dict registries and Pydantic models instead of spinning up multi-tenant database clusters, enabling the entire multi-district test suite to execute in milliseconds with zero external infrastructure.
+  - *Safety Boundary:* Enforcing tenant checks at the service method entry point guarantees that no REST route, CLI tool, or report generator can inadvertently bypass row-level geographic segregation.
+- **Rejected:** Hardcoding Wayanad parameters as statewide defaults; unrestricted multi-district user access; raw database sharing between DDMAs; calculating a single composite statewide hazard index.
+- **Consequences:** Each new district onboarding requires an explicit `DistrictConfig` manifest, local hazard adapter calibration, and an independent fixture pack before live activation.
+- **Evidence:** `phases.md` §7, `rules.md` RUL-017, RUL-018, RUL-050, RUL-052, RUL-054, Disaster Management Act 2005 §30/§31.
 - **Review trigger:** Onboarding of new Kerala districts or changes in state disaster management policy.
 
 ### DEC-037 — Multi-State Tenant Adaptation and Cross-State Leakage Prevention (PH-5)
 
 - **Status:** ACCEPTED.
-- **Context:** `phases.md` §8 & §12.8 mandate platform reusability across Indian states (pilot reference: Uttarakhand) while keeping state-specific legal frameworks, land tenure terminology, languages, and authority explicit.
+- **Context:** `phases.md` §8 & §12.8 mandate platform portability across Indian states (pilot reference: Uttarakhand) while keeping state-specific legal frameworks, land tenure terminology, languages, and authority explicit. Land revenue and disaster management administration differ radically across states; treating Kerala-specific government orders or land systems as national standards would invalidate the system in other jurisdictions.
 - **Decision:**
-  1. Implement `StateTenantPackage` and `MultiStateAdapter` architecture decoupling the core decision engine from state-specific implementations.
-  2. For Uttarakhand reference adaptation: bind to USDMA / DDMA Chamoli, Devbhoomi Bhulekh land tenure (Khasra/Khatauni vs Kerala Thandaper), GLOF/cloudburst hazard classifications, and Hindi language localization.
-  3. Enforce cryptographic tenant isolation: Zero leakage of Kerala G.O.s (such as VLRS ₹10L or Meppadi township terms) or Malayalam language strings into Uttarakhand dossiers, and vice-versa.
-  4. Ensure coordinate reference systems (CRS) decouple cleanly per state (e.g., UTM Zone 44N EPSG:32644 for Uttarakhand vs UTM Zone 43N EPSG:32643 for Kerala).
-- **Why:** Preserves the sovereign federal structure of Indian disaster management law and prevents jurisdictional invalidity.
-- **Rejected:** Treating Kerala land revenue rules as national standards; mono-lingual English/Malayalam lock-in; shared multi-tenant database without strict tenant boundaries.
-- **Consequences:** New state onboarding requires dedicated localization and land tenure adapter packages.
-- **Evidence:** `phases.md` §8 & §12.8, Disaster Management Act 2005 §14/§22, National Disaster Management Plan (NDMP), MeitY GIGW 3.0.
+  1. *Pluggable State Tenant Package Architecture (`StateTenantPackage`):* Implement `state_package_loader` and `MultiStateAdapter` in `punarvas.modules.programme.state_package` and `punarvas.modules.adaptation.service`. This decouples the core decision engine (gates, bitemporal audit, outbox, solvers) from state-specific implementations.
+  2. *Uttarakhand Reference Adaptation:* Bind the Uttarakhand tenant (`UK`) to USDMA and DDMA Chamoli, Devbhoomi Bhulekh land tenure (Khasra/Khatauni vs Kerala Thandaper), GLOF / flash-flood / land subsidence hazard classifications (Joshimath), Pipalkoti resettlement candidate enclaves, and Hindi localization.
+  3. *Zero Cross-State Leakage Invariant (`test_zero_cross_state_leakage`):* Dossier headers and reports generated for Uttarakhand must contain strictly 0% Kerala terms (no e-Rekha, no Thandaper, no VLRS ₹10L cap, no Meppadi references, no Malayalam strings). Conversely, Kerala dossiers must contain 0% Uttarakhand terms (no Devbhoomi, no Khasra/Khatauni, no USDMA, no Hindi strings).
+  4. *Pluggable Projected Coordinate Systems (CRS):* Support local projected coordinate systems per state (e.g., `EPSG:32644` WGS 84 / UTM Zone 44N for Uttarakhand vs `EPSG:32643` WGS 84 / UTM Zone 43N for Kerala) to eliminate spatial distortion during area and slope calculations.
+  5. *Shared National Core Invariant:* Shared rules identify their national statutory authority: Disaster Management Act 2005 (amended 2025 §31(4)), RFCTLARR 2013, Forest Rights Act 2006, and DPDP Rules 2025.
+- **Why We Wrote the Code This Way:**
+  - *Constitutional Federalism:* Under the Constitution of India (Seventh Schedule, State List Item 18 'Land'), land revenue and tenancy are sovereign state subjects. A system that conflates land records across state borders would produce legally defective titles and unconstitutional administrative orders.
+  - *Strict Linguistic & Cultural Alignment:* Resettlement documentation must be fully intelligible in the state's official language (Hindi in Uttarakhand, Malayalam in Kerala) to satisfy natural justice and GIGW 3.0 government transparency guidelines.
+  - *Decoupled Contract Interfaces:* Using structured Pydantic tenant configurations allows adding new states (e.g., Himachal Pradesh, Assam, Odisha) simply by supplying a configuration manifest and fixture pack without modifying the core allocation, audit, or gate engines.
+- **Rejected:** Treating Kerala land revenue rules as national standards; mono-lingual English/Malayalam lock-in; shared multi-tenant database without strict tenant boundaries; single national projection for local cadastral calculations.
+- **Consequences:** New state onboarding requires a dedicated localization pack, legal workflow mapping, land tenure schema adapter, and coordinate reference definition.
+- **Evidence:** `phases.md` §8 & §12.8, Disaster Management Act 2005 §14/§22, Constitution of India Schedule VII, National Disaster Management Plan (NDMP), MeitY GIGW 3.0.
 - **Review trigger:** Notification of new State Disaster Management Rules or expansion to a third state.
 
 ### DEC-038 — National NDMA Sovereign Relocation Clearinghouse and Inter-State Federation (Phase 6)
 
 - **Status:** ACCEPTED.
-- **Context:** While Kerala (Wayanad/Idukki) and Uttarakhand (Joshimath/Chamoli) operate under their respective SDMAs, severe disaster events frequently traverse state boundaries (e.g., Western Ghats debris corridors across Kerala/Tamil Nadu/Karnataka, or Upper Ganga/Himalayan glacial lake outburst corridors). National Disaster Management Authority (NDMA) requires nationwide situational awareness, inter-state mutual-aid coordination, and NDRF allocation tracking without usurping state constitutional data sovereignty.
+- **Context:** While Kerala (Wayanad/Idukki) and Uttarakhand (Joshimath/Chamoli) operate under their respective SDMAs, severe disaster events frequently traverse state boundaries (e.g., Western Ghats debris corridors across Kerala/Tamil Nadu/Karnataka, or Upper Ganga/Himalayan glacial lake outburst corridors across Uttarakhand/Himachal Pradesh). The National Disaster Management Authority (NDMA) requires nationwide situational awareness, inter-state mutual-aid coordination, and NDRF allocation tracking under Disaster Management Act 2005 §3 & §6 without usurping state constitutional data sovereignty.
 - **Decision:**
-  1. Implement `NationalClearinghouseService` establishing a federated clearinghouse between SDMAs and NDMA under Disaster Management Act 2005 §3 & §6.
-  2. Model cross-border hazard corridors (e.g. `CORR-WG-01` for Western Ghats Nilgiri-Wayanad, `CORR-HIM-02` for Upper Ganga Glacial & Subsidence Corridor).
-  3. Support inter-state relocation and mutual-aid requests (`InterStateRelocationRequest`) with explicit role verification (`RoleType.GOVERNMENT_APPROVER`), preventing unauthorized claims.
-  4. Enforce State Data Sovereignty: SDMAs retain exclusive custody of restricted personal, beneficiary, and parcel records. Only de-identified macro totals and cryptographically signed audit manifests (`NationalRegistryManifest`) are federated to NDMA.
-  5. Provide trilingual localization parity across English, Malayalam, and Hindi (`RUL-055`, GIGW 3.0).
-- **Why:** Delivers nationwide disaster relocation clearinghouse capability while upholding federalism, statutory state rights, and data minimization under DPDP Rules 2025.
-- **Rejected:** Centralized national database holding individual household PII; bypassing SDMA statutory approval; unverified verbal inter-state mutual aid.
+  1. *National Clearinghouse Service (`NationalClearinghouseService`):* Implement federated clearinghouse service in `punarvas.modules.governance.national_clearinghouse` establishing an advisory hub between SDMAs and NDMA.
+  2. *Cross-Border Hazard Corridors:* Model multi-state hazard corridors (`CORR-WG-01` for Western Ghats Nilgiri-Wayanad high-hazard corridor across Kerala, Tamil Nadu, and Karnataka; `CORR-HIM-02` for Upper Ganga Glacial & Subsidence Corridor across Uttarakhand and Himachal Pradesh).
+  3. *Inter-State Mutual-Aid Requests (`InterStateRelocationRequest`):* Provide formal digital request submission for inter-state assistance (e.g. cross-border plantation worker resettlement, NDRF special packages) with strict statutory role verification (`RoleType.GOVERNMENT_APPROVER`). Non-approver attempts fail closed with `AuthorityBypassError` (`RUL-002`).
+  4. *State Sovereign Data Custody Invariant:* SDMAs retain 100% exclusive custody of all identifiable citizen, household casework, and parcel data. NDMA never holds individual household PII! Only de-identified macro counts and cryptographically signed audit manifests (`NationalRegistryManifest`) carrying the state's append-only SHA-256 audit ledger head hash are federated to NDMA (`RUL-050`, `RUL-054`).
+  5. *Trilingual Localization Engine (`localization.py`):* Implement full parity across **English** (`en`), **Malayalam** (`ml`), and **Hindi** (`hi`) for advisory warnings, gate states (`PASS`/`FAIL`/`UNKNOWN`/`BLOCKED`), pathways, and administrative roles (`RUL-055`, GIGW 3.0).
+  6. *Interactive Web UI Console (`frontend/index.html`, `frontend/app.js`):* Add live Hindi language switcher (`हिन्दी`) with dynamic DOM translation, and a dedicated National Clearinghouse console tab with live mutual-aid simulation and manifest federation buttons.
+- **Why We Wrote the Code This Way:**
+  - *Preserving State Sovereignty under Federal Law:* Disaster Management Act 2005 §3, §6, and §14 clearly balance national coordination with state operational execution. Storing individual citizen PII in a centralized federal repository would violate DPDP Rules 2025 purpose limitation and invite severe privacy and jurisdictional liabilities.
+  - *Cryptographic Tamper-Evidence without Blockchain Bloat:* Instead of complex distributed consensus networks, state sovereignty is maintained through simple, mathematically sound append-only SHA-256 hash chains. The national clearinghouse verifies the state's audit head hash, guaranteeing that the federated numbers reflect a sealed, un-tampered state registry.
+  - *Trilingual Democratic Access:* Disaster survivors in Kerala speak Malayalam, survivors in Uttarakhand speak Hindi, while inter-state coordination and central guidelines are in English. Providing real-time, zero-dependency translation across all three official languages ensures that neither administrators nor affected citizens are disenfranchised by language barriers.
+- **Rejected:** Centralized national database holding individual household PII; bypassing SDMA statutory approval; unverified verbal inter-state mutual aid; third-party cloud translation APIs that could leak sensitive disaster casework.
 - **Consequences:** Inter-state coordination requires formal digital requests and state-level cryptographic manifest federation.
-- **Evidence:** Disaster Management Act 2005 §3, §6, §14; National Disaster Management Plan (NDMP); `rules.md` RUL-001, RUL-002, RUL-050–058.
+- **Evidence:** Disaster Management Act 2005 §3, §6, §14; National Disaster Management Plan (NDMP); `rules.md` RUL-001, RUL-002, RUL-050–058; DPDP Rules 2025; MeitY GIGW 3.0.
+- **Review trigger:** Notification of national inter-state disaster mutual-aid guidelines by NDMA or expansion to new cross-border corridors.
 ### DEC-039 — Controlled Live Wayanad Operations, Recovery Harness, and Delivery Completion Verification (PH-3)
 
 - **Status:** ACCEPTED.
