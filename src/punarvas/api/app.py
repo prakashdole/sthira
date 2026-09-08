@@ -139,8 +139,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from pathlib import Path
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
+
 # Also run bootstrap immediately on module import so synchronous test runners see seeded data
 bootstrap_seed_data()
+
+frontend_dir = Path(__file__).resolve().parent.parent.parent.parent / "frontend"
+if frontend_dir.is_dir():
+    app.mount("/ui", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+
+@app.get("/", include_in_schema=False)
+def root_redirect():
+    return RedirectResponse(url="/ui/")
+
 
 
 @app.get("/health", response_model=APIResponseEnvelope)

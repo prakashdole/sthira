@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PUNARVAS-AI | പുനർവാസ്-എഐ</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Advisory Warning Banner (RUL-001) -->
+  <div class="banner-advisory" role="alert">
+    <div>
+      <span data-i18n="advisory_banner">ADVISORY DECISION SUPPORT ONLY — All outputs require DDMA review and authorized human approval.</span>
+      <div class="ml-note" data-i18n="advisory_banner_ml">ഉപദേശക സ്വഭാവമുള്ളത് മാത്രം. ഔദ്യോഗിക ഗസറ്റ് വിജ്ഞാപനമോ ഉത്തരവോ അല്ല.</div>
+    </div>
+    <div class="audit-indicator" id="audit-status-badge">
+      ✓ Verifying Cryptographic Audit...
+    </div>
+  </div>
+
+  <div class="container">
+    <header>
+      <div class="brand">
+        <h1 data-i18n="brand_title">PUNARVAS-AI (പുനർവാസ്-എഐ)</h1>
+        <p data-i18n="brand_subtitle">Proactive Permanent Relocation Decision Support — Wayanad Pilot</p>
+      </div>
+      <div class="lang-toggle">
+        <button class="btn" onclick="switchLanguage('en')">English</button>
+        <button class="btn" onclick="switchLanguage('ml')">മലയാളം</button>
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab-btn active" data-tab="overview" onclick="showTab('overview')" data-i18n="tab_overview">Programme Overview</button>
+      <button class="tab-btn" data-tab="sites" onclick="showTab('sites')" data-i18n="tab_sites">Candidate Sites & Gates</button>
+      <button class="tab-btn" data-tab="parcels" onclick="showTab('parcels')" data-i18n="tab_parcels">Affected Parcels & Truth</button>
+      <button class="tab-btn" data-tab="allocation" onclick="showTab('allocation')" data-i18n="tab_allocation">Advisory Allocation</button>
+      <button class="tab-btn" data-tab="audit" onclick="showTab('audit')" data-i18n="tab_audit">Audit & Integrity</button>
+    </nav>
+
+    <main id="tab-content">
+      <!-- Dynamic Content Rendered by app.js -->
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
