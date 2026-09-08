@@ -140,9 +140,9 @@ class ApprovalService:
             )
 
         # 3. Role authorization check (RUL-002, RUL-054)
-        actor_role = context.role if context else RoleType.GOVERNMENT_APPROVER
+        actor_role = context.roles[0] if (context and context.roles) else RoleType.GOVERNMENT_APPROVER
         actor_id = context.user_id if context else approving_officer_name
-        actor_scope = context.geography_scope if context else "Kerala/Wayanad"
+        actor_scope = f"{context.geography_scope.state}/{context.geography_scope.district or 'Wayanad'}" if context else "Kerala/Wayanad"
 
         if actor_role not in (RoleType.GOVERNMENT_APPROVER, RoleType.STATE_PROGRAMME_ADMIN):
             raise UnauthorizedActionError(

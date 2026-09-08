@@ -61,6 +61,7 @@ A material change must add or supersede a decision rather than rewrite the old r
 | DEC-038 | National NDMA Sovereign Relocation Clearinghouse and Inter-State Federation | ACCEPTED |
 | DEC-039 | Controlled Live Wayanad Operations, Recovery Harness, and Delivery Completion Verification | ACCEPTED |
 | DEC-040 | Delivery Execution, Defect Severity Classification, and External Interface Reconciliation | ACCEPTED |
+| DEC-041 | Official Approvals, Statutory Notifications, Citizen Objections, and Capacity Reservation | ACCEPTED |
 
 
 
@@ -537,6 +538,29 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Consequences:** Every housing unit requires signed engineering verification and defect logging before possession certificates are issued.
 - **Evidence:** `rules.md` RUL-067–072, `trd.md` FR-063–070, AT-18, AT-22, Kerala G.O. (Ms) 6/2018/DMD, NDMA Guidelines on Temporary and Permanent Shelter.
 - **Review trigger:** Annual review of resettlement colony defect rates and KSDMA social audit reports.
+
+### DEC-041 — Official Approvals, Statutory Notifications, Citizen Objections, and Capacity Reservation (Phase 9 / ARC-C08, ARC-C09)
+
+- **Status:** ACCEPTED.
+- **Context:** `plan.md` (#9), `trd.md` (§3.8, §3.11, §5.6, FR-047–FR-052, FR-070), and `rules.md` (RUL-003, RUL-004, RUL-005, RUL-006, RUL-040, RUL-046–RUL-049, RUL-070, RUL-071) define Phase 9 as the governance, objection remedy, statutory authorization, and capacity reservation engine. Algorithmic outputs are strictly advisory proposals; statutory power belongs solely to competent human authorities.
+- **Decision:**
+  1. *Decoupling of Administrative Approval and Statutory Notification (RUL-003, AT-21):* Official administrative approval by DDMA/State Authority (`OfficialApprovalRecord`) and formal gazette publication (`StatutoryNotificationRecord`) are separate legal acts with independent digital signatures, bilingual texts (English & Malayalam), and audit hashes. Approval does not automatically publish, and publication requires a prior valid approval.
+  2. *Citizen Objections & Mandatory Freeze (RUL-046–RUL-049, FR-047–FR-051, AT-09):* Any affected citizen or community representative can file objections against draft eligibility lists, site selections, or allocation proposals across 8 categories (Inclusion, Exclusion, Pathway Preference, FRA Rights, Safety, Water Inadequacy, Tenancy, General). Filing issues an immutable receipt token (`RCPT-PUNARVAS-OBJ-*`) with SLA deadline. Active objections freeze the disputed entity, raising `EntityFrozenByObjectionError` upon attempts to issue approval, gazette notification, or commit capacity. Adverse action without a formal hearing is strictly prohibited (`RUL-049`).
+  3. *Advisory SLA Escalation Recommendations (RUL-006, FR-050):* Overdue objections (default 21 days) generate automated advisory escalation recommendations to superior authorities, strictly avoiding autonomous bypass or forced resolution.
+  4. *Step-Up MFA & Role Verification for Official Approvals (RUL-002, RUL-054):* Issuing official approval requires `RoleType.GOVERNMENT_APPROVER` or `RoleType.STATE_PROGRAMME_ADMIN` and verified step-up MFA token (`MFA-STEPUP-*`).
+  5. *Conditional Approvals & Blocking Clearance Gates (RUL-004, AT-06, AT-20):* Approvals record explicit conditions (water yield tests, FRA clearances, geotechnical stability). Blocking conditions strictly prevent capacity commitment and downstream household assignment until verified and satisfied.
+  6. *Versioned Supersession Workflow (RUL-005, AT-10):* Modifying an approved plan creates a new approval record that explicitly references and supersedes the prior version. Prior versions and audit events are permanently retained for judicial review.
+  7. *Multi-Resource Capacity Reservation Ledger (RUL-070, RUL-071, FR-070, AT-15, AT-20):*
+     - Draft scenarios are simulations and reserve ZERO live capacity (`ReservationStatus.SIMULATED`).
+     - Temporary holds reserve capacity with expiration windows.
+     - Committing reservations requires valid official approval with all blocking conditions satisfied.
+     - Concurrent allocation races fail closed across dwellings, land area, water, and budget (`ReservationConflictError`).
+     - Explicit release returns resources to the pool without double-subtraction.
+- **Why:** Preserves the rule of law, prevents administrative race conditions, eliminates forced relocation, and guarantees constitutional due process for disaster-affected communities.
+- **Rejected:** Auto-gazetting without separate order; deleting superseded plans; autonomous objection dismissal by algorithm; draft allocations reserving live capacity.
+- **Consequences:** All approvals, notifications, objections, and capacity locks are cryptographically chained in the append-only audit ledger.
+- **Evidence:** `plan.md` #9, `rules.md` RUL-003–006, RUL-040, RUL-046–049, RUL-070–071, `trd.md` FR-047–052, FR-070, AT-06, AT-09, AT-10, AT-15, AT-20, AT-21, Disaster Management Act 2005 §30, §65.
+- **Review trigger:** Judicial orders or statutory amendments regarding public notification periods or grievance redressal SLAs.
 
 ## 4. Explicit research corrections adopted
 

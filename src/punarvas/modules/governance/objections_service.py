@@ -5,7 +5,7 @@ Normative Reference: plan.md (#9), trd.md (§5.6, FR-047-FR-052), rules.md (RUL-
 
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 from pydantic import BaseModel, Field
 
@@ -223,11 +223,16 @@ class ObjectionsAppealsService:
         venue: str,
         presiding_officer: str,
         notified_parties: List[str],
-        actor: UserContext,
+        actor: Optional[UserContext] = None,
+        officer: Optional[UserContext] = None,
     ) -> HearingNotice:
         case = self._cases.get(objection_id)
         if not case:
             raise KeyError(f'Objection {objection_id} not found.')
+
+        ctx = actor or officer
+        actor_id = ctx.user_id if ctx else "officer_hearing"
+        actor_scope = f'{ctx.geography_scope.state}/{ctx.geography_scope.district or "Wayanad"}' if ctx else "Kerala/Wayanad"
 
         notice_id = f'NOT-HEAR-{objection_id}-{len(case.hearings) + 1}'
         notice = HearingNotice(
@@ -243,8 +248,8 @@ class ObjectionsAppealsService:
 
         global_audit_ledger.append_event(
             action='HEARING_SCHEDULED',
-            actor_id=actor.user_id,
-            authority_scope=f'{actor.geography_scope.state}/{actor.geography_scope.district or "Wayanad"}',
+            actor_id=actor_id,
+            authority_scope=actor_scope,
             resource_type='HEARING_NOTICE',
             resource_id=notice_id,
             payload={
@@ -262,13 +267,18 @@ class ObjectionsAppealsService:
         summary_of_grounds: str,
         remedy_notes: str,
         deciding_authority: str,
-        statutory_basis: str,
-        officer: UserContext,
+        statutory_basis: Optional[str] = None,
+        statutory_authority_basis: Optional[str] = None,
+        officer: Optional[UserContext] = None,
         appeal_window_days: int = 30,
     ) -> ObjectionDecisionOrder:
         case = self._cases.get(objection_id)
         if not case:
             raise KeyError(f'Objection {objection_id} not found.')
+
+        basis = statutory_basis or statutory_authority_basis or "Disaster Management Act 2005 §30"
+        actor_id = officer.user_id if officer else deciding_authority
+        actor_scope = f'{officer.geography_scope.state}/{officer.geography_scope.district or "Wayanad"}' if officer else "Kerala/Wayanad"
 
         now = datetime.now(timezone.utc)
         appeal_deadline = now + timedelta(days=appeal_window_days)
@@ -276,24 +286,23 @@ class ObjectionsAppealsService:
 
         audit_entry = global_audit_ledger.append_event(
             action='OBJECTION_DECISION_ORDER_ISSUED',
-            actor_id=officer.user_id,
-            authority_scope=f'{officer.geography_scope.state}/{officer.geography_scope.district or "Wayanad"}',
+            actor_id=actor_id,
+            authority_scope=actor_scope,
             resource_type='DECISION_ORDER',
             resource_id=order_id,
             payload={
                 'relief_granted': relief_granted,
                 'authority': deciding_authority,
-                'statutory_basis': statutory_basis,
+                'statutory_basis': basis,
                 'appeal_deadline': appeal_deadline.isoformat(),
             },
             reason=remedy_notes[:100],
         )
-
         order = ObjectionDecisionOrder(
             order_id=order_id,
             objection_id=objection_id,
             deciding_authority=deciding_authority,
-            statutory_authority_basis=statutory_basis,
+            statutory_authority_basis=basis,
             order_date=now,
             relief_granted=relief_granted,
             summary_of_grounds=summary_of_grounds,
@@ -344,10 +353,12 @@ class ObjectionsAppealsService:
         )
         return case
 
-    def check_is_entity_frozen(self, entity_id: str) -> bool:
+    def check_is_entity_frozen(self, entity_id: str) -> Tuple[bool, Optional[str]]:
         """RUL-049: Check if target decision/entity is blocked by pending objections or appeals."""
         pending = self._frozen_entities.get(entity_id, [])
-        return len(pending) > 0
+        if pending:
+            return True, f"Entity '{entity_id}' is frozen pending resolution of objections: {', '.join(pending)} (RUL-049)"
+        return False, None
 
     def get_pending_objections_for_entity(self, entity_id: str) -> List[str]:
         return list(self._frozen_entities.get(entity_id, []))
@@ -396,6 +407,15 @@ class ObjectionsAppealsService:
             )
             return rec
         return None
+
+    def check_sla_escalations(self, supervisory_authority: str = 'District Collector & DDMA Chairperson, Wayanad') -> List[SLAEscalationRecommendation]:
+        """Scan all registered cases and return advisory escalation recommendations for any overdue ones."""
+        recs = []
+        for obj_id in self._cases:
+            rec = self.evaluate_sla_and_recommend_escalation(obj_id, supervisory_authority=supervisory_authority)
+            if rec:
+                recs.append(rec)
+        return recs
 
     def _unfreeze_if_clean(self, entity_id: str, objection_id: str):
         if entity_id in self._frozen_entities:

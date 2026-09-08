@@ -3,6 +3,7 @@ PUNARVAS-AI FastAPI Modular Application (ARC-C01 to ARC-C13).
 Normative Reference: architecture.md §5, rules.md (RUL-001 advisory envelope).
 """
 
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,13 +43,32 @@ from punarvas.modules.land_truth import (
 from punarvas.modules.allocation import (
     allocation_service,
     capacity_reservation_ledger,
+    capacity_ledger,
+    ReservationStatus,
+    SiteCapacityConfig,
+    CapacityReservation,
 )
 from punarvas.modules.field import (
     field_sync_service,
     FieldSurveySubmission,
     DeviceStatus,
 )
-from punarvas.modules.governance import governance_service
+from punarvas.modules.governance import (
+    governance_service,
+    approval_service,
+    objections_service,
+    ApprovalCondition,
+    ApprovalConditionType,
+    OfficialApprovalRecord,
+    StatutoryNotificationRecord,
+    ObjectionCategory,
+    ObjectionAdmissibility,
+    ObjectionFilingChannel,
+    HearingNotice,
+    ObjectionDecisionOrder,
+    ObjectionCase,
+    SLAEscalationRecommendation,
+)
 from punarvas.modules.reporting import reporting_service
 from punarvas.modules.evaluation import (
     evaluation_harness_service,
@@ -103,7 +123,13 @@ from punarvas.modules.district_scale import (
     multi_district_isolation_manager,
     scale_quota_limiter,
 )
-from punarvas.core.errors import ReservationConflictError, UnauthorizedGeographyAccessError
+from punarvas.core.errors import (
+    ReservationConflictError,
+    UnauthorizedGeographyAccessError,
+    EntityFrozenByObjectionError,
+    ApprovalConditionUnmetError,
+    UnauthorizedActionError,
+)
 from punarvas.spikes import load_wayanad_fixture
 
 
@@ -962,6 +988,541 @@ def federate_state_manifest(manifest: NationalRegistryManifest):
 def list_federated_manifests(state: Optional[str] = None):
     manifests = national_clearinghouse_service.list_manifests(state=state)
     return APIResponseEnvelope(data=[m.model_dump() for m in manifests])
+
+
+# --- Phase 9: Approvals, Statutory Notifications, Objections & Multi-Resource Capacity Ledger ---
+
+# 1. Approval Request Models
+class IssueApprovalRequest(BaseModel):
+    entity_type: str
+    entity_id: str
+    entity_version: str
+    approving_officer_name: str
+    approving_officer_designation: str
+    statutory_authority_basis: str
+    approval_order_number: str
+    conditions: Optional[List[ApprovalCondition]] = None
+    supersedes_approval_id: Optional[str] = None
+    step_up_token: str
+    user_id: Optional[str] = "gov_approver"
+    user_role: Optional[RoleType] = RoleType.GOVERNMENT_APPROVER
+
+
+class SatisfyConditionRequest(BaseModel):
+    verification_doc_hash: str
+    officer_name: str
+    user_id: Optional[str] = "deputy_collector"
+
+
+class PublishStatutoryNotificationRequest(BaseModel):
+    approval_id: str
+    gazette_notification_number: str
+    gazette_volume_number: str
+    effective_date: datetime
+    notification_title_en: str
+    notification_title_ml: str
+    notification_text_en: str
+    notification_text_ml: str
+    issuing_authority: str
+    signing_officer_name: str
+    digital_signature_hash: str
+    user_id: Optional[str] = "gov_approver"
+
+
+class WithdrawApprovalRequest(BaseModel):
+    reason: str
+    revocation_order_ref: str
+    user_id: Optional[str] = "admin_authority"
+
+
+# 2. Objections & Appeals Request Models
+class FileObjectionRequest(BaseModel):
+    household_id: str
+    filer_name: str
+    target_entity_type: str
+    target_entity_id: str
+    target_version_id: str
+    category: ObjectionCategory
+    statement: str
+    assigned_officer_id: str
+    assigned_officer_name: str
+    evidence_hashes: Optional[List[str]] = None
+    is_representative: bool = False
+    representative_doc: Optional[str] = None
+    filing_channel: ObjectionFilingChannel = ObjectionFilingChannel.ASSISTED_SERVICE_DESK
+    sla_days: int = 21
+    actor_id: Optional[str] = "citizen_desk_clerk"
+
+
+class ReviewAdmissibilityRequest(BaseModel):
+    is_admissible: bool
+    rejection_reason: Optional[str] = None
+    officer_id: Optional[str] = "reviewing_officer"
+
+
+class ScheduleHearingRequest(BaseModel):
+    hearing_date: datetime
+    venue: str
+    presiding_officer: str
+    notified_parties: List[str]
+    officer_id: Optional[str] = "hearing_officer"
+
+
+class IssueDecisionOrderRequest(BaseModel):
+    relief_granted: bool
+    summary_of_grounds: str
+    remedy_notes: str
+    deciding_authority: str
+    statutory_authority_basis: Optional[str] = "Disaster Management Act 2005 §30"
+    appeal_window_days: int = 30
+    officer_id: Optional[str] = "collector_chairperson"
+
+
+class FileAppealRequest(BaseModel):
+    appellate_statement: str
+    officer_id: Optional[str] = "appellate_officer"
+
+
+# 3. Capacity Ledger Request Models
+class ConfigureSiteCapacityRequest(BaseModel):
+    site_id: str
+    district: str
+    dwellings_max: int
+    land_cents_max: float
+    water_m3_day_max: float
+    overlapping_parcel_ids: Optional[List[str]] = None
+
+
+class SetProgrammeBudgetRequest(BaseModel):
+    budget_inr: float
+
+
+class SimulateCapacityRequest(BaseModel):
+    scenario_id: str
+    site_id: str
+    dwellings: int
+    land_cents: float
+    budget_inr: float
+    water_m3_day: float
+    actor_id: Optional[str] = "scenario_planner"
+
+
+class HoldCapacityRequest(BaseModel):
+    scenario_id: str
+    site_id: str
+    dwellings: int
+    land_cents: float
+    budget_inr: float
+    water_m3_day: float
+    actor_id: Optional[str] = "allocation_officer"
+    hold_duration_days: int = 14
+
+
+class CommitCapacityRequest(BaseModel):
+    reservation_id: str
+    approval_id: str
+    actor_id: Optional[str] = "approving_authority"
+
+
+class ReleaseCapacityRequest(BaseModel):
+    reservation_id: str
+    reason: str
+    actor_id: Optional[str] = "reallocation_officer"
+
+
+# --- Governance Approvals & Notifications Endpoints ---
+
+@app.post("/api/v1/governance/approvals", response_model=APIResponseEnvelope)
+def issue_official_approval(req: IssueApprovalRequest):
+    ctx = UserContext(
+        user_id=req.user_id or "gov_approver",
+        username=req.approving_officer_name,
+        roles=[req.user_role or RoleType.GOVERNMENT_APPROVER],
+        classification_level=ClassificationLevel.RESTRICTED,
+        geography_scope=GeographyScope(state="Kerala", district="Wayanad"),
+    )
+    try:
+        record = approval_service.issue_official_approval(
+            entity_type=req.entity_type,
+            entity_id=req.entity_id,
+            entity_version=req.entity_version,
+            approving_officer_name=req.approving_officer_name,
+            approving_officer_designation=req.approving_officer_designation,
+            statutory_authority_basis=req.statutory_authority_basis,
+            approval_order_number=req.approval_order_number,
+            conditions=req.conditions,
+            supersedes_approval_id=req.supersedes_approval_id,
+            step_up_token=req.step_up_token,
+            context=ctx,
+        )
+        return APIResponseEnvelope(data=record.model_dump())
+    except EntityFrozenByObjectionError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except UnauthorizedActionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except (KeyError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/governance/approvals", response_model=APIResponseEnvelope)
+def list_approvals(entity_id: Optional[str] = None):
+    records = approval_service.list_approvals(entity_id=entity_id)
+    return APIResponseEnvelope(data=[r.model_dump() for r in records])
+
+
+@app.get("/api/v1/governance/approvals/{approval_id}", response_model=APIResponseEnvelope)
+def get_approval(approval_id: str):
+    rec = approval_service.get_approval(approval_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Approval '{approval_id}' not found")
+    return APIResponseEnvelope(data=rec.model_dump())
+
+
+@app.post("/api/v1/governance/approvals/{approval_id}/conditions/{condition_id}/satisfy", response_model=APIResponseEnvelope)
+def satisfy_approval_condition(approval_id: str, condition_id: str, req: SatisfyConditionRequest):
+    ctx = UserContext(
+        user_id=req.user_id or "deputy_collector",
+        username=req.officer_name,
+        roles=[RoleType.GOVERNMENT_APPROVER],
+        classification_level=ClassificationLevel.RESTRICTED,
+        geography_scope=GeographyScope(state="Kerala", district="Wayanad"),
+    )
+    try:
+        cond = approval_service.satisfy_condition(
+            approval_id=approval_id,
+            condition_id=condition_id,
+            verification_doc_hash=req.verification_doc_hash,
+            officer_name=req.officer_name,
+            context=ctx,
+        )
+        return APIResponseEnvelope(data=cond.model_dump())
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/api/v1/governance/approvals/{approval_id}/can-allocate", response_model=APIResponseEnvelope)
+def check_can_allocate(approval_id: str):
+    try:
+        can_proceed, failures = approval_service.check_can_allocate(approval_id)
+        return APIResponseEnvelope(data={"approval_id": approval_id, "can_allocate": can_proceed, "blocking_failures": failures})
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/v1/governance/approvals/{approval_id}/withdraw", response_model=APIResponseEnvelope)
+def withdraw_approval(approval_id: str, req: WithdrawApprovalRequest):
+    ctx = UserContext(
+        user_id=req.user_id or "admin_authority",
+        username="admin",
+        roles=[RoleType.GOVERNMENT_APPROVER],
+        classification_level=ClassificationLevel.RESTRICTED,
+        geography_scope=GeographyScope(state="Kerala", district="Wayanad"),
+    )
+    try:
+        rec = approval_service.withdraw_approval(
+            approval_id=approval_id,
+            reason=req.reason,
+            revocation_order_ref=req.revocation_order_ref,
+            context=ctx,
+        )
+        return APIResponseEnvelope(data=rec.model_dump())
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/v1/governance/notifications", response_model=APIResponseEnvelope)
+def publish_statutory_notification(req: PublishStatutoryNotificationRequest):
+    ctx = UserContext(
+        user_id=req.user_id or "gov_approver",
+        username=req.signing_officer_name,
+        roles=[RoleType.GOVERNMENT_APPROVER],
+        classification_level=ClassificationLevel.RESTRICTED,
+        geography_scope=GeographyScope(state="Kerala", district="Wayanad"),
+    )
+    try:
+        rec = approval_service.publish_statutory_notification(
+            approval_id=req.approval_id,
+            gazette_notification_number=req.gazette_notification_number,
+            gazette_volume_number=req.gazette_volume_number,
+            effective_date=req.effective_date,
+            notification_title_en=req.notification_title_en,
+            notification_title_ml=req.notification_title_ml,
+            notification_text_en=req.notification_text_en,
+            notification_text_ml=req.notification_text_ml,
+            issuing_authority=req.issuing_authority,
+            signing_officer_name=req.signing_officer_name,
+            digital_signature_hash=req.digital_signature_hash,
+            context=ctx,
+        )
+        return APIResponseEnvelope(data=rec.model_dump())
+    except EntityFrozenByObjectionError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/api/v1/governance/notifications/{notification_id}", response_model=APIResponseEnvelope)
+def get_statutory_notification(notification_id: str):
+    rec = approval_service.get_notification(notification_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Statutory notification '{notification_id}' not found")
+    return APIResponseEnvelope(data=rec.model_dump())
+
+
+# --- Objections, Appeals & Grievance Remedies Endpoints ---
+
+@app.post("/api/v1/governance/objections/file", response_model=APIResponseEnvelope)
+def file_citizen_objection(req: FileObjectionRequest):
+    ctx = UserContext(
+        user_id=req.actor_id or "citizen_desk_clerk",
+        username="Desk Officer",
+        roles=[RoleType.COMMUNITY_OFFICER],
+        classification_level=ClassificationLevel.RESTRICTED,
+        geography_scope=GeographyScope(state="Kerala", district="Wayanad"),
+    )
+    case = objections_service.file_objection(
+        household_id=req.household_id,
+        filer_name=req.filer_name,
+        target_entity_type=req.target_entity_type,
+        target_entity_id=req.target_entity_id,
+        target_version_id=req.target_version_id,
+        category=req.category,
+        statement=req.statement,
+        assigned_officer_id=req.assigned_officer_id,
+        assigned_officer_name=req.assigned_officer_name,
+        actor=ctx,
+        evidence_hashes=req.evidence_hashes,
+        is_representative=req.is_representative,
+        representative_doc=req.representative_doc,
+        filing_channel=req.filing_channel,
+        sla_days=req.sla_days,
+    )
+    return APIResponseEnvelope(data=case.model_dump())
+
+
+@app.get("/api/v1/governance/objections", response_model=APIResponseEnvelope)
+def list_citizen_objections(household_id: Optional[str] = None):
+    cases = objections_service.list_cases(household_id=household_id)
+    return APIResponseEnvelope(data=[c.model_dump() for c in cases])
+
+
+@app.get("/api/v1/governance/objections/{objection_id}", response_model=APIResponseEnvelope)
+def get_citizen_objection(objection_id: str):
+    case = objections_service.get_case(objection_id)
+    if not case:
+        raise HTTPException(status_code=404, detail=f"Objection '{objection_id}' not found")
+    return APIResponseEnvelope(data=case.model_dump())
+
+
+@app.post("/api/v1/governance/objections/{objection_id}/admissibility", response_model=APIResponseEnvelope)
+def review_objection_admissibility(objection_id: str, req: ReviewAdmissibilityRequest):
+    ctx = UserContext(
+        user_id=req.officer_id or "reviewing_officer",
+        username="Reviewing Officer",
+        roles=[RoleType.GOVERNMENT_APPROVER],
+        classification_level=ClassificationLevel.RESTRICTED,
+        geography_scope=GeographyScope(state="Kerala", district="Wayanad"),
+    )
+    try:
+        case = objections_service.review_admissibility(
+            objection_id=objection_id,
+            is_admissible=req.is_admissible,
+            officer=ctx,
+            rejection_reason=req.rejection_reason,
+        )
+        return APIResponseEnvelope(data=case.model_dump())
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/v1/governance/objections/{objection_id}/hearings", response_model=APIResponseEnvelope)
+def schedule_objection_hearing(objection_id: str, req: ScheduleHearingRequest):
+    ctx = UserContext(
+        user_id=req.officer_id or "hearing_officer",
+        username="Deputy Collector",
+        roles=[RoleType.GOVERNMENT_APPROVER],
+        classification_level=ClassificationLevel.RESTRICTED,
+        geography_scope=GeographyScope(state="Kerala", district="Wayanad"),
+    )
+    try:
+        hearing = objections_service.schedule_hearing(
+            objection_id=objection_id,
+            hearing_date=req.hearing_date,
+            venue=req.venue,
+            presiding_officer=req.presiding_officer,
+            notified_parties=req.notified_parties,
+            officer=ctx,
+        )
+        return APIResponseEnvelope(data=hearing.model_dump())
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/v1/governance/objections/{objection_id}/decision", response_model=APIResponseEnvelope)
+def issue_objection_decision(objection_id: str, req: IssueDecisionOrderRequest):
+    ctx = UserContext(
+        user_id=req.officer_id or "collector_chairperson",
+        username=req.deciding_authority,
+        roles=[RoleType.GOVERNMENT_APPROVER],
+        classification_level=ClassificationLevel.RESTRICTED,
+        geography_scope=GeographyScope(state="Kerala", district="Wayanad"),
+    )
+    try:
+        order = objections_service.issue_decision_order(
+            objection_id=objection_id,
+            relief_granted=req.relief_granted,
+            summary_of_grounds=req.summary_of_grounds,
+            remedy_notes=req.remedy_notes,
+            deciding_authority=req.deciding_authority,
+            statutory_authority_basis=req.statutory_authority_basis,
+            appeal_window_days=req.appeal_window_days,
+            officer=ctx,
+        )
+        return APIResponseEnvelope(data=order.model_dump())
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/v1/governance/objections/{objection_id}/appeal", response_model=APIResponseEnvelope)
+def file_objection_appeal(objection_id: str, req: FileAppealRequest):
+    ctx = UserContext(
+        user_id=req.officer_id or "appellate_officer",
+        username="Appellate Officer",
+        roles=[RoleType.GOVERNMENT_APPROVER],
+        classification_level=ClassificationLevel.RESTRICTED,
+        geography_scope=GeographyScope(state="Kerala", district="Wayanad"),
+    )
+    try:
+        case = objections_service.file_appeal(
+            objection_id=objection_id,
+            appellate_statement=req.appellate_statement,
+            officer=ctx,
+        )
+        return APIResponseEnvelope(data=case.model_dump())
+    except (KeyError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/governance/objections/entities/{entity_id}/frozen", response_model=APIResponseEnvelope)
+def check_entity_frozen_status(entity_id: str):
+    is_frozen, reason = objections_service.check_is_entity_frozen(entity_id)
+    pending_objs = objections_service.get_pending_objections_for_entity(entity_id)
+    return APIResponseEnvelope(data={"entity_id": entity_id, "is_frozen": is_frozen, "reason": reason, "pending_objection_ids": pending_objs})
+
+
+@app.get("/api/v1/governance/objections/escalations/overdue", response_model=APIResponseEnvelope)
+def scan_overdue_objection_escalations(supervisory_authority: Optional[str] = "District Collector & DDMA Chairperson, Wayanad"):
+    recs = objections_service.check_sla_escalations(supervisory_authority=supervisory_authority or "District Collector & DDMA Chairperson, Wayanad")
+    return APIResponseEnvelope(data=[r.model_dump() for r in recs])
+
+
+# --- Multi-Resource Capacity Reservation Ledger Endpoints ---
+
+@app.post("/api/v1/capacity/sites/configure", response_model=APIResponseEnvelope)
+def configure_site_capacity(req: ConfigureSiteCapacityRequest):
+    capacity_ledger.configure_site(
+        site_id=req.site_id,
+        district=req.district,
+        dwellings_max=req.dwellings_max,
+        land_cents_max=req.land_cents_max,
+        water_m3_day_max=req.water_m3_day_max,
+        overlapping_parcel_ids=req.overlapping_parcel_ids,
+    )
+    return APIResponseEnvelope(data={"site_id": req.site_id, "configured": True})
+
+
+@app.post("/api/v1/capacity/programme-budget", response_model=APIResponseEnvelope)
+def set_programme_budget(req: SetProgrammeBudgetRequest):
+    capacity_ledger.set_programme_budget(req.budget_inr)
+    return APIResponseEnvelope(data={"programme_budget_inr": req.budget_inr})
+
+
+@app.get("/api/v1/capacity/sites/{site_id}/remaining", response_model=APIResponseEnvelope)
+def get_site_remaining_capacity(site_id: str):
+    try:
+        rem = capacity_ledger.get_remaining_capacity(site_id)
+        return APIResponseEnvelope(data=rem)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/v1/capacity/simulate", response_model=APIResponseEnvelope)
+def simulate_scenario_capacity(req: SimulateCapacityRequest):
+    res = capacity_ledger.simulate_draft_scenario(
+        scenario_id=req.scenario_id,
+        site_id=req.site_id,
+        dwellings=req.dwellings,
+        land_cents=req.land_cents,
+        budget_inr=req.budget_inr,
+        water_m3_day=req.water_m3_day,
+        actor_id=req.actor_id or "scenario_planner",
+    )
+    return APIResponseEnvelope(data=res.model_dump())
+
+
+@app.post("/api/v1/capacity/hold", response_model=APIResponseEnvelope)
+def hold_capacity_reservation(req: HoldCapacityRequest):
+    try:
+        res = capacity_ledger.hold_reservation(
+            scenario_id=req.scenario_id,
+            site_id=req.site_id,
+            dwellings=req.dwellings,
+            land_cents=req.land_cents,
+            budget_inr=req.budget_inr,
+            water_m3_day=req.water_m3_day,
+            actor_id=req.actor_id or "allocation_officer",
+            hold_duration_days=req.hold_duration_days,
+        )
+        return APIResponseEnvelope(data=res.model_dump())
+    except EntityFrozenByObjectionError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ReservationConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/v1/capacity/commit", response_model=APIResponseEnvelope)
+def commit_capacity_reservation(req: CommitCapacityRequest):
+    try:
+        res = capacity_ledger.commit_reservation(
+            reservation_id=req.reservation_id,
+            approval_id=req.approval_id,
+            actor_id=req.actor_id or "approving_authority",
+        )
+        return APIResponseEnvelope(data=res.model_dump())
+    except ApprovalConditionUnmetError as e:
+        raise HTTPException(status_code=412, detail=str(e))
+    except (KeyError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/v1/capacity/release", response_model=APIResponseEnvelope)
+def release_capacity_reservation(req: ReleaseCapacityRequest):
+    try:
+        res = capacity_ledger.release_reservation(
+            reservation_id=req.reservation_id,
+            reason=req.reason,
+            actor_id=req.actor_id or "reallocation_officer",
+        )
+        return APIResponseEnvelope(data=res.model_dump())
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/api/v1/capacity/reservations", response_model=APIResponseEnvelope)
+def list_capacity_reservations(site_id: Optional[str] = None):
+    res_list = capacity_ledger.list_reservations(site_id=site_id)
+    return APIResponseEnvelope(data=[r.model_dump() for r in res_list])
+
+
+@app.get("/api/v1/capacity/reservations/{reservation_id}", response_model=APIResponseEnvelope)
+def get_capacity_reservation(reservation_id: str):
+    res = capacity_ledger.get_reservation(reservation_id)
+    if not res:
+        raise HTTPException(status_code=404, detail=f"Reservation '{reservation_id}' not found")
+    return APIResponseEnvelope(data=res.model_dump())
+
 
 
 

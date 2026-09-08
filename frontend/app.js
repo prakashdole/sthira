@@ -22,6 +22,7 @@ const i18n = {
     tab_scaling: "Kerala Scaling (PH-4)",
     tab_adaptation: "Multi-State Adaptation (PH-5)",
     tab_clearinghouse: "National Clearinghouse (Phase 6)",
+    tab_phase9: "Approvals & Objections (Phase 9)",
     tab_audit: "Audit & Integrity",
     site_card_capacity: "Dwelling Capacity",
     site_card_water: "Lean-Season Water",
@@ -47,6 +48,7 @@ const i18n = {
     tab_scaling: "കേരള വിപുലീകരണം (PH-4)",
     tab_adaptation: "മറ്റ് സംസ്ഥാനങ്ങൾ (PH-5)",
     tab_clearinghouse: "ദേശീയ ക്ലിയറിംഗ് ഹൗസ് (ഘട്ടം 6)",
+    tab_phase9: "അംഗീകാരങ്ങളും പരാതികളും (ഘട്ടം 9)",
     tab_audit: "ഓഡിറ്റ് പരിശോധന",
     site_card_capacity: "വീടുകളുടെ ശേഷി",
     site_card_water: "വേനൽക്കാല ജലലഭ്യത",
@@ -73,6 +75,7 @@ const i18n = {
     tab_adaptation: "बहु-राज्य अनुकूलन (PH-5)",
 
     tab_clearinghouse: "राष्ट्रीय समाशोधन केंद्र (Phase 6)",
+    tab_phase9: "अनुमोदन एवं आपत्तियां (Phase 9)",
     tab_audit: "ऑडिट एवं अखंडता",
     site_card_capacity: "आवास क्षमता",
     site_card_water: "ग्रीष्मकालीन जल उपलब्धता",
@@ -678,6 +681,107 @@ function renderActiveTab() {
         </div>
       </div>
     `;
+  } else if (activeTab === 'phase9') {
+    content.innerHTML = `
+      <div class="card" style="border-top: 4px solid #7c3aed;">
+        <h3>Official Approvals, Statutory Notifications & Citizen Remedies (Phase 9)</h3>
+        <p><strong>Normative Reference:</strong> rules.md (RUL-003-006, RUL-040, RUL-046-049, RUL-070-071), DEC-025, DEC-028, DEC-041, AT-06, AT-09, AT-10, AT-15, AT-20, AT-21.</p>
+        <div style="background: #fdf4ff; border: 1px solid #d8b4fe; padding: 0.75rem; border-radius: 6px; margin-top: 0.5rem; font-size: 0.9em; color: #581c87;">
+          <strong>Statutory Separation Invariant:</strong> Algorithmic scores are never self-executing (RUL-001). Formal administrative approval requires Step-Up MFA (RUL-054). Gazette notification is a distinct public legal act (AT-21). Citizen objections automatically freeze candidate sites or lists (RUL-049).
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top: 1rem;">
+        <!-- Card 1: Official Approvals & Step-up MFA -->
+        <div class="card">
+          <h4>1. DDMA Official Approval & Statutory Notification (AT-20, AT-21)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Issue binding administrative approval with Step-Up MFA and blocking condition gates.</p>
+          
+          <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem;">
+            <label style="font-size: 0.85em; font-weight: bold;">Entity ID & Target:</label>
+            <input type="text" id="ph9-app-entity-id" value="SITE-ELSTONE-01" class="btn" style="text-align: left; background: #fff; cursor: text;">
+            
+            <label style="font-size: 0.85em; font-weight: bold;">Step-Up MFA Token (RUL-054):</label>
+            <input type="text" id="ph9-app-token" value="MFA-STEPUP-DDMA-SECURE-99" class="btn" style="text-align: left; background: #fff; cursor: text;">
+
+            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
+              <button class="btn btn-primary" onclick="submitOfficialApprovalDemo()">Issue Official Approval</button>
+              <button class="btn btn-secondary" onclick="satisfyApprovalConditionDemo()">Satisfy Water Gate (AT-20)</button>
+              <button class="btn" onclick="publishGazetteNotificationDemo()">Publish Gazette (AT-21)</button>
+            </div>
+          </div>
+          <div id="phase9-approval-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+
+        <!-- Card 2: Citizen Objections, Freeze & Remedies -->
+        <div class="card">
+          <h4>2. Citizen Objections & Decision Freezing (RUL-046–049, AT-09)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Assisted service desk filing generates immutable receipt and freezes target decision.</p>
+          
+          <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem;">
+            <label style="font-size: 0.85em; font-weight: bold;">Household / Filer Name:</label>
+            <input type="text" id="ph9-obj-filer" value="Ramanathan K. (HH-WYD-004)" class="btn" style="text-align: left; background: #fff; cursor: text;">
+            
+            <label style="font-size: 0.85em; font-weight: bold;">Grievance Category:</label>
+            <select id="ph9-obj-cat" class="btn" style="text-align: left; background: #fff;">
+              <option value="WATER_INADEQUACY">Lean-Season Water Inadequacy (RUL-015)</option>
+              <option value="EXCLUSION_ERROR">Exclusion from Beneficiary Roster</option>
+              <option value="FOREST_RIGHTS_FRA">Unresolved Forest Rights Act (FRA) Claim</option>
+              <option value="SITE_BOUNDARY_AND_SAFETY">Hazard Runout Buffer Inadequacy</option>
+            </select>
+
+            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
+              <button class="btn btn-primary" onclick="fileCitizenObjectionDemo()">File Objection & Freeze Entity</button>
+              <button class="btn btn-secondary" onclick="scheduleHearingDemo()">Schedule Formal Hearing</button>
+              <button class="btn" onclick="issueRemedyDecisionDemo()">Grant Remedy Order</button>
+              <button class="btn" onclick="scanSLAOverdueDemo()">Scan Overdue SLAs</button>
+            </div>
+          </div>
+          <div id="phase9-objection-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+      </div>
+
+      <!-- Card 3: Multi-Resource Capacity Ledger -->
+      <div class="card" style="margin-top: 1.5rem;">
+        <h4>3. Multi-Resource Capacity Reservation Ledger (DEC-025, RUL-070, RUL-071, AT-15)</h4>
+        <p style="font-size: 0.9em; color: #6b7280;">Thread-safe atomic capacity tracking across dwellings, land cents, water m³/day, and budget.</p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: 1rem;">
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.75rem; text-align: center;">
+            <div style="font-size: 0.8em; color: #64748b; font-weight: bold;">DWELLINGS CAPACITY</div>
+            <div id="cap-dwellings-val" style="font-size: 1.5rem; font-weight: bold; color: #0f172a; margin: 0.25rem 0;">250 / 250</div>
+            <span class="badge badge-pass" id="cap-dwellings-badge">Available</span>
+          </div>
+
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.75rem; text-align: center;">
+            <div style="font-size: 0.8em; color: #64748b; font-weight: bold;">LAND AREA (CENTS)</div>
+            <div id="cap-land-val" style="font-size: 1.5rem; font-weight: bold; color: #0f172a; margin: 0.25rem 0;">1200 / 1200</div>
+            <span class="badge badge-pass" id="cap-land-badge">Available</span>
+          </div>
+
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.75rem; text-align: center;">
+            <div style="font-size: 0.8em; color: #64748b; font-weight: bold;">LEAN-SEASON WATER (m³/day)</div>
+            <div id="cap-water-val" style="font-size: 1.5rem; font-weight: bold; color: #0f172a; margin: 0.25rem 0;">150 / 150</div>
+            <span class="badge badge-pass" id="cap-water-badge">Safe Yield Tested</span>
+          </div>
+
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.75rem; text-align: center;">
+            <div style="font-size: 0.8em; color: #64748b; font-weight: bold;">PROGRAMME BUDGET (INR)</div>
+            <div id="cap-budget-val" style="font-size: 1.5rem; font-weight: bold; color: #0f172a; margin: 0.25rem 0;">₹15,00,00,000</div>
+            <span class="badge badge-pass" id="cap-budget-badge">Sanctioned</span>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem; flex-wrap: wrap;">
+          <button class="btn btn-secondary" onclick="simulateDraftCapacityDemo()">Run Draft Simulation (0 Live Capacity)</button>
+          <button class="btn btn-primary" onclick="holdCapacityDemo()">Hold 30 Dwellings (14-Day Lock)</button>
+          <button class="btn" onclick="commitCapacityDemo()">Commit with Approval (Binding)</button>
+          <button class="btn" onclick="releaseCapacityDemo()">Release Capacity (Clean Return)</button>
+        </div>
+        <div id="phase9-capacity-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+      </div>
+    `;
+    initPhase9Gauges();
   }
 }
 
@@ -793,6 +897,456 @@ async function runAllocationSimulation() {
     alert(`Simulation executed successfully! Total matched: ${json.data.assigned_count}, Unassigned: ${json.data.unassigned_count}. (RUL-070: Draft reserves zero live capacity)`);
   } catch(e) {
     alert('Simulation completed locally: 3 households assigned, 0 capacity violations.');
+  }
+}
+
+let phase9State = {
+  lastApprovalId: null,
+  lastNotificationId: null,
+  lastObjectionId: null,
+  lastReservationId: null,
+};
+
+async function initPhase9Gauges() {
+  try {
+    await fetch(`${API_BASE}/api/v1/capacity/sites/configure`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        site_id: "SITE-ELSTONE-01",
+        district: "Wayanad",
+        dwellings_max: 250,
+        land_cents_max: 1200.0,
+        water_m3_day_max: 150.0,
+      }),
+    });
+    await fetch(`${API_BASE}/api/v1/capacity/programme-budget`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ budget_inr: 150000000.0 }),
+    });
+    await refreshPhase9CapacityGauges();
+  } catch(e) {
+    console.log("Phase 9 capacity gauge init notice:", e);
+  }
+}
+
+async function refreshPhase9CapacityGauges() {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/capacity/sites/SITE-ELSTONE-01/remaining`).then(r => r.json());
+    if (res.data) {
+      const dwEl = document.getElementById('cap-dwellings-val');
+      const ldEl = document.getElementById('cap-land-val');
+      const wtEl = document.getElementById('cap-water-val');
+      const bgEl = document.getElementById('cap-budget-val');
+      if (dwEl) dwEl.textContent = `${res.data.dwellings_remaining} / 250`;
+      if (ldEl) ldEl.textContent = `${res.data.land_cents_remaining.toFixed(0)} / 1200`;
+      if (wtEl) wtEl.textContent = `${res.data.water_m3_day_remaining.toFixed(0)} / 150`;
+      if (bgEl) bgEl.textContent = `₹${(res.data.programme_budget_inr_remaining / 10000000).toFixed(2)} Cr`;
+    }
+  } catch(e) {
+    console.log("Gauge refresh notice:", e);
+  }
+}
+
+async function submitOfficialApprovalDemo() {
+  const resultDiv = document.getElementById('phase9-approval-result');
+  if (!resultDiv) return;
+  const entityId = document.getElementById('ph9-app-entity-id')?.value || "SITE-ELSTONE-01";
+  const token = document.getElementById('ph9-app-token')?.value || "MFA-STEPUP-DDMA-SECURE-99";
+  
+  try {
+    const payload = {
+      entity_type: "SITE_SELECTION",
+      entity_id: entityId,
+      entity_version: "v1.0",
+      approving_officer_name: "Dr. D. S. Collector IAS",
+      approving_officer_designation: "District Magistrate & Chairperson DDMA",
+      statutory_authority_basis: "Disaster Management Act 2005 §30(2)(v)",
+      approval_order_number: `DDMA/WYD/2024/ORD-${Math.floor(100 + Math.random()*900)}`,
+      step_up_token: token,
+      conditions: [
+        {
+          condition_id: "COND-WATER-01",
+          condition_type: "WATER_YIELD_VERIFICATION",
+          description: "Lean-season TWAD / KWA aquifer recovery yield test clearance.",
+          is_blocking_for_allocation: true,
+          is_satisfied: false
+        }
+      ]
+    };
+    const res = await fetch(`${API_BASE}/api/v1/governance/approvals`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const json = await res.json();
+    if (res.ok) {
+      phase9State.lastApprovalId = json.data.approval_id;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>Approval Issued:</strong> ${json.data.approval_id}<br>
+          Order: <code>${json.data.approval_order_number}</code> | Authority State: <span class="badge badge-pass">${json.data.authority_state}</span><br>
+          <small>Blocking Gate Active: COND-WATER-01 (Cannot commit allocation until cleared - AT-20)</small>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="padding: 0.75rem; background: #fee2e2; border: 1px solid #ef4444; border-radius: 4px; color: #b91c1c;">
+        ✕ <strong>Approval Failed (${res.status}):</strong> ${json.detail || 'Authorization/Freeze Error'}
+      </div>`;
+    }
+  } catch(e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function satisfyApprovalConditionDemo() {
+  const resultDiv = document.getElementById('phase9-approval-result');
+  if (!resultDiv) return;
+  if (!phase9State.lastApprovalId) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Please issue an official approval first.</div>`;
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/governance/approvals/${phase9State.lastApprovalId}/conditions/COND-WATER-01/satisfy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        verification_doc_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        officer_name: "Executive Engineer, KWA Kalpetta"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>Gate Cleared (AT-20):</strong> COND-WATER-01 satisfied by ${json.data.satisfied_by_officer}.<br>
+          Cryptographic Doc Proof Hash: <code>${json.data.verification_document_hash.substring(0, 16)}...</code> verified.<br>
+          Site is now eligible for binding allocation commitment!
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Condition clear notice: ${json.detail}</div>`;
+    }
+  } catch(e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function publishGazetteNotificationDemo() {
+  const resultDiv = document.getElementById('phase9-approval-result');
+  if (!resultDiv) return;
+  if (!phase9State.lastApprovalId) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Please issue an official approval first.</div>`;
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/governance/notifications`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        approval_id: phase9State.lastApprovalId,
+        gazette_notification_number: "EXTRA-GAZ-WYD-2024-884",
+        gazette_volume_number: "Vol. XIII No. 312",
+        effective_date: new Date(Date.now() + 86400000).toISOString(),
+        notification_title_en: "Statutory Resettlement Site Declaration (Elstone Estate)",
+        notification_title_ml: "എൽസ്റ്റോൺ എസ്റ്റേറ്റ് പുനരധിവാസ ഭൂമി വിജ്ഞാപനം",
+        notification_text_en: "The District Authority hereby notifies acquisition under DM Act §65...",
+        notification_text_ml: "ദുരന്ത നിവാരണ നിയമം വകുപ്പ് 65 പ്രകാരം ഭൂമി ഏറ്റെടുക്കൽ ഇതിനാൽ വിജ്ഞാപനം ചെയ്യുന്നു...",
+        issuing_authority: "Disaster Management Department, Govt. of Kerala",
+        signing_officer_name: "Dr. D. S. Collector IAS",
+        digital_signature_hash: "3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b8559"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      phase9State.lastNotificationId = json.data.notification_id;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>Statutory Gazette Published (AT-21):</strong> ${json.data.notification_id}<br>
+          Gazette No: <code>${json.data.gazette_notification_number}</code> (${json.data.gazette_volume_number})<br>
+          Bilingual Title: <em>${json.data.notification_title_ml}</em><br>
+          <small>Distinct statutory instrument verified: approval ≠ gazette publication (RUL-003).</small>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Gazette publish error: ${json.detail}</div>`;
+    }
+  } catch(e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function fileCitizenObjectionDemo() {
+  const resultDiv = document.getElementById('phase9-objection-result');
+  if (!resultDiv) return;
+  const filer = document.getElementById('ph9-obj-filer')?.value || "Ramanathan K.";
+  const cat = document.getElementById('ph9-obj-cat')?.value || "WATER_INADEQUACY";
+  const targetEntity = document.getElementById('ph9-app-entity-id')?.value || "SITE-ELSTONE-01";
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/governance/objections/file`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        household_id: "HH-WYD-004",
+        filer_name: filer,
+        target_entity_type: "SITE_SELECTION",
+        target_entity_id: targetEntity,
+        target_version_id: "v1.0",
+        category: cat,
+        statement: "Ground report indicates local open wells run dry by mid-February.",
+        assigned_officer_id: "OFF-REV-003",
+        assigned_officer_name: "Tahsildar (Land Records) Vythiri",
+        filing_channel: "ASSISTED_SERVICE_DESK",
+        sla_days: 21
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      phase9State.lastObjectionId = json.data.objection_id;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>Objection Filed:</strong> ${json.data.objection_id}<br>
+          Receipt Token: <code>${json.data.receipt_token}</code> (Provided to citizen RUL-048)<br>
+          <span class="badge badge-fail">🔒 Target Entity Frozen (RUL-049)</span> All approvals and capacity holds on ${targetEntity} are locked!
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Filing error: ${json.detail}</div>`;
+    }
+  } catch(e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function scheduleHearingDemo() {
+  const resultDiv = document.getElementById('phase9-objection-result');
+  if (!resultDiv) return;
+  if (!phase9State.lastObjectionId) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Please file an objection first.</div>`;
+    return;
+  }
+  try {
+    const hearingDate = new Date(Date.now() + 5 * 86400000).toISOString();
+    const res = await fetch(`${API_BASE}/api/v1/governance/objections/${phase9State.lastObjectionId}/hearings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        hearing_date: hearingDate,
+        venue: "Taluk Office Vythiri Mini Hall",
+        presiding_officer: "Deputy Collector (Disaster Management)",
+        notified_parties: ["Ramanathan K.", "Village Officer Meppadi", "KWA Engineer"]
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>Hearing Scheduled:</strong> ${json.data.notice_id}<br>
+          Venue: <em>${json.data.venue}</em> | Presiding: ${json.data.presiding_officer}<br>
+          Notified Parties: ${json.data.notified_parties.join(", ")}
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Notice schedule error: ${json.detail}</div>`;
+    }
+  } catch(e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function issueRemedyDecisionDemo() {
+  const resultDiv = document.getElementById('phase9-objection-result');
+  if (!resultDiv) return;
+  if (!phase9State.lastObjectionId) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Please file an objection first.</div>`;
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/governance/objections/${phase9State.lastObjectionId}/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relief_granted: true,
+        summary_of_grounds: "Field test confirmed 40% summer yield reduction.",
+        remedy_notes: "Mandate gravity flow pipeline from Chembra spring prior to layout construction.",
+        deciding_authority: "District Collector & DDMA Chairperson, Wayanad",
+        appeal_window_days: 30
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>Decision Order Issued:</strong> ${json.data.order_id}<br>
+          Relief Granted: <span class="badge badge-pass">YES</span> | Appeal Window: 30 days<br>
+          Remedy: <em>${json.data.remedy_notes}</em><br>
+          <span class="badge badge-pass">✓ Entity Unfrozen (RUL-049)</span> Decision is resolved, unblocking allocation pipeline.
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Decision order error: ${json.detail}</div>`;
+    }
+  } catch(e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function scanSLAOverdueDemo() {
+  const resultDiv = document.getElementById('phase9-objection-result');
+  if (!resultDiv) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/governance/objections/escalations/overdue`).then(r => r.json());
+    const count = res.data ? res.data.length : 0;
+    resultDiv.innerHTML = `
+      <div style="padding: 0.75rem; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; color: #334155;">
+        ℹ <strong>SLA Escalation Scanner (RUL-006 Advisory):</strong> Scanned active cases.<br>
+        Overdue escalations found: <strong>${count}</strong><br>
+        <small>Advisory invariant verified: overdue items generate human supervisory recommendations, never automated bypass.</small>
+      </div>
+    `;
+  } catch(e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function simulateDraftCapacityDemo() {
+  const resultDiv = document.getElementById('phase9-capacity-result');
+  if (!resultDiv) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/capacity/simulate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scenario_id: "SCEN-DRAFT-SIM",
+        site_id: "SITE-ELSTONE-01",
+        dwellings: 50,
+        land_cents: 250.0,
+        budget_inr: 25000000.0,
+        water_m3_day: 35.0
+      })
+    }).then(r => r.json());
+    resultDiv.innerHTML = `
+      <div style="padding: 0.75rem; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; color: #334155;">
+        ✓ <strong>Draft Scenario Simulated:</strong> ${res.data.reservation_id}<br>
+        Status: <span class="badge badge-pass">${res.data.status}</span> | Dwellings Reserved: <strong>${res.data.dwellings_reserved}</strong> (Zero Live Capacity Locked - RUL-070, DEC-025).
+      </div>
+    `;
+    await refreshPhase9CapacityGauges();
+  } catch(e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function holdCapacityDemo() {
+  const resultDiv = document.getElementById('phase9-capacity-result');
+  if (!resultDiv) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/capacity/hold`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scenario_id: "SCEN-ALLOC-01",
+        site_id: "SITE-ELSTONE-01",
+        dwellings: 30,
+        land_cents: 150.0,
+        budget_inr: 15000000.0,
+        water_m3_day: 20.0,
+        hold_duration_days: 14
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      phase9State.lastReservationId = json.data.reservation_id;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>Temporary Capacity Hold Acquired (AT-15):</strong> ${json.data.reservation_id}<br>
+          Dwellings Locked: <strong>${json.data.dwellings_reserved}</strong> | Land: <strong>${json.data.land_cents_reserved} cents</strong> | Water: <strong>${json.data.water_m3_day_reserved} m³/day</strong><br>
+          Expires at: <code>${json.data.expires_at}</code> (14-day hold window)
+        </div>
+      `;
+      await refreshPhase9CapacityGauges();
+    } else {
+      resultDiv.innerHTML = `<div style="padding: 0.75rem; background: #fee2e2; border: 1px solid #ef4444; border-radius: 4px; color: #b91c1c;">
+        ✕ <strong>Hold Conflict (${res.status}):</strong> ${json.detail}
+      </div>`;
+    }
+  } catch(e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function commitCapacityDemo() {
+  const resultDiv = document.getElementById('phase9-capacity-result');
+  if (!resultDiv) return;
+  if (!phase9State.lastReservationId) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Please acquire a capacity hold first.</div>`;
+    return;
+  }
+  if (!phase9State.lastApprovalId) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Please issue an official approval with conditions satisfied first.</div>`;
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/capacity/commit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reservation_id: phase9State.lastReservationId,
+        approval_id: phase9State.lastApprovalId
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>Reservation Committed (Binding):</strong> ${json.data.reservation_id}<br>
+          Status: <span class="badge badge-pass">${json.data.status}</span> | Linked to Approval: <code>${json.data.approval_order_id}</code><br>
+          All conditions verified satisfied before commit (AT-20).
+        </div>
+      `;
+      await refreshPhase9CapacityGauges();
+    } else {
+      resultDiv.innerHTML = `<div style="padding: 0.75rem; background: #fee2e2; border: 1px solid #ef4444; border-radius: 4px; color: #b91c1c;">
+        ✕ <strong>Commit Failed (${res.status}):</strong> ${json.detail}
+      </div>`;
+    }
+  } catch(e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function releaseCapacityDemo() {
+  const resultDiv = document.getElementById('phase9-capacity-result');
+  if (!resultDiv) return;
+  if (!phase9State.lastReservationId) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">No active reservation to release.</div>`;
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/capacity/release`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reservation_id: phase9State.lastReservationId,
+        reason: "Reallocation plan revision approved by DDMA"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>Capacity Cleanly Released (RUL-071):</strong> ${json.data.reservation_id}<br>
+          Capacity returned to site pool without double-subtraction.
+        </div>
+      `;
+      await refreshPhase9CapacityGauges();
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Release error: ${json.detail}</div>`;
+    }
+  } catch(e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
   }
 }
 
