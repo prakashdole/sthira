@@ -802,6 +802,28 @@ class CaseDeliveryTracker:
         self._external_handoffs[case_id] = record
         return record
 
+    def record_external_handoff(
+        self,
+        case_id: str,
+        external_system_name: str,
+        external_reference_id: str,
+        accountable_agency: str,
+        accountable_officer: str,
+        delegated_scope: str,
+        reconciliation_method: str = "PERIODIC_API_SYNC_AND_SITE_AUDIT",
+        actor_id: Optional[str] = None,
+        **kwargs: Any,
+    ) -> ExternalHandoffRecord:
+        return self.register_external_handoff(
+            case_id=case_id,
+            external_system_name=external_system_name,
+            external_reference_id=external_reference_id,
+            accountable_agency=accountable_agency,
+            accountable_officer=accountable_officer,
+            delegated_scope=delegated_scope,
+            reconciliation_method=reconciliation_method,
+        )
+
     # 8. Post-Relocation Follow-Up (FR-068 / DEC-026)
     def record_livelihood_followup(
         self,
@@ -848,6 +870,34 @@ class CaseDeliveryTracker:
             self._followups[case_id] = []
         self._followups[case_id].append(record)
         return record
+
+    def record_post_relocation_followup(
+        self,
+        case_id: str,
+        milestone_stage: str,
+        livelihood_restored: bool,
+        income_restoration_pct: float,
+        schooling_continuity: bool,
+        healthcare_accessible: bool,
+        infrastructure_rating: str,
+        satisfaction_score: float,
+        conducted_by: str,
+        actor_id: Optional[str] = None,
+        grievance_notes: Optional[str] = None,
+        **kwargs: Any,
+    ) -> PostRelocationFollowUp:
+        return self.record_livelihood_followup(
+            case_id=case_id,
+            milestone_stage=milestone_stage,
+            livelihood_restored=livelihood_restored,
+            income_restoration_pct=income_restoration_pct,
+            schooling_continuity=schooling_continuity,
+            healthcare_accessible=healthcare_accessible,
+            infrastructure_rating=infrastructure_rating,
+            community_satisfaction=satisfaction_score,
+            officer_name=conducted_by,
+            grievance_notes=grievance_notes,
+        )
 
     def get_necessity_review(self, case_id: str) -> Optional[RelocationNecessityReview]:
         return self._necessity_reviews.get(case_id)
