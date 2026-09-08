@@ -3,7 +3,7 @@ PUNARVAS-AI Policy, Equations & Hard Gate Engine (ARC-C07 / C1-06).
 Normative Reference: equations.md, parameters.md, rules.md (RUL-013, RUL-028, RUL-029, RUL-030, RUL-035).
 """
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from punarvas.core.contracts import HardGateResult, DimensionScore
@@ -232,5 +232,110 @@ class PolicyEngine:
         )
 
 
+class SensitivityResult(BaseModel):
+    dimension_id: str
+    dimension_name: str
+    baseline_weight: float
+    perturbed_weight: float
+    perturbation_pct: float
+    rank_reversal_detected: bool
+    reversals: List[Dict[str, Any]] = Field(default_factory=list)
+    max_score_delta: float = 0.0
+
+
+class SensitivityAnalysisEngine:
+    """
+    C2-03: Sensitivity analysis and rank-instability detection (ODN-005, DEC-035).
+    Tests sensitivity by perturbing dimensional weights (w +/- 20%) and checking if site relative
+    comparability order reverses.
+    """
+
+    @classmethod
+    def analyze_site_rank_sensitivity(
+        cls,
+        sites: List[SiteCriteriaInput],
+        engine: PolicyEngine,
+        perturbation_factor: float = 0.20,
+    ) -> List[SensitivityResult]:
+        if len(sites) < 2:
+            return []
+
+        # Evaluate baseline reports
+        baseline_reports = [engine.evaluate_site(s) for s in sites]
+
+        # Dimension weights
+        dim_defs = [
+            ("DIM-ACC-01", "Healthcare Accessibility", 0.3),
+            ("DIM-ACC-02", "Education Accessibility", 0.3),
+            ("DIM-CAP-01", "Dwelling Capacity", 0.4),
+        ]
+
+        def compute_aggregate_profile(report: SiteEvaluationReport, weights: Dict[str, float]) -> float:
+            total = 0.0
+            for d in report.dimension_scores:
+                w = weights.get(d.dimension_id, d.weight)
+                total += d.normalized_score * w
+            return total
+
+        baseline_weights = {d[0]: d[2] for d in dim_defs}
+        baseline_scores = {r.site_id: compute_aggregate_profile(r, baseline_weights) for r in baseline_reports}
+        baseline_sorted = sorted(baseline_scores.keys(), key=lambda s: baseline_scores[s], reverse=True)
+
+        results: List[SensitivityResult] = []
+
+        for dim_id, dim_name, base_w in dim_defs:
+            for factor in (1.0 + perturbation_factor, 1.0 - perturbation_factor):
+                perturbed_w = round(base_w * factor, 4)
+                test_weights = dict(baseline_weights)
+                test_weights[dim_id] = perturbed_w
+
+                # Normalize remaining weights so sum equals 1.0
+                other_sum = sum(v for k, v in test_weights.items() if k != dim_id)
+                if other_sum > 0:
+                    scale = (1.0 - perturbed_w) / other_sum
+                    for k in test_weights:
+                        if k != dim_id:
+                            test_weights[k] = round(test_weights[k] * scale, 4)
+
+                perturbed_scores = {r.site_id: compute_aggregate_profile(r, test_weights) for r in baseline_reports}
+                perturbed_sorted = sorted(perturbed_scores.keys(), key=lambda s: perturbed_scores[s], reverse=True)
+
+                # Check pairwise rank reversals
+                reversals = []
+                for i in range(len(baseline_sorted)):
+                    for j in range(i + 1, len(baseline_sorted)):
+                        s_a = baseline_sorted[i]
+                        s_b = baseline_sorted[j]
+                        # In baseline, s_a >= s_b
+                        pos_a = perturbed_sorted.index(s_a)
+                        pos_b = perturbed_sorted.index(s_b)
+                        if pos_a > pos_b:  # S_b overtook S_a
+                            reversals.append({
+                                "overtaken_site": s_a,
+                                "overtaking_site": s_b,
+                                "baseline_scores": {s_a: baseline_scores[s_a], s_b: baseline_scores[s_b]},
+                                "perturbed_scores": {s_a: perturbed_scores[s_a], s_b: perturbed_scores[s_b]},
+                            })
+
+                max_delta = max(abs(perturbed_scores[s] - baseline_scores[s]) for s in baseline_scores)
+
+                results.append(
+                    SensitivityResult(
+                        dimension_id=dim_id,
+                        dimension_name=dim_name,
+                        baseline_weight=base_w,
+                        perturbed_weight=perturbed_w,
+                        perturbation_pct=round((factor - 1.0) * 100, 1),
+                        rank_reversal_detected=len(reversals) > 0,
+                        reversals=reversals,
+                        max_score_delta=round(max_delta, 4),
+                    )
+                )
+
+        return results
+
+
 # Global singleton instance
 policy_engine = PolicyEngine()
+sensitivity_analysis_engine = SensitivityAnalysisEngine()
+

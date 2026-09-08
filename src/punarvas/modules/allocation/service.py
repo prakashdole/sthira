@@ -3,12 +3,13 @@ PUNARVAS-AI Advisory Allocation & Feasibility Validator Module (ARC-C08 / C1-07)
 Normative Reference: rules.md (RUL-040-043, RUL-070, RUL-073, RUL-074).
 """
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from punarvas.core.contracts import utc_now
 from punarvas.core.enums import SolverStatus, RelocationPathway
 from punarvas.core.audit import global_audit_ledger
+from punarvas.core.errors import ReservationConflictError
 from punarvas.modules.household.service import HouseholdCase
 
 
@@ -191,5 +192,144 @@ class AllocationService:
         return scenario
 
 
-# Global singleton instance
+class CapacityReservation(BaseModel):
+    reservation_id: str
+    scenario_id: str
+    site_id: str
+    dwellings_reserved: int
+    land_cents_reserved: float
+    budget_inr_reserved: float
+    water_m3_day_reserved: float
+    status: str = "ACTIVE"  # ACTIVE, RELEASED, EXPIRED
+    reserved_at: str = Field(default_factory=lambda: utc_now().isoformat())
+    reserved_by: str
+    released_at: Optional[str] = None
+    release_reason: Optional[str] = None
+
+
+class CapacityReservationLedger:
+    """
+    C2-03 / FEAT-024: Capacity reservation and commitment ledger.
+    Atomically reserves capacity across dwellings, land area, budget, and water.
+    Drafts reserve nothing (DEC-025). Approval checks remaining capacity and fails closed
+    upon competing scenario or overlapping resource collision (ODN-009, RUL-070).
+    """
+
+    def __init__(self):
+        self._reservations: Dict[str, CapacityReservation] = {}
+        self._site_dwellings: Dict[str, int] = {}
+        self._site_land_cents: Dict[str, float] = {}
+        self._programme_budget_inr: float = 0.0
+        self._site_water_m3_day: Dict[str, float] = {}
+
+    def configure_capacities(
+        self,
+        site_dwellings: Dict[str, int],
+        site_land_cents: Dict[str, float],
+        programme_budget_inr: float,
+        site_water_m3_day: Dict[str, float],
+    ):
+        self._site_dwellings = dict(site_dwellings)
+        self._site_land_cents = dict(site_land_cents)
+        self._programme_budget_inr = programme_budget_inr
+        self._site_water_m3_day = dict(site_water_m3_day)
+
+    def get_remaining_capacity(self, site_id: str) -> Dict[str, float]:
+        active_res = [r for r in self._reservations.values() if r.site_id == site_id and r.status == "ACTIVE"]
+        dwellings_used = sum(r.dwellings_reserved for r in active_res)
+        land_used = sum(r.land_cents_reserved for r in active_res)
+        water_used = sum(r.water_m3_day_reserved for r in active_res)
+        total_budget_used = sum(r.budget_inr_reserved for r in self._reservations.values() if r.status == "ACTIVE")
+
+        return {
+            "dwellings_remaining": self._site_dwellings.get(site_id, 0) - dwellings_used,
+            "land_cents_remaining": self._site_land_cents.get(site_id, 0.0) - land_used,
+            "water_m3_day_remaining": self._site_water_m3_day.get(site_id, 0.0) - water_used,
+            "programme_budget_inr_remaining": self._programme_budget_inr - total_budget_used,
+        }
+
+    def reserve(
+        self,
+        scenario_id: str,
+        site_id: str,
+        dwellings: int,
+        land_cents: float,
+        budget_inr: float,
+        water_m3_day: float,
+        actor_id: str,
+    ) -> CapacityReservation:
+        rem = self.get_remaining_capacity(site_id)
+
+        if dwellings > rem["dwellings_remaining"]:
+            raise ReservationConflictError(
+                resource_type="DWELLING_CAPACITY",
+                resource_id=site_id,
+                reason=f"Requested {dwellings} units, but only {int(rem['dwellings_remaining'])} remain unreserved."
+            )
+        if land_cents > rem["land_cents_remaining"]:
+            raise ReservationConflictError(
+                resource_type="LAND_AREA",
+                resource_id=site_id,
+                reason=f"Requested {land_cents:.1f} cents, but only {rem['land_cents_remaining']:.1f} cents remain."
+            )
+        if water_m3_day > rem["water_m3_day_remaining"]:
+            raise ReservationConflictError(
+                resource_type="WATER_YIELD",
+                resource_id=site_id,
+                reason=f"Requested {water_m3_day:.1f} m3/day, but only {rem['water_m3_day_remaining']:.1f} m3/day available."
+            )
+        if budget_inr > rem["programme_budget_inr_remaining"]:
+            raise ReservationConflictError(
+                resource_type="PROGRAMME_BUDGET",
+                resource_id="TOTAL_BUDGET",
+                reason=f"Requested INR {budget_inr:,.0f}, but only INR {rem['programme_budget_inr_remaining']:,.0f} available."
+            )
+
+        res_id = f"RES-{site_id}-{scenario_id}-{int(utc_now().timestamp())}"
+        reservation = CapacityReservation(
+            reservation_id=res_id,
+            scenario_id=scenario_id,
+            site_id=site_id,
+            dwellings_reserved=dwellings,
+            land_cents_reserved=land_cents,
+            budget_inr_reserved=budget_inr,
+            water_m3_day_reserved=water_m3_day,
+            reserved_by=actor_id,
+        )
+        self._reservations[res_id] = reservation
+
+        global_audit_ledger.log(
+            actor_id=actor_id,
+            authority_scope="Wayanad/CapacityLedger",
+            action="RESERVE_CAPACITY",
+            entity_type="CapacityReservation",
+            entity_id=res_id,
+            version_id="1.0",
+            reason=f"Scenario '{scenario_id}' atomically reserved {dwellings} units, {land_cents} cents, INR {budget_inr} on '{site_id}'.",
+        )
+        return reservation
+
+    def release(self, reservation_id: str, reason: str, actor_id: str) -> CapacityReservation:
+        res = self._reservations.get(reservation_id)
+        if not res:
+            raise KeyError(f"Reservation '{reservation_id}' not found.")
+        res.status = "RELEASED"
+        res.released_at = utc_now().isoformat()
+        res.release_reason = reason
+
+        global_audit_ledger.log(
+            actor_id=actor_id,
+            authority_scope="Wayanad/CapacityLedger",
+            action="RELEASE_CAPACITY",
+            entity_type="CapacityReservation",
+            entity_id=reservation_id,
+            version_id="1.0",
+            reason=f"Released reservation for site '{res.site_id}'. Reason: {reason}",
+        )
+        return res
+
+
+# Global singleton instances
 allocation_service = AllocationService()
+capacity_reservation_ledger = CapacityReservationLedger()
+

@@ -87,3 +87,14 @@ class CapacityExceededError(PunarvasError):
             rule_id="RUL-041",
             resolution="Scale back allocation or reserve additional site parcels."
         )
+
+
+class ReservationConflictError(PunarvasError):
+    """Raised when competing scenarios attempt to reserve the same dwelling, land, budget, or water resource (RUL-070, DEC-025, ODN-009)."""
+    def __init__(self, resource_type: str, resource_id: str, reason: str):
+        super().__init__(
+            f"Capacity reservation conflict on {resource_type} '{resource_id}': {reason}.",
+            rule_id="RUL-070",
+            resolution="Resolve cross-scenario competition or release conflicting reservation before approval."
+        )
+
