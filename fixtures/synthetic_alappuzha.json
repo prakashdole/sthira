@@ -1,0 +1,159 @@
+{
+  "programme": {
+    "programme_id": "PRG-KL-ALP-2024",
+    "title": "Alappuzha Kuttanad Waterlogging & Tidal Inundation Resettlement Programme",
+    "state": "Kerala",
+    "district": "Alappuzha",
+    "target_settlements": ["Champakulam", "Kainakary", "Nedumudi"],
+    "lead_authority": "District Disaster Management Authority (DDMA), Alappuzha",
+    "active_policy_version": "POL-ALP-2024.1",
+    "mandate_legal_basis": "Disaster Management Act 2005 read with Kuttanad Package"
+  },
+  "hazard_layers": [
+    {
+      "layer_id": "HAZ-ALP-POLDER-FLOOD-2023",
+      "name": "Kuttanad Below-Sea-Level Polder Waterlogging Risk Zone",
+      "source_id": "S02",
+      "publisher": "Irrigation Department / KSDMA",
+      "scale": "1:25,000",
+      "crs": "EPSG:4326",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [76.320, 9.450],
+            [76.400, 9.450],
+            [76.400, 9.520],
+            [76.320, 9.520],
+            [76.320, 9.450]
+          ]
+        ]
+      },
+      "hazard_level": "HIGH",
+      "debris_flow_channel": false,
+      "valid_from": "2023-01-01T00:00:00Z"
+    },
+    {
+      "layer_id": "HAZ-ALP-TIDAL-SURGE-2023",
+      "name": "Vembanad Estuarine Tidal Backwater Ingress Zone",
+      "source_id": "S03",
+      "publisher": "KSDMA / CESS",
+      "crs": "EPSG:4326",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [76.330, 9.460],
+            [76.380, 9.460],
+            [76.380, 9.500],
+            [76.330, 9.500],
+            [76.330, 9.460]
+          ]
+        ]
+      },
+      "hazard_level": "MODERATE",
+      "debris_flow_channel": false,
+      "valid_from": "2023-06-01T00:00:00Z"
+    }
+  ],
+  "affected_parcels": [
+    {
+      "parcel_id": "PARCEL-KL-ALP-CHAMP-001",
+      "ulpin": "KL130101001001",
+      "survey_number": "88/3",
+      "village": "Champakulam",
+      "lsg_name": "Champakulam Grama Panchayat",
+      "centroid": [76.350, 9.475],
+      "area_cents": 6.0,
+      "hazard_zone_ids": ["HAZ-ALP-POLDER-FLOOD-2023", "HAZ-ALP-TIDAL-SURGE-2023"],
+      "ground_state": "SUBMERGED_EMBANKMENT_COLLAPSE",
+      "title_holder": "Thomas Varghese",
+      "household_id": "HH-ALP-001",
+      "relocation_necessary": true,
+      "discrepancies": []
+    },
+    {
+      "parcel_id": "PARCEL-KL-ALP-CHAMP-002",
+      "ulpin": "KL130101001002",
+      "survey_number": "88/4",
+      "village": "Champakulam",
+      "lsg_name": "Champakulam Grama Panchayat",
+      "centroid": [76.355, 9.480],
+      "area_cents": 5.5,
+      "hazard_zone_ids": ["HAZ-ALP-POLDER-FLOOD-2023"],
+      "ground_state": "CHRONICALLY_WATERLOGGED_POLDER",
+      "title_holder": "Babu K",
+      "household_id": "HH-ALP-002",
+      "relocation_necessary": true,
+      "discrepancies": []
+    }
+  ],
+  "candidate_sites": [
+    {
+      "site_id": "SITE-ALP-KUTTANAD-01",
+      "name": "Champakulam Elevated Resettlement Mound",
+      "village": "Champakulam",
+      "lsg_name": "Champakulam Grama Panchayat",
+      "centroid": [76.375, 9.495],
+      "usable_area_acres": 8.0,
+      "dwelling_capacity": 60,
+      "unit_plot_cents": 5.0,
+      "hazard_susceptibility_level": "LOW",
+      "in_debris_flow_runout": false,
+      "slope_degrees": 0.5,
+      "title_clearance_status": "VERIFIED_CLEAR",
+      "road_access_width_m": 3.8,
+      "lean_season_water_state": "PASS",
+      "tested_water_lpcd": 70.0,
+      "livelihood_distance_km": 1.5,
+      "land_acquisition_cost_inr": 18000000.0,
+      "infrastructure_cost_inr": 12000000.0,
+      "statutory_clearance_status": "APPROVED",
+      "status": "APPROVED_FOR_ALLOCATION"
+    }
+  ],
+  "synthetic_households": [
+    {
+      "household_id": "HH-ALP-001",
+      "head_of_household": "Thomas Varghese",
+      "member_count": 3,
+      "vulnerable_members": {
+        "elderly": 1,
+        "disabled": 0,
+        "children": 0
+      },
+      "requires_ground_floor": false,
+      "source_parcel_id": "PARCEL-KL-ALP-CHAMP-001",
+      "verified_eligibility": true,
+      "consent_status": {
+        "PROGRAMME_PARTICIPATION": "CONSENTED",
+        "PATHWAY_CHOICE": "CONSENTED",
+        "SITE_PREFERENCE": "NOT_APPLICABLE"
+      },
+      "chosen_pathway": "SELF_RELOCATION_ASSISTANCE",
+      "preferred_sites": [],
+      "objection_filed": false
+    },
+    {
+      "household_id": "HH-ALP-002",
+      "head_of_household": "Babu K",
+      "member_count": 4,
+      "vulnerable_members": {
+        "elderly": 0,
+        "disabled": 1,
+        "children": 1
+      },
+      "requires_ground_floor": true,
+      "source_parcel_id": "PARCEL-KL-ALP-CHAMP-002",
+      "verified_eligibility": true,
+      "consent_status": {
+        "PROGRAMME_PARTICIPATION": "CONSENTED",
+        "PATHWAY_CHOICE": "CONSENTED",
+        "SITE_PREFERENCE": "CONSENTED"
+      },
+      "chosen_pathway": "TOWNSHIP",
+      "preferred_sites": ["SITE-ALP-KUTTANAD-01"],
+      "objection_filed": false
+    }
+  ]
+}

@@ -225,3 +225,74 @@ def test_api_evaluation_metrics():
     assert "median_time_reduction_pct" in metrics
     assert "sha256_checksum" in metrics
 
+
+def test_api_scaling_districts():
+    response = client.get("/api/v1/scaling/districts")
+    assert response.status_code == 200
+    districts = response.json()["data"]
+    assert len(districts) >= 3
+    district_ids = [d["district_id"] for d in districts]
+    assert "KL-WYD" in district_ids
+    assert "KL-IDU" in district_ids
+    assert "KL-ALP" in district_ids
+
+
+def test_api_scaling_statewide_dashboard():
+    response = client.get("/api/v1/scaling/statewide-dashboard")
+    assert response.status_code == 200
+    dash = response.json()["data"]
+    assert dash["state"] == "Kerala"
+    assert dash["total_districts_onboarded"] >= 3
+    assert dash["data_classification"] == "STATEWIDE_PUBLIC_AGGREGATE"
+    assert dash["total_eligible_households"] > 0
+
+
+def test_api_scaling_district_fixtures():
+    response = client.get("/api/v1/scaling/districts/KL-IDU/fixtures")
+    assert response.status_code == 200
+    fixtures = response.json()["data"]
+    assert fixtures["district_name"] == "Idukki"
+    assert fixtures["sample_site"]["village"] == "KDH Village (Munnar)"
+    assert fixtures["sample_household"]["head_of_household"] == "Murugan S"
+
+
+def test_api_adaptation_tenants():
+    response = client.get("/api/v1/adaptation/tenants")
+    assert response.status_code == 200
+    tenants = response.json()["data"]
+    state_codes = [t["state_code"] for t in tenants]
+    assert "KL" in state_codes
+    assert "UK" in state_codes
+
+
+def test_api_adaptation_dossier_header_leakage_checks():
+    # Kerala Header
+    res_kl = client.get("/api/v1/adaptation/dossier-header/KL?language=ml")
+    assert res_kl.status_code == 200
+    hdr_kl = res_kl.json()["data"]
+    assert "KSDMA" in hdr_kl["statutory_authority"]
+    assert "USDMA" not in hdr_kl["statutory_authority"]
+    assert "Devbhoomi" not in hdr_kl["land_tenure_system"]
+    assert hdr_kl["crs"] == "EPSG:32643"
+
+    # Uttarakhand Header
+    res_uk = client.get("/api/v1/adaptation/dossier-header/UK?language=hi")
+    assert res_uk.status_code == 200
+    hdr_uk = res_uk.json()["data"]
+    assert "USDMA" in hdr_uk["statutory_authority"]
+    assert "KSDMA" not in hdr_uk["statutory_authority"]
+    assert "e-Rekha" not in hdr_uk["land_tenure_system"]
+    assert hdr_uk["crs"] == "EPSG:32644"
+    assert "पुनर्वास" in hdr_uk["glossary"]["title"]
+
+
+def test_api_adaptation_state_fixtures():
+    response = client.get("/api/v1/adaptation/tenants/UK/fixtures")
+    assert response.status_code == 200
+    fixtures = response.json()["data"]
+    assert fixtures["state_code"] == "UK"
+    assert "subsidence" in fixtures["hazard_context"].lower()
+    assert fixtures["sample_site"]["district"] == "Chamoli"
+    assert fixtures["sample_household"]["head_of_household"] == "Ram Prasad Semwal"
+
+

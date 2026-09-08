@@ -29,25 +29,66 @@ def compute_file_checksum(file_path: Path) -> str:
     return sha256.hexdigest()
 
 
-def load_wayanad_fixture() -> Dict[str, Any]:
+def load_district_fixture(district_name: str) -> Dict[str, Any]:
     """
-    Load and return validated synthetic Wayanad fixture payload.
+    Load and return validated synthetic fixture payload for a specific Kerala district.
+    Supports 'wayanad', 'idukki', 'alappuzha' (C4-03).
     """
     fixtures_dir = get_fixtures_path()
-    fixture_file = fixtures_dir / "synthetic_wayanad.json"
+    slug = district_name.lower().strip()
+    fixture_file = fixtures_dir / f"synthetic_{slug}.json"
     if not fixture_file.exists():
-        raise FileNotFoundError(f"Fixture file not found: {fixture_file}")
+        raise FileNotFoundError(f"District fixture file not found: {fixture_file}")
 
     checksum = compute_file_checksum(fixture_file)
 
     with open(fixture_file, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # Attach checksum and provenance
     data["_metadata"] = {
         "checksum_sha256": checksum,
         "file_name": fixture_file.name,
+        "district": district_name,
         "is_synthetic": True,
         "status": "VALIDATED_TEST_FIXTURE",
     }
     return data
+
+
+def load_wayanad_fixture() -> Dict[str, Any]:
+    """Load and return validated synthetic Wayanad fixture payload."""
+    return load_district_fixture("wayanad")
+
+
+def load_idukki_fixture() -> Dict[str, Any]:
+    """Load and return validated synthetic Idukki fixture payload (C4-03)."""
+    return load_district_fixture("idukki")
+
+
+def load_alappuzha_fixture() -> Dict[str, Any]:
+    """Load and return validated synthetic Alappuzha fixture payload (C4-03)."""
+    return load_district_fixture("alappuzha")
+
+
+def load_uttarakhand_fixture() -> Dict[str, Any]:
+    """Load and return validated synthetic Uttarakhand reference pilot payload (C5-02)."""
+    fixtures_dir = get_fixtures_path()
+    fixture_file = fixtures_dir / "uttarakhand_fixture.json"
+    if not fixture_file.exists():
+        raise FileNotFoundError(f"Uttarakhand fixture file not found: {fixture_file}")
+
+    checksum = compute_file_checksum(fixture_file)
+    with open(fixture_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    data["_metadata"] = {
+        "checksum_sha256": checksum,
+        "file_name": fixture_file.name,
+        "state": "Uttarakhand",
+        "district": "Chamoli",
+        "is_synthetic": True,
+        "status": "VALIDATED_TEST_FIXTURE",
+    }
+    return data
+
+

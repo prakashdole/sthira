@@ -1,0 +1,153 @@
+{
+  "state_package": {
+    "state_id": "Uttarakhand",
+    "state_name": "Uttarakhand",
+    "state_code": "UK",
+    "primary_language": "hi",
+    "secondary_language": "en",
+    "sdma_name": "Uttarakhand State Disaster Management Authority (USDMA)",
+    "statutory_mandate": "Disaster Management Act, 2005 read with Uttarakhand State Disaster Management Rules",
+    "default_resettlement_scheme": "Uttarakhand Disaster Recovery & Resettlement Policy (Mukhya Mantri Punarvas Yojana)",
+    "local_body_type": "NAGAR_PALIKA_OR_PANCHAYAT"
+  },
+  "programme": {
+    "programme_id": "PRG-UK-CHAMOLI-2026",
+    "title": "Joshimath Land Subsidence Rehabilitation & Relocation Programme",
+    "state": "Uttarakhand",
+    "district": "Chamoli",
+    "lead_authority": "District Disaster Management Authority (DDMA), Chamoli",
+    "mandate_legal_basis": "Disaster Management Act 2005 §30 & Uttarakhand Disaster Management Rules",
+    "active_policy_version": "1.0",
+    "status": "ANALYTICAL"
+  },
+  "hazard_layers": [
+    {
+      "layer_id": "HZ-UK-JOSHIMATH-SUBSIDENCE",
+      "name": "Joshimath High Subsidence & Structural Distress Zone",
+      "source_id": "S03-USDMA-CBRI",
+      "hazard_level": "VERY_HIGH",
+      "debris_flow_channel": false,
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [79.555, 30.552],
+            [79.568, 30.558],
+            [79.575, 30.548],
+            [79.562, 30.542],
+            [79.555, 30.552]
+          ]
+        ]
+      }
+    },
+    {
+      "layer_id": "HZ-UK-DHAULIGANGA-GLOF",
+      "name": "Alaknanda-Dhauliganga Flash Flood & Glacial Runout Zone",
+      "source_id": "S01-GSI-NLSM",
+      "hazard_level": "VERY_HIGH",
+      "debris_flow_channel": true,
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [79.540, 30.530],
+            [79.552, 30.536],
+            [79.558, 30.525],
+            [79.546, 30.520],
+            [79.540, 30.530]
+          ]
+        ]
+      }
+    }
+  ],
+  "affected_parcels": [
+    {
+      "parcel_id": "PARCEL-UK-CHAM-SUNIL-01",
+      "ulpin": "UK-CHAM-JOSHI-0101",
+      "survey_number": "Khasra No. 412",
+      "village": "Sunil Ward",
+      "lsg_name": "Joshimath Nagar Palika",
+      "centroid": [79.560, 30.550],
+      "area_cents": 35.0,
+      "title_holder": "Bhupinder Singh Rawat",
+      "ground_state": "ACTIVE_SUBSIDENCE_CRACKED",
+      "discrepancies": ["PAPER_VACANT_GROUND_OCCUPIED"]
+    },
+    {
+      "parcel_id": "PARCEL-UK-CHAM-MBAGH-02",
+      "ulpin": "UK-CHAM-JOSHI-0102",
+      "survey_number": "Khasra No. 589",
+      "village": "Manohar Bagh Ward",
+      "lsg_name": "Joshimath Nagar Palika",
+      "centroid": [79.565, 30.545],
+      "area_cents": 50.0,
+      "title_holder": "Devi Prasad Semwal",
+      "ground_state": "CRACKED_EVACUATED",
+      "discrepancies": []
+    }
+  ],
+  "candidate_sites": [
+    {
+      "site_id": "SITE-UK-PIPALKOTI-01",
+      "name": "Pipalkoti Resettlement Enclave (Badrinath Highway)",
+      "village": "Pipalkoti",
+      "lsg_name": "Pipalkoti Nagar Panchayat",
+      "centroid": [79.432, 30.428],
+      "developable_cents": 1200.0,
+      "dwelling_capacity": 200,
+      "hazard_level": "LOW",
+      "in_debris_runout": false,
+      "title_clearance": "VERIFIED_CLEAR",
+      "forest_clearance_required": false,
+      "lean_season_lpcd": 70.0,
+      "has_dry_season_test": true,
+      "road_access_width_m": 7.0,
+      "distance_to_hospital_km": 3.0,
+      "distance_to_school_km": 1.5
+    },
+    {
+      "site_id": "SITE-UK-DHAK-02",
+      "name": "Dhak Village Slope Terrace",
+      "village": "Dhak",
+      "lsg_name": "Joshimath Rural",
+      "centroid": [79.610, 30.520],
+      "developable_cents": 350.0,
+      "dwelling_capacity": 40,
+      "hazard_level": "VERY_HIGH",
+      "in_debris_runout": true,
+      "title_clearance": "VERIFIED_CLEAR",
+      "forest_clearance_required": true,
+      "lean_season_lpcd": 30.0,
+      "has_dry_season_test": false,
+      "road_access_width_m": 3.0,
+      "distance_to_hospital_km": 12.0,
+      "distance_to_school_km": 6.0
+    }
+  ],
+  "synthetic_households": [
+    {
+      "household_id": "HH-UK-001",
+      "head_of_household": "Bhupinder Singh Rawat",
+      "member_count": 5,
+      "vulnerable_members": { "elderly": 2, "disabled": 0, "children": 1 },
+      "requires_ground_floor": true,
+      "source_parcel_id": "PARCEL-UK-CHAM-SUNIL-01",
+      "verified_eligibility": true,
+      "chosen_pathway": "TOWNSHIP",
+      "preferred_sites": ["SITE-UK-PIPALKOTI-01"],
+      "objection_filed": false
+    },
+    {
+      "household_id": "HH-UK-002",
+      "head_of_household": "Devi Prasad Semwal",
+      "member_count": 4,
+      "vulnerable_members": { "elderly": 1, "disabled": 1, "children": 0 },
+      "requires_ground_floor": true,
+      "source_parcel_id": "PARCEL-UK-CHAM-MBAGH-02",
+      "verified_eligibility": true,
+      "chosen_pathway": "SELF_RELOCATION_ASSISTANCE",
+      "preferred_sites": [],
+      "objection_filed": false
+    }
+  ]
+}

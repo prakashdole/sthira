@@ -1,0 +1,158 @@
+{
+  "programme": {
+    "programme_id": "PRG-KL-IDU-2024",
+    "title": "Idukki Highland Escarpment & Dam Buffer Resettlement Programme",
+    "state": "Kerala",
+    "district": "Idukki",
+    "target_settlements": ["Pettimudi", "Rajamala", "Santhanpara"],
+    "lead_authority": "District Disaster Management Authority (DDMA), Idukki",
+    "active_policy_version": "POL-IDU-2024.1",
+    "mandate_legal_basis": "Disaster Management Act 2005 read with Kerala State Disaster Management Plan"
+  },
+  "hazard_layers": [
+    {
+      "layer_id": "HAZ-IDU-GSI-SLOPE-2023",
+      "name": "Idukki High Range Steep Slope Instability Map",
+      "source_id": "S01",
+      "publisher": "Geological Survey of India / KSDMA",
+      "scale": "1:50,000",
+      "crs": "EPSG:4326",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.020, 10.120],
+            [77.060, 10.120],
+            [77.060, 10.160],
+            [77.020, 10.160],
+            [77.020, 10.120]
+          ]
+        ]
+      },
+      "hazard_level": "VERY_HIGH",
+      "debris_flow_channel": false,
+      "valid_from": "2023-01-01T00:00:00Z"
+    },
+    {
+      "layer_id": "HAZ-IDU-DAM-BUFFER-2023",
+      "name": "Idukki Reservoir Downstream Emergency Buffer Zone",
+      "source_id": "S02",
+      "publisher": "KSDMA / Kerala State Electricity Board (KSEB)",
+      "crs": "EPSG:4326",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.030, 10.130],
+            [77.050, 10.130],
+            [77.050, 10.150],
+            [77.030, 10.150],
+            [77.030, 10.130]
+          ]
+        ]
+      },
+      "hazard_level": "HIGH",
+      "valid_from": "2023-06-01T00:00:00Z"
+    }
+  ],
+  "affected_parcels": [
+    {
+      "parcel_id": "PARCEL-KL-IDU-MUN-001",
+      "ulpin": "KL120101001001",
+      "survey_number": "210/1A",
+      "village": "KDH Village (Munnar)",
+      "lsg_name": "Munnar Grama Panchayat",
+      "centroid": [77.035, 10.135],
+      "area_cents": 10.0,
+      "hazard_zone_ids": ["HAZ-IDU-GSI-SLOPE-2023"],
+      "ground_state": "DESTROYED_BY_SLOPE_COLLAPSE",
+      "title_holder": "Murugan S",
+      "household_id": "HH-IDU-001",
+      "relocation_necessary": true,
+      "discrepancies": []
+    },
+    {
+      "parcel_id": "PARCEL-KL-IDU-MUN-002",
+      "ulpin": "KL120101001002",
+      "survey_number": "210/2",
+      "village": "KDH Village (Munnar)",
+      "lsg_name": "Munnar Grama Panchayat",
+      "centroid": [77.040, 10.140],
+      "area_cents": 7.5,
+      "hazard_zone_ids": ["HAZ-IDU-GSI-SLOPE-2023", "HAZ-IDU-DAM-BUFFER-2023"],
+      "ground_state": "UNINHABITABLE_STEEP_CLIFF",
+      "title_holder": "Muthulakshmi P",
+      "household_id": "HH-IDU-002",
+      "relocation_necessary": true,
+      "discrepancies": []
+    }
+  ],
+  "candidate_sites": [
+    {
+      "site_id": "SITE-IDU-MUNNAR-01",
+      "name": "Ikka Nagar Plateau Extension",
+      "village": "KDH Village (Munnar)",
+      "lsg_name": "Munnar Grama Panchayat",
+      "centroid": [77.075, 10.090],
+      "usable_area_acres": 12.0,
+      "dwelling_capacity": 100,
+      "unit_plot_cents": 6.0,
+      "hazard_susceptibility_level": "MODERATE",
+      "in_debris_flow_runout": false,
+      "slope_degrees": 8.5,
+      "title_clearance_status": "VERIFIED_CLEAR",
+      "road_access_width_m": 4.5,
+      "lean_season_water_state": "PASS",
+      "tested_water_lpcd": 60.0,
+      "livelihood_distance_km": 2.2,
+      "land_acquisition_cost_inr": 24000000.0,
+      "infrastructure_cost_inr": 18000000.0,
+      "statutory_clearance_status": "APPROVED",
+      "status": "APPROVED_FOR_ALLOCATION"
+    }
+  ],
+  "synthetic_households": [
+    {
+      "household_id": "HH-IDU-001",
+      "head_of_household": "Murugan S",
+      "member_count": 4,
+      "vulnerable_members": {
+        "elderly": 1,
+        "disabled": 0,
+        "children": 1
+      },
+      "requires_ground_floor": false,
+      "source_parcel_id": "PARCEL-KL-IDU-MUN-001",
+      "verified_eligibility": true,
+      "consent_status": {
+        "PROGRAMME_PARTICIPATION": "CONSENTED",
+        "PATHWAY_CHOICE": "CONSENTED",
+        "SITE_PREFERENCE": "CONSENTED"
+      },
+      "chosen_pathway": "TOWNSHIP",
+      "preferred_sites": ["SITE-IDU-MUNNAR-01"],
+      "objection_filed": false
+    },
+    {
+      "household_id": "HH-IDU-002",
+      "head_of_household": "Muthulakshmi P",
+      "member_count": 3,
+      "vulnerable_members": {
+        "elderly": 1,
+        "disabled": 1,
+        "children": 0
+      },
+      "requires_ground_floor": true,
+      "source_parcel_id": "PARCEL-KL-IDU-MUN-002",
+      "verified_eligibility": true,
+      "consent_status": {
+        "PROGRAMME_PARTICIPATION": "CONSENTED",
+        "PATHWAY_CHOICE": "CONSENTED",
+        "SITE_PREFERENCE": "NOT_APPLICABLE"
+      },
+      "chosen_pathway": "SELF_RELOCATION_ASSISTANCE",
+      "preferred_sites": [],
+      "objection_filed": false
+    }
+  ]
+}

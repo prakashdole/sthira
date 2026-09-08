@@ -112,6 +112,29 @@ class AuditLedger:
         self._entries.append(entry)
         return entry
 
+    def append_event(
+        self,
+        action: str,
+        actor_id: str,
+        resource_type: str,
+        resource_id: str,
+        payload: Optional[dict] = None,
+        authority_scope: str = "GLOBAL",
+        version_id: str = "1.0",
+        reason: Optional[str] = None,
+    ) -> AuditEntry:
+        """Compatibility helper mapping append_event calls to log."""
+        reason_str = reason or (json.dumps(payload, sort_keys=True) if payload else "")
+        return self.log(
+            actor_id=actor_id,
+            authority_scope=authority_scope,
+            action=action,
+            entity_type=resource_type,
+            entity_id=resource_id,
+            version_id=version_id,
+            reason=reason_str,
+        )
+
     def verify_integrity(self) -> bool:
         """
         Cryptographically verify the entire chain from genesis to head.

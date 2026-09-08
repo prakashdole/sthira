@@ -1,0 +1,142 @@
+{
+  "programme": {
+    "programme_id": "PRG-IDUKKI-2026-01",
+    "title": "Idukki High-Range Landslide Relocation & Resettlement Programme",
+    "state": "Kerala",
+    "district": "Idukki",
+    "lead_authority": "District Disaster Management Authority (DDMA), Idukki",
+    "mandate_legal_basis": "Disaster Management Act 2005 §30 & G.O. (Ms) No. 6/2018/DMD",
+    "active_policy_version": "1.0",
+    "status": "ANALYTICAL"
+  },
+  "hazard_layers": [
+    {
+      "layer_id": "HZ-IDUKKI-PETTIMUDI-01",
+      "name": "Pettimudi Debris Flow Corridor & Runout Buffer",
+      "source_id": "S01-GSI-NLSM",
+      "hazard_level": "VERY_HIGH",
+      "debris_flow_channel": true,
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.012, 10.185],
+            [77.018, 10.188],
+            [77.022, 10.179],
+            [77.015, 10.175],
+            [77.012, 10.185]
+          ]
+        ]
+      }
+    },
+    {
+      "layer_id": "HZ-IDUKKI-MUNNAR-FLOOD",
+      "name": "Muthirapuzha River Flash Flood Inundation Zone",
+      "source_id": "S05-KSDMA-FLOOD",
+      "hazard_level": "HIGH",
+      "debris_flow_channel": false,
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.050, 10.080],
+            [77.058, 10.084],
+            [77.062, 10.076],
+            [77.054, 10.072],
+            [77.050, 10.080]
+          ]
+        ]
+      }
+    }
+  ],
+  "affected_parcels": [
+    {
+      "parcel_id": "PARCEL-IDK-DEV-001",
+      "ulpin": "KL-IDK-DEV-8821",
+      "survey_number": "142/2-P",
+      "village": "KDH Village",
+      "lsg_name": "Munnar",
+      "centroid": [77.015, 10.180],
+      "area_cents": 120.0,
+      "title_holder": "Kanan Devan Hills Plantations (KDHP) Leasehold",
+      "ground_state": "OCCUPIED_LINE_HOUSES",
+      "discrepancies": ["PAPER_VACANT_GROUND_OCCUPIED", "UNRESOLVED_FRA_CLAIM"]
+    },
+    {
+      "parcel_id": "PARCEL-IDK-DEV-002",
+      "ulpin": "KL-IDK-DEV-8822",
+      "survey_number": "156/1",
+      "village": "Pallivasal",
+      "lsg_name": "Pallivasal",
+      "centroid": [77.035, 10.055],
+      "area_cents": 45.0,
+      "title_holder": "Revenue Poramboke",
+      "ground_state": "PAPER_VACANT_GROUND_OCCUPIED",
+      "discrepancies": ["PAPER_VACANT_GROUND_OCCUPIED", "CADASTRAL_GRID_SHIFT"]
+    }
+  ],
+  "candidate_sites": [
+    {
+      "site_id": "SITE-IDUKKI-KUTTIYAR-01",
+      "name": "Kuttiyar Valley Resettlement Enclave (Devikulam)",
+      "village": "Devikulam",
+      "lsg_name": "Devikulam",
+      "centroid": [77.095, 10.065],
+      "developable_cents": 850.0,
+      "dwelling_capacity": 120,
+      "hazard_level": "LOW",
+      "in_debris_runout": false,
+      "title_clearance": "VERIFIED_CLEAR",
+      "forest_clearance_required": false,
+      "lean_season_lpcd": 60.0,
+      "has_dry_season_test": true,
+      "road_access_width_m": 4.5,
+      "distance_to_hospital_km": 4.8,
+      "distance_to_school_km": 2.1
+    },
+    {
+      "site_id": "SITE-IDUKKI-CHINNAKANAL-02",
+      "name": "Chinnakanal Elephant Corridor Ridge",
+      "village": "Chinnakanal",
+      "lsg_name": "Chinnakanal",
+      "centroid": [77.140, 10.020],
+      "developable_cents": 400.0,
+      "dwelling_capacity": 50,
+      "hazard_level": "VERY_HIGH",
+      "in_debris_runout": true,
+      "title_clearance": "LITIGATION",
+      "forest_clearance_required": true,
+      "lean_season_lpcd": 25.0,
+      "has_dry_season_test": false,
+      "road_access_width_m": 2.5,
+      "distance_to_hospital_km": 18.0,
+      "distance_to_school_km": 9.5
+    }
+  ],
+  "synthetic_households": [
+    {
+      "household_id": "HH-IDK-001",
+      "head_of_household": "Ganeshan M.",
+      "member_count": 4,
+      "vulnerable_members": { "elderly": 1, "disabled": 1, "children": 1 },
+      "requires_ground_floor": true,
+      "source_parcel_id": "PARCEL-IDK-DEV-001",
+      "verified_eligibility": true,
+      "chosen_pathway": "TOWNSHIP",
+      "preferred_sites": ["SITE-IDUKKI-KUTTIYAR-01"],
+      "objection_filed": false
+    },
+    {
+      "household_id": "HH-IDK-002",
+      "head_of_household": "Mariyamma K.",
+      "member_count": 3,
+      "vulnerable_members": { "elderly": 1, "disabled": 0, "children": 0 },
+      "requires_ground_floor": false,
+      "source_parcel_id": "PARCEL-IDK-DEV-001",
+      "verified_eligibility": true,
+      "chosen_pathway": "SELF_RELOCATION_ASSISTANCE",
+      "preferred_sites": [],
+      "objection_filed": false
+    }
+  ]
+}

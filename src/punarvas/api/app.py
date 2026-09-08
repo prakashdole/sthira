@@ -53,8 +53,58 @@ from punarvas.modules.evaluation import (
     evaluation_harness_service,
     CaseShadowEvaluation,
 )
-from punarvas.core.errors import ReservationConflictError
+from punarvas.modules.scaling import (
+    DistrictProfile,
+    district_onboarding_service,
+    statewide_oversight_service,
+)
+from punarvas.modules.adaptation import (
+    StateTenantPackage,
+    multi_state_adapter_service,
+)
+from punarvas.modules.governance.national_clearinghouse import (
+    InterStateRelocationRequest,
+    NationalRegistryManifest,
+    national_clearinghouse_service,
+)
+from punarvas.core.localization import (
+    LOCALIZATION_REGISTRY,
+    get_supported_languages,
+    translate_text,
+)
+from punarvas.modules.live_ops import (
+    StepUpToken,
+    BreakGlassSession,
+    RestoreVerificationResult,
+    ManualDecisionRecord,
+    RollbackRecord,
+    step_up_auth_manager,
+    break_glass_manager,
+    disaster_recovery_harness,
+    degraded_mode_controller,
+    manual_continuity_reconciler,
+    rollback_controller,
+)
+from punarvas.modules.reconstruction import (
+    CompletionMilestoneType,
+    MilestoneRecord,
+    CaseCompletionSummary,
+    DecisionReconstructionReport,
+    DisclosureReviewResult,
+    delivery_completion_tracker,
+    decision_reconstruction_engine,
+    disclosure_review_engine,
+)
+from punarvas.modules.district_scale import (
+    DistrictPolicyOverride,
+    district_onboarding_engine,
+    policy_inheritance_engine,
+    multi_district_isolation_manager,
+    scale_quota_limiter,
+)
+from punarvas.core.errors import ReservationConflictError, UnauthorizedGeographyAccessError
 from punarvas.spikes import load_wayanad_fixture
+
 
 from contextlib import asynccontextmanager
 
@@ -452,4 +502,466 @@ def get_lsgd_dm_plan_annex(lsg_name: str = "Meppadi Grama Panchayat"):
 def get_evaluation_metrics():
     metrics = evaluation_harness_service.calculate_metrics(actor_id="eval_api_caller")
     return APIResponseEnvelope(data=metrics.model_dump())
+
+
+# --- Phase 7 (PH-4): Kerala Multi-District Scaling Endpoints ---
+@app.get("/api/v1/scaling/districts", response_model=APIResponseEnvelope)
+def list_districts():
+    districts = district_onboarding_service.list_districts()
+    return APIResponseEnvelope(data=[d.model_dump() for d in districts])
+
+
+@app.get("/api/v1/scaling/districts/{district_id}", response_model=APIResponseEnvelope)
+def get_district(district_id: str):
+    p = district_onboarding_service.get_district(district_id)
+    if not p:
+        raise HTTPException(status_code=404, detail=f"District {district_id} not found")
+    return APIResponseEnvelope(data=p.model_dump())
+
+
+@app.post("/api/v1/scaling/districts", response_model=APIResponseEnvelope)
+def onboard_district(profile: DistrictProfile):
+    res = district_onboarding_service.onboard_district(profile, actor_id="api_admin")
+    return APIResponseEnvelope(data=res.model_dump())
+
+
+@app.get("/api/v1/scaling/statewide-dashboard", response_model=APIResponseEnvelope)
+def get_statewide_dashboard():
+    dash = statewide_oversight_service.get_statewide_dashboard()
+    return APIResponseEnvelope(data=dash.model_dump())
+
+
+@app.get("/api/v1/scaling/districts/{district_id}/fixtures", response_model=APIResponseEnvelope)
+def get_district_fixtures(district_id: str):
+    try:
+        fixtures = statewide_oversight_service.get_district_fixture_pack(district_id)
+        return APIResponseEnvelope(data=fixtures)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# --- Phase 8 (PH-5): Multi-State Adaptation & Tenant Isolation Endpoints ---
+@app.get("/api/v1/adaptation/tenants", response_model=APIResponseEnvelope)
+def list_state_tenants():
+    tenants = multi_state_adapter_service.list_tenants()
+    return APIResponseEnvelope(data=[t.model_dump() for t in tenants])
+
+
+@app.get("/api/v1/adaptation/tenants/{state_code}", response_model=APIResponseEnvelope)
+def get_state_tenant(state_code: str):
+    t = multi_state_adapter_service.get_tenant(state_code)
+    if not t:
+        raise HTTPException(status_code=404, detail=f"Tenant for state {state_code} not found")
+    return APIResponseEnvelope(data=t.model_dump())
+
+
+@app.post("/api/v1/adaptation/tenants", response_model=APIResponseEnvelope)
+def onboard_state_tenant(pkg: StateTenantPackage):
+    res = multi_state_adapter_service.onboard_tenant(pkg, actor_id="api_admin")
+    return APIResponseEnvelope(data=res.model_dump())
+
+
+@app.get("/api/v1/adaptation/dossier-header/{state_code}", response_model=APIResponseEnvelope)
+def get_state_dossier_header(state_code: str, case_id: str = "CASE-DEMO-001", language: Optional[str] = None):
+    try:
+        hdr = multi_state_adapter_service.generate_state_dossier_header(
+            state_code=state_code,
+            case_id=case_id,
+            language=language,
+            actor_id="api_dossier_generator",
+        )
+        return APIResponseEnvelope(data=hdr)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/adaptation/tenants/{state_code}/fixtures", response_model=APIResponseEnvelope)
+def get_state_fixtures(state_code: str):
+    fixtures = multi_state_adapter_service.get_state_fixture_pack(state_code)
+    if not fixtures:
+        raise HTTPException(status_code=404, detail=f"No fixtures found for state {state_code}")
+    return APIResponseEnvelope(data=fixtures)
+
+
+# --- Phase 3 (PH-3): Controlled Live Wayanad Operations & Recovery Endpoints ---
+
+class StepUpRequest(BaseModel):
+    user_id: str
+    action: str
+    valid_seconds: int = 300
+
+
+@app.post("/api/v1/auth/step-up", response_model=APIResponseEnvelope)
+def issue_step_up_token(req: StepUpRequest):
+    user = UserContext(
+        user_id=req.user_id,
+        username=f"user_{req.user_id}",
+        roles=[RoleType.GOVERNMENT_APPROVER],
+    )
+    try:
+        tok = step_up_auth_manager.issue_step_up_token(user, req.action, req.valid_seconds)
+        return APIResponseEnvelope(data=tok.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class BreakGlassRequest(BaseModel):
+    user_id: str
+    reason: str
+    justification_category: str
+    approving_authority: str
+    duration_minutes: int = 60
+
+
+@app.post("/api/v1/auth/break-glass", response_model=APIResponseEnvelope)
+def request_break_glass(req: BreakGlassRequest):
+    try:
+        session = break_glass_manager.request_break_glass(
+            user_id=req.user_id,
+            reason=req.reason,
+            justification_category=req.justification_category,
+            approving_authority=req.approving_authority,
+            duration_minutes=req.duration_minutes,
+        )
+        return APIResponseEnvelope(data=session.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class RevokeBreakGlassRequest(BaseModel):
+    actor_id: str
+    reason: str
+
+
+@app.post("/api/v1/auth/break-glass/{session_id}/revoke", response_model=APIResponseEnvelope)
+def revoke_break_glass(session_id: str, req: RevokeBreakGlassRequest):
+    try:
+        session = break_glass_manager.revoke_break_glass(session_id, req.actor_id, req.reason)
+        return APIResponseEnvelope(data=session.model_dump())
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+class RestoreVerificationRequest(BaseModel):
+    db_snapshot_hash: str
+    actual_db_hash: str
+    object_inventory: Dict[str, str]
+    actual_objects: Dict[str, str]
+    audit_checkpoint_valid: bool
+
+
+@app.post("/api/v1/recovery/verify-restore", response_model=APIResponseEnvelope)
+def verify_restore_consistency(req: RestoreVerificationRequest):
+    result = disaster_recovery_harness.verify_restore_consistency(
+        db_snapshot_hash=req.db_snapshot_hash,
+        actual_db_hash=req.actual_db_hash,
+        object_inventory=req.object_inventory,
+        actual_objects=req.actual_objects,
+        audit_checkpoint_valid=req.audit_checkpoint_valid,
+    )
+    return APIResponseEnvelope(data=result.model_dump())
+
+
+class DegradedModeToggleRequest(BaseModel):
+    engage: bool
+    reason: Optional[str] = None
+    actor_id: str = "system_operator"
+
+
+@app.get("/api/v1/recovery/degraded-mode", response_model=APIResponseEnvelope)
+def get_degraded_mode_status():
+    return APIResponseEnvelope(
+        data={
+            "is_degraded": degraded_mode_controller.is_degraded,
+            "reason": degraded_mode_controller._degraded_reason,
+        }
+    )
+
+
+@app.post("/api/v1/recovery/degraded-mode", response_model=APIResponseEnvelope)
+def set_degraded_mode(req: DegradedModeToggleRequest):
+    if req.engage:
+        degraded_mode_controller.engage_degraded_mode(
+            reason=req.reason or "Administrative circuit breaker engaged",
+            actor_id=req.actor_id,
+        )
+    else:
+        degraded_mode_controller.disengage_degraded_mode(actor_id=req.actor_id)
+    return APIResponseEnvelope(
+        data={
+            "is_degraded": degraded_mode_controller.is_degraded,
+            "reason": degraded_mode_controller._degraded_reason,
+        }
+    )
+
+
+class ManualContinuityRequest(BaseModel):
+    manual_decision_id: str
+    case_id: str
+    jurisdiction_id: str
+    approving_authority: str
+    statutory_basis: str
+    decision_summary: str
+    paper_notice_reference: str
+    signed_offline_time: str
+    actor_id: str
+
+
+@app.post("/api/v1/live/manual-continuity", response_model=APIResponseEnvelope)
+def reconcile_manual_decision(req: ManualContinuityRequest):
+    from datetime import datetime
+    try:
+        dt = datetime.fromisoformat(req.signed_offline_time)
+    except Exception:
+        from datetime import timezone
+        dt = datetime.now(timezone.utc)
+    rec = manual_continuity_reconciler.reconcile_manual_decision(
+        manual_decision_id=req.manual_decision_id,
+        case_id=req.case_id,
+        jurisdiction_id=req.jurisdiction_id,
+        approving_authority=req.approving_authority,
+        statutory_basis=req.statutory_basis,
+        decision_summary=req.decision_summary,
+        paper_notice_reference=req.paper_notice_reference,
+        signed_offline_time=dt,
+        actor_id=req.actor_id,
+    )
+    return APIResponseEnvelope(data=rec.model_dump())
+
+
+class RollbackRequest(BaseModel):
+    programme_id: str
+    authority_order_ref: str
+    reason: str
+    actor_id: str
+    active_projections_count: int = 0
+
+
+@app.post("/api/v1/live/rollback", response_model=APIResponseEnvelope)
+def initiate_live_rollback(req: RollbackRequest):
+    rec = rollback_controller.initiate_rollback(
+        programme_id=req.programme_id,
+        authority_order_ref=req.authority_order_ref,
+        reason=req.reason,
+        actor_id=req.actor_id,
+        active_projections_count=req.active_projections_count,
+    )
+    return APIResponseEnvelope(data=rec.model_dump())
+
+
+class DecisionReconstructionRequest(BaseModel):
+    decision_id: str
+    case_id: str
+    authority_state: str
+    approving_authority: str
+    statutory_basis: str
+    effective_valid_time: str
+    inputs: List[Dict[str, Any]]
+
+
+@app.post("/api/v1/live/reconstruct-decision", response_model=APIResponseEnvelope)
+def reconstruct_decision_dag(req: DecisionReconstructionRequest):
+    report = decision_reconstruction_engine.reconstruct_decision(
+        decision_id=req.decision_id,
+        case_id=req.case_id,
+        authority_state=req.authority_state,
+        approving_authority=req.approving_authority,
+        statutory_basis=req.statutory_basis,
+        effective_valid_time=req.effective_valid_time,
+        inputs=req.inputs,
+    )
+    return APIResponseEnvelope(data=report.model_dump())
+
+
+class DisclosureReviewRequest(BaseModel):
+    records: List[Dict[str, Any]]
+    prior_published_records: Optional[List[Dict[str, Any]]] = None
+    min_k_threshold: int = 5
+
+
+@app.post("/api/v1/live/disclosure-review", response_model=APIResponseEnvelope)
+def review_public_disclosure(req: DisclosureReviewRequest):
+    res = disclosure_review_engine.review_and_generalize_public_projection(
+        records=req.records,
+        prior_published_records=req.prior_published_records,
+        min_k_threshold=req.min_k_threshold,
+    )
+    return APIResponseEnvelope(data=res.model_dump())
+
+
+class MilestoneRecordRequest(BaseModel):
+    milestone_type: CompletionMilestoneType
+    verified_by: str
+    evidence_doc_ref: str
+    notes: Optional[str] = None
+    unresolved_defects: int = 0
+    external_system_id: Optional[str] = None
+    actor_id: str = "delivery_officer"
+
+
+@app.post("/api/v1/live/completion-milestones/{case_id}", response_model=APIResponseEnvelope)
+def record_completion_milestone(case_id: str, req: MilestoneRecordRequest):
+    try:
+        rec = delivery_completion_tracker.record_milestone(
+            case_id=case_id,
+            milestone_type=req.milestone_type,
+            verified_by=req.verified_by,
+            evidence_doc_ref=req.evidence_doc_ref,
+            notes=req.notes,
+            unresolved_defects=req.unresolved_defects,
+            external_system_id=req.external_system_id,
+            actor_id=req.actor_id,
+        )
+        return APIResponseEnvelope(data=rec.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/live/completion-milestones/{case_id}", response_model=APIResponseEnvelope)
+def get_completion_summary(case_id: str):
+    summary = delivery_completion_tracker.get_completion_summary(case_id)
+    return APIResponseEnvelope(data=summary.model_dump())
+
+
+# --- Extended Phase 4: Policy Inheritance, Isolation & Scale Limiting ---
+
+@app.get("/api/v1/districts/{district_id}/policy", response_model=APIResponseEnvelope)
+def get_district_policy(district_id: str):
+    overrides = policy_inheritance_engine.get_district_overrides(district_id)
+    return APIResponseEnvelope(
+        data={
+            "district_id": district_id,
+            "state_baselines": policy_inheritance_engine.STATE_BASELINES,
+            "overrides": [o.model_dump() for o in overrides],
+        }
+    )
+
+
+@app.post("/api/v1/districts/{district_id}/policy/override", response_model=APIResponseEnvelope)
+def register_policy_override(district_id: str, override: DistrictPolicyOverride):
+    res = policy_inheritance_engine.register_override(override, actor_id="policy_admin")
+    return APIResponseEnvelope(data=res.model_dump())
+
+
+class IsolationCheckRequest(BaseModel):
+    user_id: str
+    username: str
+    roles: List[RoleType]
+    district_scope: Optional[str]
+    target_district_id: str
+    action: str = "READ"
+
+
+@app.post("/api/v1/scaling/district-isolation-check", response_model=APIResponseEnvelope)
+def check_district_isolation(req: IsolationCheckRequest):
+    from punarvas.core.contracts import GeographyScope
+    user = UserContext(
+        user_id=req.user_id,
+        username=req.username,
+        roles=req.roles,
+        geography_scope=GeographyScope(state="Kerala", district=req.district_scope),
+    )
+    try:
+        multi_district_isolation_manager.assert_user_can_access_district(
+            user=user,
+            target_district_id=req.target_district_id,
+            action=req.action,
+        )
+        return APIResponseEnvelope(
+            data={"allowed": True, "user_id": req.user_id, "target_district": req.target_district_id}
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+
+@app.post("/api/v1/districts/{district_id}/acquire-slot", response_model=APIResponseEnvelope)
+def acquire_job_slot(district_id: str):
+    ok = scale_quota_limiter.acquire_job_slot(district_id)
+    return APIResponseEnvelope(
+        data={
+            "district_id": district_id,
+            "acquired": ok,
+            "active_jobs": scale_quota_limiter.get_active_job_count(district_id),
+        }
+    )
+
+
+@app.post("/api/v1/districts/{district_id}/release-slot", response_model=APIResponseEnvelope)
+def release_job_slot(district_id: str):
+    scale_quota_limiter.release_job_slot(district_id)
+    return APIResponseEnvelope(
+        data={
+            "district_id": district_id,
+            "released": True,
+            "active_jobs": scale_quota_limiter.get_active_job_count(district_id),
+        }
+    )
+
+
+# --- Phase 6: Trilingual Localization & National NDMA Federation Endpoints ---
+
+@app.get("/api/v1/localization/languages", response_model=APIResponseEnvelope)
+def list_supported_languages():
+    langs = get_supported_languages()
+    return APIResponseEnvelope(data={"supported_languages": langs})
+
+
+@app.get("/api/v1/localization/{lang}", response_model=APIResponseEnvelope)
+def get_localized_dictionary(lang: str):
+    if lang not in LOCALIZATION_REGISTRY:
+        raise HTTPException(status_code=404, detail=f"Language '{lang}' not supported. Supported: {get_supported_languages()}")
+    return APIResponseEnvelope(data=LOCALIZATION_REGISTRY[lang])
+
+
+@app.get("/api/v1/national/clearinghouse/corridors", response_model=APIResponseEnvelope)
+def list_interstate_hazard_corridors():
+    corridors = national_clearinghouse_service.list_corridors()
+    return APIResponseEnvelope(data=[c.model_dump() for c in corridors])
+
+
+@app.post("/api/v1/national/clearinghouse/requests", response_model=APIResponseEnvelope)
+def submit_interstate_request(req: InterStateRelocationRequest):
+    user = UserContext(
+        user_id="sdma_state_approver",
+        username="sdma_state_secretary",
+        roles=[RoleType.GOVERNMENT_APPROVER],
+        geography_scope=GeographyScope(state=req.origin_state, district="*"),
+    )
+    res = national_clearinghouse_service.submit_interstate_request(
+        req=req,
+        user=user,
+        reason=f"Inter-state relocation assistance requested for {req.disaster_event}",
+    )
+    return APIResponseEnvelope(data=res.model_dump())
+
+
+@app.get("/api/v1/national/clearinghouse/requests", response_model=APIResponseEnvelope)
+def list_interstate_requests(state: Optional[str] = None):
+    requests = national_clearinghouse_service.list_requests(state=state)
+    return APIResponseEnvelope(data=[r.model_dump() for r in requests])
+
+
+@app.post("/api/v1/national/clearinghouse/manifests", response_model=APIResponseEnvelope)
+def federate_state_manifest(manifest: NationalRegistryManifest):
+    user = UserContext(
+        user_id="state_registry_daemon",
+        username="state_federation_service",
+        roles=[RoleType.GOVERNMENT_APPROVER],
+        geography_scope=GeographyScope(state=manifest.state, district=manifest.district),
+    )
+    res = national_clearinghouse_service.federate_state_manifest(
+        manifest=manifest,
+        user=user,
+        reason=f"Federated state relocation registry for {manifest.state}/{manifest.district}",
+    )
+    return APIResponseEnvelope(data=res.model_dump())
+
+
+@app.get("/api/v1/national/clearinghouse/manifests", response_model=APIResponseEnvelope)
+def list_federated_manifests(state: Optional[str] = None):
+    manifests = national_clearinghouse_service.list_manifests(state=state)
+    return APIResponseEnvelope(data=[m.model_dump() for m in manifests])
+
+
+
 
