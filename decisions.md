@@ -56,6 +56,8 @@ A material change must add or supersede a decision rather than rewrite the old r
 | DEC-033 | Phase 0 research findings and closure of baseline operational decisions | ACCEPTED |
 | DEC-034 | PKG-0C shared domain contracts and Ponytail modular architecture | ACCEPTED |
 | DEC-035 | Phase 2 Wayanad Shadow Pilot, Evaluation Protocols, and Rehearsal Architecture | ACCEPTED |
+| DEC-036 | Kerala Multi-District Scaling, Policy Inheritance, and Row-Level Isolation | ACCEPTED |
+| DEC-037 | Multi-State Tenant Adaptation and Cross-State Leakage Prevention | ACCEPTED |
 
 ### 2.1 Approval provenance
 
@@ -436,6 +438,36 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Consequences:** Prepares system for controlled live deployment (Phase 3) while keeping production boundary protected.
 - **Evidence:** `phases.md` §5 & §12.5, `rules.md` RUL-001–083, `trd.md` FR-042–075, Disaster Management Act 2005 §31/§65, Kerala G.O. (Ms) 6/2018/DMD.
 - **Review trigger:** Formal evaluation board review at Phase 2 exit gate before Phase 3 authorization.
+
+### DEC-036 — Kerala Multi-District Scaling, Policy Inheritance, and Row-Level Isolation (PH-4)
+
+- **Status:** ACCEPTED.
+- **Context:** `phases.md` §7 & §12.7 mandate scaling across Kerala districts (e.g., Idukki, Alappuzha, Malappuram) through repeatable configuration rather than shared unrestricted access. Cross-district data or policy assumptions (e.g. Wayanad debris flow parameters applied to Alappuzha coastal backwaters) must never leak.
+- **Decision:**
+  1. Implement `DistrictProfile` and `DistrictOnboardingService` providing dynamic configuration for each district's unique hazard profile, authority names, local road/water standards, and active schemes.
+  2. Implement policy inheritance with strict local override rules: State base policy defines mandatory governance gates, while district-specific hazard thresholds (e.g. steep mountain tea slopes vs coastal inundation) override baseline without polluting sibling districts.
+  3. Enforce strict row-level and geography isolation (RUL-054): DDMA officers in District A cannot query or modify casework in District B.
+  4. Provide state-level oversight (`KSDMA`) through de-identified, privacy-safe aggregates only (RUL-052).
+- **Why:** Prevents dangerous geographic policy misapplication and maintains constitutional and statutory district autonomy under the Disaster Management Act 2005.
+- **Rejected:** Hardcoding Wayanad parameters as statewide defaults; unrestricted multi-district user access; raw database sharing between DDMAs.
+- **Consequences:** Each district requires an onboarding manifest and independent validation pack.
+- **Evidence:** `phases.md` §7, `rules.md` RUL-017, RUL-018, RUL-054, Disaster Management Act 2005 §30/§31.
+- **Review trigger:** Onboarding of new Kerala districts or changes in state disaster management policy.
+
+### DEC-037 — Multi-State Tenant Adaptation and Cross-State Leakage Prevention (PH-5)
+
+- **Status:** ACCEPTED.
+- **Context:** `phases.md` §8 & §12.8 mandate platform reusability across Indian states (pilot reference: Uttarakhand) while keeping state-specific legal frameworks, land tenure terminology, languages, and authority explicit.
+- **Decision:**
+  1. Implement `StateTenantPackage` and `MultiStateAdapter` architecture decoupling the core decision engine from state-specific implementations.
+  2. For Uttarakhand reference adaptation: bind to USDMA / DDMA Chamoli, Devbhoomi Bhulekh land tenure (Khasra/Khatauni vs Kerala Thandaper), GLOF/cloudburst hazard classifications, and Hindi language localization.
+  3. Enforce cryptographic tenant isolation: Zero leakage of Kerala G.O.s (such as VLRS ₹10L or Meppadi township terms) or Malayalam language strings into Uttarakhand dossiers, and vice-versa.
+  4. Ensure coordinate reference systems (CRS) decouple cleanly per state (e.g., UTM Zone 44N EPSG:32644 for Uttarakhand vs UTM Zone 43N EPSG:32643 for Kerala).
+- **Why:** Preserves the sovereign federal structure of Indian disaster management law and prevents jurisdictional invalidity.
+- **Rejected:** Treating Kerala land revenue rules as national standards; mono-lingual English/Malayalam lock-in; shared multi-tenant database without strict tenant boundaries.
+- **Consequences:** New state onboarding requires dedicated localization and land tenure adapter packages.
+- **Evidence:** `phases.md` §8 & §12.8, Disaster Management Act 2005 §14/§22, National Disaster Management Plan (NDMP), MeitY GIGW 3.0.
+- **Review trigger:** Notification of new State Disaster Management Rules or expansion to a third state.
 
 ## 4. Explicit research corrections adopted
 
