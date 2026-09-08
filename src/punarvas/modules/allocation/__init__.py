@@ -1,5 +1,5 @@
 """
-Allocation and feasibility validator package.
+Allocation and multi-resource capacity reservation package.
 """
 from punarvas.modules.allocation.service import (
     AllocationAssignment,
@@ -7,9 +7,16 @@ from punarvas.modules.allocation.service import (
     AllocationValidator,
     AllocationService,
     allocation_service,
-    CapacityReservation,
+    CapacityReservation as LegacyCapacityReservation,
     CapacityReservationLedger,
     capacity_reservation_ledger,
+)
+from punarvas.modules.allocation.reservation_ledger import (
+    ReservationStatus,
+    SiteCapacityConfig,
+    CapacityReservation,
+    MultiResourceReservationLedger,
+    capacity_ledger,
 )
 
 __all__ = [
@@ -18,8 +25,12 @@ __all__ = [
     "AllocationValidator",
     "AllocationService",
     "allocation_service",
-    "CapacityReservation",
+    "LegacyCapacityReservation",
     "CapacityReservationLedger",
     "capacity_reservation_ledger",
+    "ReservationStatus",
+    "SiteCapacityConfig",
+    "CapacityReservation",
+    "MultiResourceReservationLedger",
+    "capacity_ledger",
 ]
-

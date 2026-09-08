@@ -1,5 +1,5 @@
 """
-Governance, objections and schemes package.
+Governance, objections, appeals, approvals and statutory notification package.
 """
 from punarvas.modules.governance.service import (
     ObjectionRecord,
@@ -9,6 +9,26 @@ from punarvas.modules.governance.service import (
     GovernanceService,
     governance_service,
 )
+from punarvas.modules.governance.objections_service import (
+    ObjectionCategory,
+    ObjectionAdmissibility,
+    ObjectionFilingChannel,
+    HearingNotice,
+    ObjectionDecisionOrder,
+    ObjectionCase,
+    SLAEscalationRecommendation,
+    ObjectionsAppealsService,
+    objections_appeals_service,
+    objections_service,
+)
+from punarvas.modules.governance.approval_service import (
+    ApprovalConditionType,
+    ApprovalCondition,
+    OfficialApprovalRecord,
+    StatutoryNotificationRecord,
+    ApprovalService,
+    approval_service,
+)
 
 __all__ = [
     "ObjectionRecord",
@@ -17,5 +37,20 @@ __all__ = [
     "SchemeAssessmentResult",
     "GovernanceService",
     "governance_service",
+    "ObjectionCategory",
+    "ObjectionAdmissibility",
+    "ObjectionFilingChannel",
+    "HearingNotice",
+    "ObjectionDecisionOrder",
+    "ObjectionCase",
+    "SLAEscalationRecommendation",
+    "ObjectionsAppealsService",
+    "objections_appeals_service",
+    "objections_service",
+    "ApprovalConditionType",
+    "ApprovalCondition",
+    "OfficialApprovalRecord",
+    "StatutoryNotificationRecord",
+    "ApprovalService",
+    "approval_service",
 ]
-
