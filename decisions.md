@@ -53,16 +53,19 @@ A material change must add or supersede a decision rather than rewrite the old r
 | DEC-030 | Pin standards, basemap and specialist-model activation separately | PROPOSED |
 | DEC-031 | Separate source products, access services, processing, display, and operational readiness | ACCEPTED |
 | DEC-032 | Build with public/synthetic data first; block real decisions on agency and field evidence | ACCEPTED |
+| DEC-033 | Phase 0 research findings and closure of baseline operational decisions | ACCEPTED |
+| DEC-034 | PKG-0C shared domain contracts and Ponytail modular architecture | ACCEPTED |
 
 ### 2.1 Approval provenance
 
-The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 September 2026. That instruction approves DEC-001–023 and DEC-025–029 as the documentation baseline, including PUNARVAS-AI, Wayanad as reference pilot, production-oriented documentation, and the named technology direction. The user's later request to add the supplied data-source package approves DEC-031–032 as documentation and delivery policy. Neither instruction confers government authority or approves programme-specific policy values, data agreements, provider accounts, scientific models, budgets, procurement, or live deployment. DEC-024 and DEC-030 remain proposed because those choices were not specified.
+The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 September 2026. That instruction approves DEC-001–023 and DEC-025–029 as the documentation baseline, including PUNARVAS-AI, Wayanad as reference pilot, production-oriented documentation, and the named technology direction. The user's later request to add the supplied data-source package approves DEC-031–032 as documentation and delivery policy. DEC-033 and DEC-034 record research closures and implementation contracts executed per user directive. DEC-024 and DEC-030 remain proposed until specifically configured.
 
 | Decisions | Proposed by | Approved by/date | Approval evidence |
 | --- | --- | --- | --- |
 | DEC-001–022 | Documentation analysis based on `idea.txt`, `claude.txt` and cited sources | User / 2026-09-08 | Current-thread directive “PLEASE IMPLEMENT THIS PLAN” |
 | DEC-023, DEC-025–029 | Astra corrective review reconciled by this revision | User / 2026-09-08 | Current request: read all handoff material and make the changes in the specified files |
 | DEC-031–032 | Supplied data-source feasibility handoff reconciled by revision 1.2 | User / 2026-09-08 | Current request: add all supplied data sources according to their respective files |
+| DEC-033–034 | Agent research and implementation execution | User / 2026-09-08 | Current request: start coding and execute Phase 0 research and Phase 1 implementation |
 | DEC-024, DEC-030 | Revision authors | Not yet approved | [Open Decisions](./open-decisions.md) ODN-006–008 and ODN-013–019 |
 
 ## 3. Detailed decisions
@@ -388,6 +391,32 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Consequences:** PH-0/PH-1 can build and validate ingestion, exposure, discrepancy, gates, scenarios, and reports. Production transition depends on formal agency/field acquisition, owner review, privacy controls, and the source-readiness report.
 - **Evidence:** Source inventory S01–S54, especially S45–S50; [source-register.md](./source-register.md#6-source-activation-and-acquisition-gate); RUL-079–080; FR-082–083.
 - **Review trigger:** All relevant agency and field dependencies are acquired and independently accepted for a bounded live workflow, or the pilot scope changes.
+
+### DEC-033 — Phase 0 research findings and closure of baseline operational decisions
+
+- **Context:** `open-decisions.md` and `phases.md` left several empirical questions open regarding statutory cadence, Wayanad township acquisition routes, Kerala VLRS scheme caps, C-FLOOD basin boundaries, GSI hazard coverage, DPDP timeline, and empirical equation derivations.
+- **Decision:** Formally close baseline analytical ambiguities using primary verified facts:
+  1. Under the Disaster Management (Amendment) Act 2025 (commenced 9 April 2025), §31(4) mandates District Disaster Management Plan updates every 2 years or earlier as necessary. Algorithmic outputs are advisory; statutory power remains with DDMA/SDMA.
+  2. The Wayanad 2024 rehabilitation township model is anchored at Elstone Estate (Kalpetta Municipality) for ~430 disaster-affected families on ~7 cents/unit, acquired under Section 65 of the Disaster Management Act 2005.
+  3. The Kerala Vulnerability Linked Relocation Scheme (G.O. Ms 6/2018/DMD et seq.) establishes an individual relocation precedent of ₹10 Lakh (₹6L for ≥3 cents safe land + ₹4L for house construction), preserving agricultural ownership while barring residential construction.
+  4. C-FLOOD operational coverage is confirmed to cover Godavari, Tapi, and Mahanadi basins only; it has zero coverage in Wayanad and is locked out of Wayanad gates (RUL-017).
+  5. The empirical GLOF formula $Q_{peak}=0.00077 V^{1.017}$ originates from Huggel et al. (2002) for alpine glacial outbursts; it is verified as non-applicable to Wayanad and rejected from executable code (E52).
+  6. DPDP Rules 2025 were notified on 14 November 2025 with phased enforcement, mandating strict data minimization and India-resident infrastructure.
+- **Why:** Replaces speculative software defaults with primary statutory and empirical reality.
+- **Rejected:** Waiting indefinitely for administrative data agreements; using unverified formulas or assuming C-FLOOD coverage.
+- **Consequences:** Closes ODN-001–003, ODN-010, ODN-017, ODN-018, and ODN-021 for baseline implementation.
+- **Evidence:** PIB PRID 2146781; Gazette Notification 8 April 2025; KSDMA G.O. (Ms) 6/2018/DMD; CWC C-FLOOD documentation; GSI NLSM 2022 dataset; MeitY DPDP Rules notification.
+- **Review trigger:** State-level amendment to Kerala VLRS caps or notification of new Wayanad land orders.
+
+### DEC-034 — PKG-0C shared domain contracts and Ponytail modular architecture
+
+- **Context:** `phases.md` mandates completing PKG-0C before parallel feature coding to freeze domain boundaries ARC-C01–13, state enums, API errors, bitemporal envelopes, and outbox event schemas.
+- **Decision:** Implement PKG-0C and Phase 1 platform using Python FastAPI modular monolith with Pydantic v2 domain schemas, enforcing the Ponytail ladder (`YAGNI -> stdlib -> native -> one line -> minimum`). Dual-target storage architecture uses PostgreSQL/PostGIS for production and an in-memory/SQLite GeoJSON spatial engine for zero-dependency local testing. Audit events use append-only SHA-256 hash chaining.
+- **Why:** Guarantees absolute contract consistency across domain modules, eliminates bloat, and allows fully deterministic automated verification without external database infrastructure.
+- **Rejected:** Premature microservices; raw untyped dictionaries; third-party blockchain audit systems; mutable state rewrites.
+- **Consequences:** All domain packages import from `punarvas.core`. Database changes must preserve bitemporal valid/system times and hash audit continuity.
+- **Evidence:** `architecture.md` §5 & §6; `trd.md` §3; `rules.md` RUL-001–083.
+- **Review trigger:** Introduction of external distributed event brokers or multi-region database replication.
 
 ## 4. Explicit research corrections adopted
 
