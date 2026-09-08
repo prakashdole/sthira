@@ -60,6 +60,8 @@ A material change must add or supersede a decision rather than rewrite the old r
 | DEC-037 | Multi-State Tenant Adaptation and Cross-State Leakage Prevention | ACCEPTED |
 | DEC-038 | National NDMA Sovereign Relocation Clearinghouse and Inter-State Federation | ACCEPTED |
 | DEC-039 | Controlled Live Wayanad Operations, Recovery Harness, and Delivery Completion Verification | ACCEPTED |
+| DEC-040 | Delivery Execution, Defect Severity Classification, and External Interface Reconciliation | ACCEPTED |
+
 
 
 ### 2.1 Approval provenance
@@ -72,6 +74,7 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 | DEC-023, DEC-025–029 | Astra corrective review reconciled by this revision | User / 2026-09-08 | Current request: read all handoff material and make the changes in the specified files |
 | DEC-031–032 | Supplied data-source feasibility handoff reconciled by revision 1.2 | User / 2026-09-08 | Current request: add all supplied data sources according to their respective files |
 | DEC-033–034 | Agent research and implementation execution | User / 2026-09-08 | Current request: start coding and execute Phase 0 research and Phase 1 implementation |
+| DEC-035–040 | Implementation execution (Phases 2, 3, 4, 6, 10) | User / 2026-09-08 | Current request: Phase 3, Phase 4, Delivery Execution implementation and decision documentation |
 | DEC-024, DEC-030 | Revision authors | Not yet approved | [Open Decisions](./open-decisions.md) ODN-006–008 and ODN-013–019 |
 
 ## 3. Detailed decisions
@@ -505,7 +508,25 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Evidence:** `phases.md` §6 & §12.6, `rules.md` RUL-001–083, `trd.md` NFR-006, NFR-013, NFR-032, AT-22, AT-23, AT-27, AT-28.
 - **Review trigger:** Completion of six-month controlled live deployment window before Kerala scaling expansion.
 
+### DEC-040 — Delivery Execution, Defect Severity Classification, and External Interface Reconciliation (Phase 10 / ARC-C12)
+
+- **Status:** ACCEPTED.
+- **Context:** `phases.md` §12.6/§12.7 and `plan.md` (#10) define Phase 10 / ARC-C12 as post-allocation physical delivery execution, funding gap reconciliation, defect clearance, and external system handoff. Administrative ceremonies or housing sanctions frequently get announced before water, electricity, or road connections exist. `rules.md` (RUL-067 through RUL-072) mandates that approval must never be treated as completed relocation, and unserviced or defective housing must never be forced upon vulnerable households.
+- **Decision:**
+  1. *Defect Severity Triad & Life-Safety Gating:* Classify defects into `CRITICAL` (structural failure, unsafe slope, water contamination; strictly blocks possession handover), `MAJOR` (road blockage, drainage failure, power cutoff; blocks occupancy certificate), and `MINOR` (cosmetic blemishes, paint; permits conditional occupancy with contractor rectification warranty) (`RUL-072`, `AT-22`).
+  2. *Basic Services Readiness Triad Verification:* Handover requires affirmative verification of potable water supply ($\ge 55$ LPCD), energised domestic power, and all-weather road access ($\ge 3.66$m width). Handover of unserviced units raises `UnservicedUnitHandoverError`.
+  3. *In-Situ Mitigation Alternatives Review:* Enforce formal necessity review under `RUL-067` (`FR-063`) verifying whether engineered in-situ retaining walls or channelization could avert displacement before irreversible relocation is ordered.
+  4. *Multi-Source Funding Gap Reconciliation:* Track funding states (`IDENTIFIED`, `APPLIED`, `SANCTIONED`, `RELEASED`, `SPENT`, `RECONCILED`) across SDRF, NDRF, CMRF, and CSR grants, computing exact gaps and blocking unit contracts until funding is confirmed (`RUL-069`).
+  5. *External Accountable System Handoff:* Explicitly register handoffs to external departmental systems (e.g., PWD e-Tendering, KWA Billing, Treasury PFMS) preserving bidirectional reference IDs and reconciliation hashes.
+  6. *Post-Relocation Longitudinal Monitoring:* Track 6-month and 12-month post-occupation welfare indicators (livelihood restoration, children school enrollment, healthcare access) before a case is archived as fully resolved.
+- **Why:** Protects vulnerable disaster survivors from secondary disaster trauma (abandoned or unlivable resettlement sites), enforces engineering quality accountability, and satisfies `RUL-072` and `AT-22`.
+- **Rejected:** Self-certification of defect completion by construction contractors; counting foundation or structural milestones as completed relocation; unmonitored external system handoffs.
+- **Consequences:** Every housing unit requires signed engineering verification and defect logging before possession certificates are issued.
+- **Evidence:** `rules.md` RUL-067–072, `trd.md` FR-063–070, AT-18, AT-22, Kerala G.O. (Ms) 6/2018/DMD, NDMA Guidelines on Temporary and Permanent Shelter.
+- **Review trigger:** Annual review of resettlement colony defect rates and KSDMA social audit reports.
+
 ## 4. Explicit research corrections adopted
+
 
 
 | Transcript claim/implication | Baseline correction | Decisions/rules |
