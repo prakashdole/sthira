@@ -170,6 +170,105 @@ class ReportingService:
         summary["checksum_sha256"] = sha256
         return summary
 
+    def generate_lsgd_dm_plan_annex(
+        self,
+        lsg_name: str,
+        district: str,
+        vulnerable_wards: List[int],
+        settlement_names: List[str],
+        verified_beneficiary_count: int,
+        host_sites: List[Dict[str, Any]],
+        generating_user_id: str,
+    ) -> "LSGDDisasterManagementPlanAnnex":
+        """
+        FEAT-018 / DEC-013 / FR-054: Kerala LSGD Disaster Management Plan Annex Generator.
+        Maps structured technical and hazard evidence into the government LSGD template,
+        while leaving all participatory and statutory approval fields explicitly incomplete (never invented!).
+        """
+        annex_id = f"LSGD-ANNEX-{lsg_name.replace(' ', '_').upper()}-{int(utc_now().timestamp())}"
+
+        section_a = {
+            "title": "Section A: Settlement Vulnerability & Hazard Profile",
+            "vulnerable_wards": vulnerable_wards,
+            "settlements": settlement_names,
+            "hazard_classification": "CRITICAL_DEBRIS_FLOW_AND_LANDSLIDE_RUNOUT",
+            "source_evidence": "GSI NLSM 2022 & KSDMA Wayanad Landslide Runout Assessment",
+        }
+
+        section_b = {
+            "title": "Section B: Permanent Relocation Candidate Casework Summary",
+            "verified_households_needing_relocation": verified_beneficiary_count,
+            "status": "ADVISORY_SCREENING_COMPLETE",
+        }
+
+        section_c = {
+            "title": "Section C: Host Township / Relocation Site Options",
+            "candidate_sites": host_sites,
+        }
+
+        section_d = {
+            "title": "Section D: Mandatory Participatory & Statutory Approvals (DEC-013)",
+            "gram_ward_sabha_resolution": "PENDING_GRAM_SABHA_APPROVAL",
+            "lsg_working_group_recommendation": "PENDING_WORKING_GROUP_MEETING",
+            "technical_scrutiny_committee": "PENDING_ENGINEERING_SCRUTINY",
+            "district_planning_committee_approval": "PENDING_DPC_CONCURRENCE",
+            "ddma_final_sanction": "PENDING_DDMA_ORDER",
+            "approval_status": "INCOMPLETE_REQUIRES_LAWFUL_PARTICIPATORY_PROCESS",
+        }
+
+        payload_to_hash = {
+            "annex_id": annex_id,
+            "lsg_name": lsg_name,
+            "district": district,
+            "section_a": section_a,
+            "section_b": section_b,
+            "section_c": section_c,
+            "section_d": section_d,
+        }
+        sha256 = hashlib.sha256(json.dumps(payload_to_hash, sort_keys=True).encode("utf-8")).hexdigest()
+
+        annex = LSGDDisasterManagementPlanAnnex(
+            annex_id=annex_id,
+            lsg_name=lsg_name,
+            district=district,
+            plan_period="2024-2026",
+            section_a_vulnerability_profile=section_a,
+            section_b_relocation_beneficiaries=section_b,
+            section_c_host_site_capacities=section_c,
+            section_d_statutory_approvals=section_d,
+            statutory_note_en=(
+                "Kerala Local Self Government Institution (LSGI) Disaster Management Plan Annexure. "
+                "Algorithmic outputs are advisory only under DM Act 2005 §31. Participatory and statutory approvals "
+                "must be conducted through lawful Gram/Ward Sabha and Panchayati Raj processes (DEC-013)."
+            ),
+            statutory_note_ml=(
+                "കേരള തദ്ദേശ സ്വയംഭരണ ദുരന്ത നിവാരണ പദ്ധതി അനുബന്ധം. ദുരന്ത നിവാരണ നിയമം 2005 വകുപ്പ് 31 "
+                "പ്രകാരം ഇത് ഉപദേശക രേഖ മാത്രമാണ്. ഗ്രാമ/വാർഡ് സഭകളിലൂടെ മാത്രമേ നിയമപരമായ അന്തിമ അംഗീകാരം നൽകാവൂ (DEC-013)."
+            ),
+            generating_user_id=generating_user_id,
+            sha256_checksum=sha256,
+        )
+
+        return annex
+
+
+class LSGDDisasterManagementPlanAnnex(BaseModel):
+    annex_id: str
+    lsg_name: str
+    district: str
+    plan_period: str = "2024-2026"
+    section_a_vulnerability_profile: Dict[str, Any]
+    section_b_relocation_beneficiaries: Dict[str, Any]
+    section_c_host_site_capacities: Dict[str, Any]
+    section_d_statutory_approvals: Dict[str, Any]
+    statutory_note_en: str
+    statutory_note_ml: str
+    generating_user_id: str
+    generated_at: str = Field(default_factory=lambda: utc_now().isoformat())
+    is_advisory: bool = True
+    sha256_checksum: str
+
 
 # Global singleton instance
 reporting_service = ReportingService()
+
