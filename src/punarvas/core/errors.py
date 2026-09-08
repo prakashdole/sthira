@@ -98,3 +98,53 @@ class ReservationConflictError(PunarvasError):
             resolution="Resolve cross-scenario competition or release conflicting reservation before approval."
         )
 
+
+
+class ApprovalConditionUnmetError(PunarvasError):
+    """Raised when an approval condition blocks allocation or notification (RUL-040, AT-20)."""
+    def __init__(self, condition_id: str, reason: str):
+        super().__init__(
+            f"Approval condition '{condition_id}' unmet: {reason}.",
+            rule_id="RUL-040",
+            resolution="Satisfy and verify blocking condition before proceeding with allocation/reservation."
+        )
+
+
+class EntityFrozenByObjectionError(PunarvasError):
+    """Raised when an operation is blocked because the target entity has pending objections (RUL-049, FR-050)."""
+    def __init__(self, entity_id: str, reason: str):
+        super().__init__(
+            f"Entity '{entity_id}' is frozen by pending objections: {reason}.",
+            rule_id="RUL-049",
+            resolution="Resolve all pending objections and hearings before approval or publication."
+        )
+
+
+class UnauthorizedActionError(PunarvasError):
+    """Raised when an actor role lacks the authority or MFA token for a statutory action (RUL-002, RUL-054)."""
+    def __init__(self, action: str, reason: str):
+        super().__init__(
+            f"Unauthorized action '{action}': {reason}.",
+            rule_id="RUL-054",
+            resolution="Authenticate with authorized statutory role and required step-up credentials."
+        )
+
+
+class DefectsBlockCompletionError(PunarvasError):
+    """Raised when unresolved defects block handover, occupation, or completion (RUL-072, AT-22)."""
+    def __init__(self, case_id: str, defect_count: int, reason: str):
+        super().__init__(
+            f"Relocation delivery blocked for case '{case_id}': {defect_count} unresolved defects ({reason}).",
+            rule_id="RUL-072",
+            resolution="Clear and verify all structural and safety defects before possession handover."
+        )
+
+
+class UnservicedUnitHandoverError(PunarvasError):
+    """Raised when an unserviced unit (missing water, electricity, or access road) is offered for handover (RUL-072, AT-22)."""
+    def __init__(self, case_id: str, missing_services: str):
+        super().__init__(
+            f"Cannot handover unserviced unit for case '{case_id}'. Missing functioning services: {missing_services}.",
+            rule_id="RUL-072",
+            resolution="Ensure potable water (>=55 LPCD), energised electricity, and access road are functioning."
+        )
