@@ -6,6 +6,9 @@ from punarvas.modules.policy.service import (
     SiteEvaluationReport,
     PolicyEngine,
     policy_engine,
+    SensitivityResult,
+    SensitivityAnalysisEngine,
+    sensitivity_analysis_engine,
 )
 
 __all__ = [
@@ -13,4 +16,8 @@ __all__ = [
     "SiteEvaluationReport",
     "PolicyEngine",
     "policy_engine",
+    "SensitivityResult",
+    "SensitivityAnalysisEngine",
+    "sensitivity_analysis_engine",
 ]
+

@@ -7,6 +7,9 @@ from punarvas.modules.allocation.service import (
     AllocationValidator,
     AllocationService,
     allocation_service,
+    CapacityReservation,
+    CapacityReservationLedger,
+    capacity_reservation_ledger,
 )
 
 __all__ = [
@@ -15,4 +18,8 @@ __all__ = [
     "AllocationValidator",
     "AllocationService",
     "allocation_service",
+    "CapacityReservation",
+    "CapacityReservationLedger",
+    "capacity_reservation_ledger",
 ]
+

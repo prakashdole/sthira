@@ -28,11 +28,32 @@ from punarvas.modules.programme import ProgrammeRecord, programme_service
 from punarvas.modules.catalog import catalog_service
 from punarvas.modules.hazard import HazardLayer, hazard_service
 from punarvas.modules.household import HouseholdCase, household_service
-from punarvas.modules.policy import SiteCriteriaInput, policy_engine
-from punarvas.modules.land_truth import ParcelRecord, land_truth_service
-from punarvas.modules.allocation import allocation_service
+from punarvas.modules.policy import (
+    SiteCriteriaInput,
+    policy_engine,
+    sensitivity_analysis_engine,
+)
+from punarvas.modules.land_truth import (
+    ParcelRecord,
+    land_truth_service,
+    agency_import_adapter,
+)
+from punarvas.modules.allocation import (
+    allocation_service,
+    capacity_reservation_ledger,
+)
+from punarvas.modules.field import (
+    field_sync_service,
+    FieldSurveySubmission,
+    DeviceStatus,
+)
 from punarvas.modules.governance import governance_service
 from punarvas.modules.reporting import reporting_service
+from punarvas.modules.evaluation import (
+    evaluation_harness_service,
+    CaseShadowEvaluation,
+)
+from punarvas.core.errors import ReservationConflictError
 from punarvas.spikes import load_wayanad_fixture
 
 from contextlib import asynccontextmanager
@@ -298,3 +319,137 @@ def verify_audit():
             "total_records": len(global_audit_ledger.entries),
         }
     )
+
+
+# --- Phase 2: Agency Import & Reconciliation ---
+class ERekhaImportRequest(BaseModel):
+    batch_id: str
+    records: List[Dict[str, Any]]
+
+
+@app.post("/api/v1/agency-import/e-rekha", response_model=APIResponseEnvelope)
+def import_e_rekha(req: ERekhaImportRequest):
+    results = agency_import_adapter.import_and_reconcile_e_rekha(
+        batch_id=req.batch_id,
+        records=req.records,
+        actor_id="api_revenue_officer",
+    )
+    return APIResponseEnvelope(data=[r.model_dump() for r in results])
+
+
+class FRAImportRequest(BaseModel):
+    batch_id: str
+    records: List[Dict[str, Any]]
+
+
+@app.post("/api/v1/agency-import/fra", response_model=APIResponseEnvelope)
+def import_fra(req: FRAImportRequest):
+    results = agency_import_adapter.import_and_reconcile_fra(
+        batch_id=req.batch_id,
+        records=req.records,
+        actor_id="api_forest_officer",
+    )
+    return APIResponseEnvelope(data=[r.model_dump() for r in results])
+
+
+# --- Phase 2: Field Workspace & Lost-Device Revocation ---
+class LostDeviceReportRequest(BaseModel):
+    device_id: str
+    reason: str
+
+
+@app.post("/api/v1/field/report-lost-device", response_model=APIResponseEnvelope)
+def report_lost_device(req: LostDeviceReportRequest):
+    try:
+        dev = field_sync_service.report_lost_device(
+            device_id=req.device_id,
+            reason=req.reason,
+            actor_id="security_admin",
+        )
+        return APIResponseEnvelope(data=dev.model_dump())
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/v1/field/sync", response_model=APIResponseEnvelope)
+def sync_offline_survey(submission: FieldSurveySubmission):
+    # Dummy server records for demonstration
+    current_records: Dict[str, Dict[str, Any]] = {}
+    res = field_sync_service.ingest_offline_sync(
+        submission=submission,
+        current_server_records=current_records,
+        actor_id="field_sync_daemon",
+    )
+    return APIResponseEnvelope(data=res.model_dump())
+
+
+# --- Phase 2: Capacity Reservation Ledger ---
+class CapacityReserveRequest(BaseModel):
+    scenario_id: str
+    site_id: str
+    dwellings: int
+    land_cents: float
+    budget_inr: float
+    water_m3_day: float
+
+
+@app.post("/api/v1/capacity/reserve", response_model=APIResponseEnvelope)
+def reserve_capacity(req: CapacityReserveRequest):
+    try:
+        res = capacity_reservation_ledger.reserve(
+            scenario_id=req.scenario_id,
+            site_id=req.site_id,
+            dwellings=req.dwellings,
+            land_cents=req.land_cents,
+            budget_inr=req.budget_inr,
+            water_m3_day=req.water_m3_day,
+            actor_id="api_approver",
+        )
+        return APIResponseEnvelope(data=res.model_dump())
+    except ReservationConflictError as e:
+        raise HTTPException(status_code=409, detail=e.message)
+
+
+@app.get("/api/v1/capacity/status/{site_id}", response_model=APIResponseEnvelope)
+def get_capacity_status(site_id: str):
+    rem = capacity_reservation_ledger.get_remaining_capacity(site_id)
+    return APIResponseEnvelope(data=rem)
+
+
+# --- Phase 2: Sensitivity Analysis ---
+class SensitivityAnalysisRequest(BaseModel):
+    sites: List[SiteCriteriaInput]
+    perturbation_factor: float = 0.20
+
+
+@app.post("/api/v1/policy/sensitivity", response_model=APIResponseEnvelope)
+def run_sensitivity_analysis(req: SensitivityAnalysisRequest):
+    results = sensitivity_analysis_engine.analyze_site_rank_sensitivity(
+        sites=req.sites,
+        engine=policy_engine,
+        perturbation_factor=req.perturbation_factor,
+    )
+    return APIResponseEnvelope(data=[r.model_dump() for r in results])
+
+
+# --- Phase 2: Kerala LSGD Disaster Management Plan Annex ---
+@app.get("/api/v1/reporting/lsgd-plan-annex", response_model=APIResponseEnvelope)
+def get_lsgd_dm_plan_annex(lsg_name: str = "Meppadi Grama Panchayat"):
+    annex = reporting_service.generate_lsgd_dm_plan_annex(
+        lsg_name=lsg_name,
+        district="Wayanad",
+        vulnerable_wards=[10, 11, 12],
+        settlement_names=["Chooralmala", "Mundakkai", "Punchirimattam"],
+        verified_beneficiary_count=430,
+        host_sites=[{"site_id": "SITE-ELSTONE-01", "capacity": 200}],
+        generating_user_id="api_planner",
+    )
+    return APIResponseEnvelope(data=annex.model_dump())
+
+
+# --- Phase 2: Evaluation & Benchmark Metrics ---
+@app.get("/api/v1/evaluation/metrics", response_model=APIResponseEnvelope)
+def get_evaluation_metrics():
+    metrics = evaluation_harness_service.calculate_metrics(actor_id="eval_api_caller")
+    return APIResponseEnvelope(data=metrics.model_dump())
+
