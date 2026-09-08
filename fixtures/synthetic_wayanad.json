@@ -1,0 +1,266 @@
+{
+  "programme": {
+    "programme_id": "PRG-KL-WYD-2024",
+    "title": "Wayanad Landslide Rehabilitation & Resettlement Programme",
+    "state": "Kerala",
+    "district": "Wayanad",
+    "target_settlements": ["Mundakkai", "Chooralmala", "Attamala"],
+    "lead_authority": "District Disaster Management Authority (DDMA), Wayanad",
+    "active_policy_version": "POL-WYD-2024.1",
+    "mandate_legal_basis": "Disaster Management Act 2005 read with 2025 Amendment"
+  },
+  "hazard_layers": [
+    {
+      "layer_id": "HAZ-GSI-2022-LSM",
+      "name": "KSDMA-GSI Landslide Susceptibility Zones 2022",
+      "source_id": "S01",
+      "publisher": "Geological Survey of India / KSDMA",
+      "scale": "1:50,000",
+      "crs": "EPSG:4326",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [76.120, 11.530],
+            [76.155, 11.530],
+            [76.155, 11.560],
+            [76.120, 11.560],
+            [76.120, 11.530]
+          ]
+        ]
+      },
+      "hazard_level": "VERY_HIGH",
+      "debris_flow_channel": true,
+      "valid_from": "2022-01-01T00:00:00Z"
+    },
+    {
+      "layer_id": "HAZ-KSDMA-FLOOD-100YR",
+      "name": "KSDMA 100-Year Flood Inundation Extent",
+      "source_id": "S02",
+      "publisher": "KSDMA",
+      "crs": "EPSG:4326",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [76.130, 11.535],
+            [76.145, 11.535],
+            [76.145, 11.545],
+            [76.130, 11.545],
+            [76.130, 11.535]
+          ]
+        ]
+      },
+      "hazard_level": "HIGH",
+      "valid_from": "2023-01-01T00:00:00Z"
+    }
+  ],
+  "affected_parcels": [
+    {
+      "parcel_id": "PARCEL-KL-WYD-MEP-001",
+      "ulpin": "KL110101001001",
+      "survey_number": "142/1A",
+      "village": "Vellarimala",
+      "lsg_name": "Meppadi Grama Panchayat",
+      "centroid": [76.135, 11.542],
+      "area_cents": 12.5,
+      "hazard_zone_ids": ["HAZ-GSI-2022-LSM", "HAZ-KSDMA-FLOOD-100YR"],
+      "ground_state": "DESTROYED_BY_DEBRIS_FLOW",
+      "title_holder": "Ramesh K",
+      "household_id": "HH-WYD-001",
+      "relocation_necessary": true,
+      "discrepancies": []
+    },
+    {
+      "parcel_id": "PARCEL-KL-WYD-MEP-002",
+      "ulpin": "KL110101001002",
+      "survey_number": "142/2",
+      "village": "Vellarimala",
+      "lsg_name": "Meppadi Grama Panchayat",
+      "centroid": [76.138, 11.545],
+      "area_cents": 8.0,
+      "hazard_zone_ids": ["HAZ-GSI-2022-LSM"],
+      "ground_state": "UNINHABITABLE_RUNOUT_ZONE",
+      "title_holder": "Sujatha M",
+      "household_id": "HH-WYD-002",
+      "relocation_necessary": true,
+      "discrepancies": []
+    },
+    {
+      "parcel_id": "PARCEL-KL-WYD-MEP-003",
+      "ulpin": "KL110101001003",
+      "survey_number": "143/5",
+      "village": "Vellarimala",
+      "lsg_name": "Meppadi Grama Panchayat",
+      "centroid": [76.140, 11.548],
+      "area_cents": 15.0,
+      "hazard_zone_ids": ["HAZ-GSI-2022-LSM"],
+      "ground_state": "GROUND_OCCUPIED_PAPER_VACANT",
+      "title_holder": "Government Poramboke (Paper)",
+      "household_id": "HH-WYD-003",
+      "relocation_necessary": true,
+      "discrepancies": ["PAPER_VACANT_GROUND_OCCUPIED", "CADASTRAL_GRID_SHIFT"]
+    },
+    {
+      "parcel_id": "PARCEL-KL-WYD-MEP-004",
+      "ulpin": "KL110101001004",
+      "survey_number": "144/1",
+      "village": "Vellarimala",
+      "lsg_name": "Meppadi Grama Panchayat",
+      "centroid": [76.142, 11.550],
+      "area_cents": 25.0,
+      "hazard_zone_ids": ["HAZ-GSI-2022-LSM"],
+      "ground_state": "TRIBAL_SETTLEMENT",
+      "title_holder": "Kani Tribal Community",
+      "household_id": "HH-WYD-004",
+      "relocation_necessary": true,
+      "discrepancies": ["UNRESOLVED_FRA_CLAIM"]
+    }
+  ],
+  "candidate_sites": [
+    {
+      "site_id": "SITE-ELSTONE-01",
+      "name": "Elstone Estate Model Township",
+      "location": "Kalpetta Municipality",
+      "centroid": [76.085, 11.610],
+      "total_area_acres": 65.0,
+      "developable_area_acres": 48.0,
+      "dwelling_capacity": 250,
+      "acquisition_route": "DISASTER_MANAGEMENT_ACT_SEC_65",
+      "legal_readiness_state": "PASS",
+      "hazard_safety_state": "PASS",
+      "lean_season_water_state": "PASS",
+      "tested_water_lpcd": 85.0,
+      "infrastructure_state": "PASS",
+      "road_access_width_m": 12.0,
+      "distance_to_hospital_km": 3.2,
+      "distance_to_school_km": 1.5,
+      "unit_plot_cents": 7.0
+    },
+    {
+      "site_id": "SITE-NEDUMBALA-02",
+      "name": "Nedumbala Estate Resettlement Block",
+      "location": "Meppadi Grama Panchayat",
+      "centroid": [76.115, 11.565],
+      "total_area_acres": 40.0,
+      "developable_area_acres": 26.0,
+      "dwelling_capacity": 140,
+      "acquisition_route": "NEGOTIATED_PURCHASE",
+      "legal_readiness_state": "PASS",
+      "hazard_safety_state": "PASS",
+      "lean_season_water_state": "UNKNOWN",
+      "tested_water_lpcd": 0.0,
+      "infrastructure_state": "PASS",
+      "road_access_width_m": 8.0,
+      "distance_to_hospital_km": 6.5,
+      "distance_to_school_km": 2.8,
+      "unit_plot_cents": 6.0
+    },
+    {
+      "site_id": "SITE-HIGH-SLOPE-03",
+      "name": "Kottapadi Hillside Extension",
+      "location": "Kottapadi",
+      "centroid": [76.160, 11.580],
+      "total_area_acres": 20.0,
+      "developable_area_acres": 8.0,
+      "dwelling_capacity": 40,
+      "acquisition_route": "REVENUE_TRANSFER",
+      "legal_readiness_state": "PASS",
+      "hazard_safety_state": "FAIL",
+      "lean_season_water_state": "FAIL",
+      "tested_water_lpcd": 25.0,
+      "infrastructure_state": "BLOCKED",
+      "road_access_width_m": 3.0,
+      "distance_to_hospital_km": 14.0,
+      "distance_to_school_km": 7.0,
+      "unit_plot_cents": 5.0
+    }
+  ],
+  "synthetic_households": [
+    {
+      "household_id": "HH-WYD-001",
+      "head_of_household": "Ramesh K",
+      "member_count": 4,
+      "vulnerable_members": {
+        "elderly": 1,
+        "disabled": 1,
+        "children": 1
+      },
+      "requires_ground_floor": true,
+      "source_parcel_id": "PARCEL-KL-WYD-MEP-001",
+      "verified_eligibility": true,
+      "consent_status": {
+        "PROGRAMME_PARTICIPATION": "CONSENTED",
+        "PATHWAY_CHOICE": "CONSENTED",
+        "SITE_PREFERENCE": "CONSENTED"
+      },
+      "chosen_pathway": "TOWNSHIP",
+      "preferred_sites": ["SITE-ELSTONE-01", "SITE-NEDUMBALA-02"],
+      "objection_filed": false
+    },
+    {
+      "household_id": "HH-WYD-002",
+      "head_of_household": "Sujatha M",
+      "member_count": 3,
+      "vulnerable_members": {
+        "elderly": 0,
+        "disabled": 0,
+        "children": 1
+      },
+      "requires_ground_floor": false,
+      "source_parcel_id": "PARCEL-KL-WYD-MEP-002",
+      "verified_eligibility": true,
+      "consent_status": {
+        "PROGRAMME_PARTICIPATION": "CONSENTED",
+        "PATHWAY_CHOICE": "CONSENTED",
+        "SITE_PREFERENCE": "NOT_APPLICABLE"
+      },
+      "chosen_pathway": "SELF_RELOCATION_ASSISTANCE",
+      "preferred_sites": [],
+      "objection_filed": false
+    },
+    {
+      "household_id": "HH-WYD-003",
+      "head_of_household": "Deepak V",
+      "member_count": 5,
+      "vulnerable_members": {
+        "elderly": 1,
+        "disabled": 0,
+        "children": 2
+      },
+      "requires_ground_floor": false,
+      "source_parcel_id": "PARCEL-KL-WYD-MEP-003",
+      "verified_eligibility": true,
+      "consent_status": {
+        "PROGRAMME_PARTICIPATION": "CONSENTED",
+        "PATHWAY_CHOICE": "CONSENTED",
+        "SITE_PREFERENCE": "CONSENTED"
+      },
+      "chosen_pathway": "TOWNSHIP",
+      "preferred_sites": ["SITE-ELSTONE-01"],
+      "objection_filed": false
+    },
+    {
+      "household_id": "HH-WYD-004",
+      "head_of_household": "Mani Kani",
+      "member_count": 4,
+      "vulnerable_members": {
+        "elderly": 2,
+        "disabled": 0,
+        "children": 1
+      },
+      "requires_ground_floor": true,
+      "source_parcel_id": "PARCEL-KL-WYD-MEP-004",
+      "verified_eligibility": true,
+      "consent_status": {
+        "PROGRAMME_PARTICIPATION": "CONSENTED",
+        "PATHWAY_CHOICE": "UNDER_GRAMA_SABHA_CONSULTATION",
+        "SITE_PREFERENCE": "PENDING"
+      },
+      "chosen_pathway": "TOWNSHIP",
+      "preferred_sites": ["SITE-ELSTONE-01"],
+      "objection_filed": true,
+      "objection_reason": "FRA Community forest rights recognition pending with Sub-Divisional Committee"
+    }
+  ]
+}
