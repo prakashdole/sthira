@@ -21,6 +21,7 @@ from punarvas.core.errors import (
 )
 from punarvas.modules.governance.objections_service import objections_service
 from punarvas.modules.governance.approval_service import approval_service
+from punarvas.modules.live_ops.service import degraded_mode_controller
 
 
 class ReservationStatus(str, Enum):
@@ -189,6 +190,7 @@ class MultiResourceReservationLedger:
         Atomically reserve capacity under temporary hold (AT-15).
         Fails closed if remaining capacity is insufficient or competing reservation intervenes.
         """
+        degraded_mode_controller.assert_writes_allowed()
         with self._lock:
             # Check freeze from pending objections (RUL-049)
             is_frozen, frozen_reason = objections_service.check_is_entity_frozen(site_id)
@@ -287,6 +289,7 @@ class MultiResourceReservationLedger:
         Convert a temporary reservation hold into a binding commitment upon official approval (RUL-070).
         Revalidates blocking approval conditions (AT-20) and pending objections (RUL-049).
         """
+        degraded_mode_controller.assert_writes_allowed()
         with self._lock:
             res = self._reservations.get(reservation_id)
             if not res:

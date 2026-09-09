@@ -5,7 +5,7 @@ Normative Reference: architecture.md §5, rules.md (RUL-001 advisory envelope).
 
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -192,7 +192,14 @@ from punarvas.core.errors import (
     UnauthorizedActionError,
     DefectsBlockCompletionError,
     UnservicedUnitHandoverError,
+    DegradedModeError,
 )
+from punarvas.core.identity import (
+    TOKEN_TTL_SECONDS,
+    authenticate_password,
+    issue_access_token,
+)
+from punarvas.api.middleware import security_middleware
 from punarvas.spikes import load_wayanad_fixture
 
 
@@ -299,6 +306,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.middleware("http")(security_middleware)
 
 from pathlib import Path
 from fastapi.responses import RedirectResponse
@@ -315,6 +323,33 @@ if frontend_dir.is_dir():
 def root_redirect():
     return RedirectResponse(url="/ui/")
 
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/v1/auth/login", response_model=APIResponseEnvelope)
+def login(req: LoginRequest):
+    user = authenticate_password(req.username, req.password)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    token = issue_access_token(user)
+    return APIResponseEnvelope(
+        data={
+            "access_token": token,
+            "token_type": "bearer",
+            "expires_in": TOKEN_TTL_SECONDS,
+            "user": {
+                "user_id": user.user_id,
+                "username": user.username,
+                "roles": [r.value for r in user.roles],
+                "state": user.geography_scope.state,
+                "district": user.geography_scope.district,
+            },
+        }
+    )
 
 
 @app.get("/health", response_model=APIResponseEnvelope)
@@ -676,18 +711,15 @@ def get_state_fixtures(state_code: str):
 # --- Phase 3 (PH-3): Controlled Live Wayanad Operations & Recovery Endpoints ---
 
 class StepUpRequest(BaseModel):
-    user_id: str
     action: str
     valid_seconds: int = 300
 
 
 @app.post("/api/v1/auth/step-up", response_model=APIResponseEnvelope)
-def issue_step_up_token(req: StepUpRequest):
-    user = UserContext(
-        user_id=req.user_id,
-        username=f"user_{req.user_id}",
-        roles=[RoleType.GOVERNMENT_APPROVER],
-    )
+def issue_step_up_token(req: StepUpRequest, request: Request):
+    user = getattr(request.state, "user", None)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
         tok = step_up_auth_manager.issue_step_up_token(user, req.action, req.valid_seconds)
         return APIResponseEnvelope(data=tok.model_dump())
@@ -1196,14 +1228,10 @@ class ReleaseCapacityRequest(BaseModel):
 # --- Governance Approvals & Notifications Endpoints ---
 
 @app.post("/api/v1/governance/approvals", response_model=APIResponseEnvelope)
-def issue_official_approval(req: IssueApprovalRequest):
-    ctx = UserContext(
-        user_id=req.user_id or "gov_approver",
-        username=req.approving_officer_name,
-        roles=[req.user_role or RoleType.GOVERNMENT_APPROVER],
-        classification_level=ClassificationLevel.RESTRICTED,
-        geography_scope=GeographyScope(state="Kerala", district="Wayanad"),
-    )
+def issue_official_approval(req: IssueApprovalRequest, request: Request):
+    ctx = getattr(request.state, "user", None)
+    if ctx is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
         record = approval_service.issue_official_approval(
             entity_type=req.entity_type,
@@ -1219,6 +1247,8 @@ def issue_official_approval(req: IssueApprovalRequest):
             context=ctx,
         )
         return APIResponseEnvelope(data=record.model_dump())
+    except DegradedModeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except EntityFrozenByObjectionError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except UnauthorizedActionError as e:

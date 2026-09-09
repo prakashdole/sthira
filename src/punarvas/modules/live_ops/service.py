@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from punarvas.core.audit import global_audit_ledger
 from punarvas.core.contracts import UserContext
 from punarvas.core.enums import AuthorityState, ClassificationLevel, RoleType
+from punarvas.core.errors import DegradedModeError
 
 
 class StepUpToken(BaseModel):
@@ -21,6 +22,8 @@ class StepUpToken(BaseModel):
     user_id: str
     target_action: str
     expires_at_epoch: float
+    nonce: str
+    consumed: bool = False
     verified: bool = True
     sha256_hash: str
 
@@ -100,14 +103,17 @@ class StepUpAuthManager:
         if action not in self.PRIVILEGED_ACTIONS:
             raise ValueError(f"Action {action} is not a registered privileged step-up action.")
         token_str = secrets.token_hex(24)
+        nonce = secrets.token_hex(16)
         expires_at = time.time() + valid_seconds
-        token_hash = hashlib.sha256(f"{user.user_id}:{action}:{token_str}".encode()).hexdigest()
+        token_hash = hashlib.sha256(f"{user.user_id}:{action}:{nonce}:{token_str}".encode()).hexdigest()
 
         rec = StepUpToken(
             token_id=token_str,
             user_id=user.user_id,
             target_action=action,
             expires_at_epoch=expires_at,
+            nonce=nonce,
+            consumed=False,
             verified=True,
             sha256_hash=token_hash,
         )
@@ -124,12 +130,13 @@ class StepUpAuthManager:
 
     def verify_step_up(self, token_id: str, user_id: str, action: str) -> bool:
         rec = self._tokens.get(token_id)
-        if not rec:
+        if not rec or rec.consumed:
             return False
         if rec.user_id != user_id or rec.target_action != action:
             return False
         if time.time() > rec.expires_at_epoch:
             return False
+        rec.consumed = True
         return True
 
 
@@ -344,7 +351,7 @@ class DegradedModeController:
 
     def assert_writes_allowed(self):
         if self._degraded_active:
-            raise RuntimeError(
+            raise DegradedModeError(
                 f"System is in DEGRADED_MODE ({self._degraded_reason}). Authoritative writes and new decisions are suspended."
             )
 

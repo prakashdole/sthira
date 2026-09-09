@@ -20,6 +20,7 @@ from punarvas.core.errors import (
 from punarvas.modules.governance.objections_service import (
     objections_service,
 )
+from punarvas.modules.live_ops.service import degraded_mode_controller, step_up_auth_manager
 
 
 class ApprovalConditionType(str, Enum):
@@ -124,6 +125,8 @@ class ApprovalService:
         Requires step-up MFA token verification (RUL-054).
         Fails if entity is frozen by pending objections (RUL-049, FR-050).
         """
+        degraded_mode_controller.assert_writes_allowed()
+
         # 1. Check pending objections freeze (RUL-049 / FR-050)
         is_frozen, frozen_reason = objections_service.check_is_entity_frozen(entity_id)
         if is_frozen:
@@ -132,17 +135,25 @@ class ApprovalService:
                 reason=frozen_reason or "Entity is frozen pending objection resolution (RUL-049)."
             )
 
-        # 2. Verify Step-Up MFA Token (RUL-054)
-        if not step_up_token or not step_up_token.startswith("MFA-STEPUP-"):
+        if not context:
             raise UnauthorizedActionError(
                 action="OFFICIAL_APPROVAL",
-                reason="Official approval requires valid step-up multi-factor authentication token (RUL-054)."
+                reason="Authenticated principal is required; identity is not taken from request fields.",
+            )
+
+        # 2. Verify Step-Up MFA Token bound to principal, action, nonce and expiry (RUL-054)
+        if not step_up_token or not step_up_auth_manager.verify_step_up(
+            step_up_token, context.user_id, "APPROVE_DECISION"
+        ):
+            raise UnauthorizedActionError(
+                action="OFFICIAL_APPROVAL",
+                reason="Official approval requires a verified step-up token bound to the authenticated principal and APPROVE_DECISION action (RUL-054)."
             )
 
         # 3. Role authorization check (RUL-002, RUL-054)
-        actor_role = context.roles[0] if (context and context.roles) else RoleType.GOVERNMENT_APPROVER
-        actor_id = context.user_id if context else approving_officer_name
-        actor_scope = f"{context.geography_scope.state}/{context.geography_scope.district or 'Wayanad'}" if context else "Kerala/Wayanad"
+        actor_role = context.roles[0] if context.roles else RoleType.PUBLIC_VIEWER
+        actor_id = context.user_id
+        actor_scope = f"{context.geography_scope.state}/{context.geography_scope.district or 'Wayanad'}"
 
         if actor_role not in (RoleType.GOVERNMENT_APPROVER, RoleType.STATE_PROGRAMME_ADMIN):
             raise UnauthorizedActionError(
@@ -289,6 +300,7 @@ class ApprovalService:
         Publishes bilingual gazette / district order artifact.
         Fails if entity is frozen by objections (RUL-049, FR-050).
         """
+        degraded_mode_controller.assert_writes_allowed()
         approval = self._approvals.get(approval_id)
         if not approval:
             raise KeyError(f"Approval '{approval_id}' not found.")

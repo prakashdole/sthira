@@ -130,6 +130,10 @@ class UnauthorizedActionError(PunarvasError):
         )
 
 
+class DegradedModeError(RuntimeError):
+    """Authoritative writes are suspended while the system is in degraded/read-only mode."""
+
+
 class DefectsBlockCompletionError(PunarvasError):
     """Raised when unresolved defects block handover, occupation, or completion (RUL-072, AT-22)."""
     def __init__(self, case_id: str, defect_count: int, reason: str):

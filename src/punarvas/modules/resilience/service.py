@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from punarvas.core.audit import global_audit_ledger
+from punarvas.core.outbox import OutboxStatus, TransactionalOutbox, global_outbox
 from punarvas.modules.resilience.contracts import (
     CertInIncidentNotification,
     ChannelType,
@@ -31,9 +32,9 @@ class ResilienceService:
     Coordinated Restore Validation, and Statutory Compliance Service (ARC-C11, DEC-045).
     """
 
-    def __init__(self):
+    def __init__(self, outbox: Optional[TransactionalOutbox] = None):
         self._devices: Dict[str, OfflineDeviceRecord] = {}
-        self._outbox_dead_letter_queue: Dict[str, Dict[str, Any]] = {}
+        self._outbox = outbox if outbox is not None else TransactionalOutbox()
         self._seed_default_devices()
 
     def _seed_default_devices(self):
@@ -64,46 +65,59 @@ class ResilienceService:
         reconcile_dead_letter: bool = False,
     ) -> OutboxRelayResult:
         """
-        Durable outbox relay with exponential backoff emulation, dead-letter routing,
-        and idempotent recovery (NFR-028, AT-25).
+        Relay through the core transactional outbox. FAILED items retry until
+        DEAD_LETTER; reconcile_dead_letter re-queues them (NFR-028, AT-25).
         """
         published = 0
         failed = 0
         dead_letter = 0
         reconciled = 0
 
+        tracked = []
         for msg in messages:
-            msg_id = msg.get("id", "msg-unknown")
-            event_type = msg.get("event_type", "GENERIC_EVENT")
-            current_retry = msg.get("retry_count", 0)
-            is_dead_letter_entry = msg.get("status") == "DEAD_LETTER" or msg_id in self._outbox_dead_letter_queue
-
-            # Test failure trigger
-            should_fail = force_fail_pattern and (force_fail_pattern in event_type or force_fail_pattern in msg_id)
-
-            if reconcile_dead_letter and is_dead_letter_entry and not should_fail:
-                # Idempotent reconciliation
-                reconciled += 1
-                published += 1
-                if msg_id in self._outbox_dead_letter_queue:
-                    del self._outbox_dead_letter_queue[msg_id]
-                msg["status"] = "PUBLISHED"
-                msg["reconciled_at"] = utc_now().isoformat()
-            elif should_fail:
-                failed += 1
-                current_retry += 1
-                msg["retry_count"] = current_retry
-                if current_retry >= max_retries:
-                    dead_letter += 1
-                    msg["status"] = "DEAD_LETTER"
-                    self._outbox_dead_letter_queue[msg_id] = msg
-                else:
-                    msg["status"] = "PENDING_RETRY"
+            msg_id = str(msg.get("id", "msg-unknown"))
+            event_type = str(msg.get("event_type", "GENERIC_EVENT"))
+            existing = self._outbox.get_by_idempotency_key(msg_id)
+            if existing is None:
+                existing = self._outbox.enqueue(
+                    topic=event_type,
+                    payload={"id": msg_id, "event_type": event_type, **{k: v for k, v in msg.items() if k not in ("id", "event_type")}},
+                    idempotency_key=msg_id,
+                )
+                existing.retry_count = int(msg.get("retry_count", 0))
+                existing.max_retries = max_retries
+                if msg.get("status") == "DEAD_LETTER":
+                    existing.status = OutboxStatus.DEAD_LETTER
             else:
-                published += 1
-                msg["status"] = "PUBLISHED"
-                if msg_id in self._outbox_dead_letter_queue:
-                    del self._outbox_dead_letter_queue[msg_id]
+                existing.max_retries = max_retries
+            tracked.append((msg, existing))
+
+        if reconcile_dead_letter:
+            reconciled = self._outbox.reconcile_dead_letters()
+
+        def publisher(outbox_msg):
+            event_type = str(outbox_msg.payload.get("event_type", outbox_msg.topic))
+            msg_id = str(outbox_msg.payload.get("id", outbox_msg.idempotency_key))
+            if force_fail_pattern and (force_fail_pattern in event_type or force_fail_pattern in msg_id):
+                raise RuntimeError("injected broker failure")
+
+        published = self._outbox.relay_pending(publisher=publisher)
+
+        for src, existing in tracked:
+            if existing.status == OutboxStatus.PUBLISHED:
+                src["status"] = "PUBLISHED"
+                if reconcile_dead_letter:
+                    src["reconciled_at"] = utc_now().isoformat()
+            elif existing.status == OutboxStatus.DEAD_LETTER:
+                src["status"] = "DEAD_LETTER"
+                dead_letter += 1
+                failed += 1
+            elif existing.status == OutboxStatus.FAILED:
+                src["status"] = "PENDING_RETRY"
+                failed += 1
+            else:
+                src["status"] = existing.status.value
+            src["retry_count"] = existing.retry_count
 
         total = len(messages)
         is_resilient = (dead_letter == 0) or (reconcile_dead_letter and reconciled > 0)
@@ -538,4 +552,4 @@ class ResilienceService:
 
 
 # Global singleton
-resilience_service = ResilienceService()
+resilience_service = ResilienceService(outbox=global_outbox)
