@@ -120,6 +120,15 @@ from punarvas.modules.governance.national_clearinghouse import (
     NationalRegistryManifest,
     national_clearinghouse_service,
 )
+from punarvas.modules.source_access import (
+    source_access_service,
+    CapabilityType,
+    PriorityClass,
+    ActivationState,
+    AOISampleGateInput,
+    ObservationReconciliationRequest,
+    DependencyBlockerEvaluationRequest,
+)
 from punarvas.core.localization import (
     LOCALIZATION_REGISTRY,
     get_supported_languages,
@@ -2405,6 +2414,163 @@ def evaluate_compliance_posture(req: EvaluateCompliancePostureApiRequest):
         active_control_ids=req.active_control_ids,
     )
     return APIResponseEnvelope(data=res.model_dump())
+
+
+# ==============================================================================
+# PHASE 13: Source Access, Provider Health & Operational Blocker Gating (ARC-C13)
+# ==============================================================================
+
+class CatalogSearchApiRequest(BaseModel):
+    source_id: str
+    query_filter: str = ""
+    actor_id: Optional[str] = "analyst"
+
+
+class CheckGovernanceApiRequest(BaseModel):
+    source_id: str
+    target_geography: str
+
+
+class SimulateBasemapFailureApiRequest(BaseModel):
+    provider_id: str = "S53"
+    actor_id: Optional[str] = "sys-admin"
+
+
+@app.get("/api/v1/sources/capabilities", response_model=APIResponseEnvelope)
+def list_source_capabilities(
+    priority_class: Optional[PriorityClass] = None,
+    capability_type: Optional[CapabilityType] = None,
+    activation_state: Optional[ActivationState] = None,
+):
+    """
+    List all S01-S54 operational source capabilities with optional filters (FR-076, RUL-076).
+    """
+    caps = source_access_service.list_capabilities(
+        priority_class=priority_class,
+        capability_type=capability_type,
+        activation_state=activation_state,
+    )
+    return APIResponseEnvelope(data=[c.model_dump() for c in caps])
+
+
+@app.get("/api/v1/sources/capabilities/{source_id}", response_model=APIResponseEnvelope)
+def get_source_capability(source_id: str):
+    """
+    Get detailed capability specification, intended use, and explicit non-uses for a source.
+    """
+    cap = source_access_service.get_capability(source_id)
+    if not cap:
+        raise HTTPException(status_code=404, detail=f"Source capability '{source_id}' not found in S01-S54 register")
+    return APIResponseEnvelope(data=cap.model_dump())
+
+
+@app.post("/api/v1/sources/catalog-search", response_model=APIResponseEnvelope)
+def record_source_catalog_search(req: CatalogSearchApiRequest):
+    """
+    Simulate/record catalog discovery (FR-077, AT-31).
+    Explicitly affirms CATALOG_VISIBLE != APPROVED_FOR_USE.
+    """
+    try:
+        res = source_access_service.record_catalog_search(
+            source_id=req.source_id,
+            query_filter=req.query_filter,
+            actor_id=req.actor_id or "analyst",
+        )
+        return APIResponseEnvelope(data=res)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/v1/sources/aoi-sample/validate", response_model=APIResponseEnvelope)
+def validate_aoi_sample(sample_input: AOISampleGateInput):
+    """
+    Execute Section 6 AOI sample gate (FR-078, RUL-077, AT-38).
+    Transitions sample to APPROVED_FOR_USE or QUARANTINED.
+    """
+    try:
+        res = source_access_service.validate_aoi_sample(
+            sample_input=sample_input,
+            actor_id="api-user",
+        )
+        return APIResponseEnvelope(data=res.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/api/v1/sources/mirror-groups", response_model=APIResponseEnvelope)
+def list_mirror_groups():
+    """
+    List shared lineage and mirror groups (FR-079, RUL-078).
+    """
+    groups = source_access_service.list_mirror_groups()
+    return APIResponseEnvelope(data=[g.model_dump() for g in groups])
+
+
+@app.post("/api/v1/sources/mirror-groups/reconcile", response_model=APIResponseEnvelope)
+def reconcile_mirror_observations(req: ObservationReconciliationRequest):
+    """
+    Deduplicate shared observation entries across mirror platforms (FR-079, AT-32).
+    """
+    try:
+        res = source_access_service.reconcile_mirror_observations(req, actor_id="api-analyst")
+        return APIResponseEnvelope(data=res.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/api/v1/sources/check-governance", response_model=APIResponseEnvelope)
+def check_geography_governance(source_id: str, target_geography: str):
+    """
+    Check source against geography lockouts and paused API status (FR-080, AT-33, AT-34).
+    """
+    res = source_access_service.check_geography_and_governance(source_id, target_geography)
+    return APIResponseEnvelope(data=res)
+
+
+@app.get("/api/v1/sources/health", response_model=APIResponseEnvelope)
+def get_provider_health(source_id: Optional[str] = None):
+    """
+    Retrieve provider adapter health and telemetry with verified zero secret leakage (FR-081, RUL-081).
+    """
+    health = source_access_service.get_provider_health(source_id)
+    return APIResponseEnvelope(data=[h.model_dump() for h in health])
+
+
+@app.post("/api/v1/sources/blockers/evaluate", response_model=APIResponseEnvelope)
+def evaluate_production_blockers(req: DependencyBlockerEvaluationRequest):
+    """
+    Evaluate S45-S50 mandatory blocker gates before production site approval or allocation (FR-083, RUL-079, AT-35).
+    """
+    report = source_access_service.evaluate_production_blockers(req, actor_id="api-officer")
+    return APIResponseEnvelope(data=report.model_dump())
+
+
+@app.get("/api/v1/sources/basemaps", response_model=APIResponseEnvelope)
+def get_basemap_configuration(provider_id: str = "S53"):
+    """
+    Retrieve basemap configuration and terms (FR-084, RUL-082).
+    """
+    try:
+        cfg = source_access_service.get_basemap_config(provider_id)
+        return APIResponseEnvelope(data=cfg.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/v1/sources/basemaps/simulate-failure", response_model=APIResponseEnvelope)
+def simulate_basemap_failure(req: SimulateBasemapFailureApiRequest):
+    """
+    Demonstrate that basemap failure decouples from analytical decision lineage (FR-084, AT-37).
+    """
+    try:
+        res = source_access_service.simulate_basemap_failure_fallback(
+            provider_id=req.provider_id,
+            actor_id=req.actor_id or "sys-admin",
+        )
+        return APIResponseEnvelope(data=res)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
 
 
 

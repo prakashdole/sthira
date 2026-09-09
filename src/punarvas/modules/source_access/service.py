@@ -775,7 +775,7 @@ class SourceAccessService:
             quarantine_reasons.append(f"Invalid or missing Coordinate Reference System (CRS): {sample_input.crs}")
 
         # 6. Resolution / scale
-        valid_res = sample_input.resolution_meters > 0.0 and sample_input.resolution_meters <= 10000.0
+        valid_res = sample_input.resolution_meters > 0.0 and sample_input.resolution_meters <= 100000.0
         checks["resolution_scale"] = valid_res
         if not valid_res:
             quarantine_reasons.append(f"Implausible resolution: {sample_input.resolution_meters} meters")
