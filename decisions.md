@@ -63,6 +63,7 @@ A material change must add or supersede a decision rather than rewrite the old r
 | DEC-040 | Delivery Execution, Defect Severity Classification, and External Interface Reconciliation | ACCEPTED |
 | DEC-041 | Official Approvals, Statutory Notifications, Citizen Objections, and Capacity Reservation | ACCEPTED |
 | DEC-042 | Government Dossiers, Evidence-Bound Field Checklists, and Tamper-Evident Export Manifests | ACCEPTED |
+| DEC-043 | Formula Classification, Parameter Registry, Mathematical Validation, and Statutory Compliance Control | ACCEPTED |
 
 
 
@@ -578,6 +579,40 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Consequences:** All exports are immutable once sealed and can be independently validated by court-appointed auditors or appellate authorities.
 - **Evidence:** `plan.md` #11, `rules.md` RUL-052–060, RUL-075, `trd.md` FR-053–058, NFR-019–022, AT-12, AT-13, AT-14, AT-21, AT-23, AT-24, Disaster Management Act 2005 §31, Kerala Panchayat Raj Act 1994 §166.
 - **Review trigger:** Revisions to Kerala LSGD Disaster Management planning guidelines, Comptroller & Auditor General (CAG) audit standards, or MeitY GIGW requirements.
+
+### DEC-043 — Formula Classification, Parameter Registry, Mathematical Validation, and Statutory Compliance Control (Phase 12 / ARC-C07, FR-071–FR-075, RUL-061–RUL-066)
+
+- **Status:** ACCEPTED.
+- **Context:** `trd.md` (§3.12, FR-071–FR-075), `architecture.md` (§8.5, ARC-C07), `rules.md` (RUL-061–RUL-066), `equations.md`, and `parameters.md` govern mathematical formulation, parameter contracts, execution dispatch, numerical validation, lineage replay, and the statutory compliance register. In public disaster relocation planning, arbitrary algorithmic formulas (such as unverified GLOF power laws, opaque master scores, or unanchored weights) or unverified parameter defaults can cause severe allocation injustices, geotechnical vulnerabilities, or legal invalidation under judicial review.
+- **Decision:**
+  1. *Immutable Formula and Parameter Registry (FR-071, RUL-061, RUL-062):* Maintain effective-dated, versioned formula and parameter catalogs implementing `equations.md` (E01–E60) and `parameters.md` (PAR-001–PAR-020). Every formula specifies classification (`CORE`, `OPTIONAL`, `SPECIALIST_EXTERNAL`, `REJECTED`), owner role, requirement links, test links, and SHA-256 hash. Every parameter specifies unit (UCUM compatible), spatial/temporal support, source capability (`S01`–`S54`), acquisition method, and fail-closed missing behavior (`UNKNOWN`/`BLOCKED`).
+  2. *Strict Allow-List Execution Dispatch & Deny-List Enforcement (FR-072, RUL-061, RUL-066):*
+     - `CORE` formulas explicitly activated by an approved policy version execute in decision workflows.
+     - `OPTIONAL` formulas are separately labelled as `ANALYTICAL_OPTIONAL` and require explicit activation.
+     - `SPECIALIST_EXTERNAL` formulas (e.g., E37–E54 geotechnical/hydrological/InSAR equations) are non-executable natively and fail closed with `UnvalidatedSpecialistFormulaError` unless imported as externally validated packages with local calibration evidence.
+     - `REJECTED` formulas (e.g., E60 Opaque Master Score $\Omega$, E55 unverified GLOF formula `Q_peak = 0.00077 V^1.017`) strictly raise `RejectedFormulaExecutionError` and cannot execute under any policy.
+  3. *Strict Numerical Validation Guard (FR-073, RUL-063, RUL-064):*
+     - Guard against divide-by-zero, NaN, infinity, empty geometries, and invalid domain values (e.g., negative slope, negative population, negative water yield).
+     - Strict dimensional consistency: Population, households, dwellings, area, money, flow, storage, and probability remain dimensionally distinct and cannot be summed or compared without explicit approved conversion factors (`RUL-064`).
+     - Missing or out-of-coverage inputs raise typed validation failures or yield `UNKNOWN`; never coerced to zero, pass, or favorable scores (`RUL-063`).
+  4. *Lineage Replay & Historical Explainability (FR-074):*
+     - Every numerical execution emits a `FormulaExecutionAuditRecord` recording formula ID, formula version, parameter versions, inputs snapshot, computed output, numerical warnings, uncertainty bounds, software container version, execution timestamp, and SHA-256 reproducibility hash.
+     - Provide a bit-for-bit replay verification method (`reproduce_formula_execution`).
+  5. *Effective-Dated Statutory Compliance Applicability Register (FR-075):*
+     - Maintain the legal/compliance applicability register covering:
+       - Disaster Management Act 2005 (Amended 2025, commenced 9 April 2025; §30, §31(4) 2-year update cadence, §65).
+       - Right to Fair Compensation and Transparency in Land Acquisition, Rehabilitation and Resettlement Act 2013 (RFCTLARR) & Kerala Rules 2015.
+       - Scheduled Tribes and Other Traditional Forest Dwellers (Recognition of Forest Rights) Act 2006 (FRA) & Gram Sabha consent requirements.
+       - Digital Personal Data Protection Act 2023 & DPDP Rules 2025 (purpose specification, data minimization, consent revocation).
+       - Kerala Land Relinquishment Act 1958 & Rules.
+       - Kerala Panchayat Raj Act 1994 & Kerala Municipality Act 1994 (LSGD DM plan integration).
+       - National Geospatial Policy 2022 & Indian Geospatial Guidelines (sensitive attributes, boundary fidelity).
+       - CERT-In Directions 2022 (incident reporting, log retention).
+- **Why:** Protects constitutional rights, statutory integrity, and scientific defensibility while eliminating hidden heuristics or magic constants from governmental decision-making.
+- **Rejected:** Hardcoded floating-point weights; silent NaN/zero coercion; unverified specialist model execution without local ground calibration; executing rejected opaque master scores ($\Omega$).
+- **Consequences:** Any formula execution produces an auditable trace that can be replayed and verified independently by regulatory oversight bodies.
+- **Evidence:** `trd.md` FR-071–075, `rules.md` RUL-061–066, `architecture.md` §8.5, `equations.md`, `parameters.md`, Disaster Management Act 2005 §31(4), DPDP Rules 2025.
+- **Review trigger:** Statutory amendments, notification of new DM/data protection rules, or introduction of new validated geotechnical/hydrological formula packages.
 
 ## 4. Explicit research corrections adopted
 
