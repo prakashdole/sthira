@@ -64,6 +64,7 @@ A material change must add or supersede a decision rather than rewrite the old r
 | DEC-041 | Official Approvals, Statutory Notifications, Citizen Objections, and Capacity Reservation | ACCEPTED |
 | DEC-042 | Government Dossiers, Evidence-Bound Field Checklists, and Tamper-Evident Export Manifests | ACCEPTED |
 | DEC-043 | Formula Classification, Parameter Registry, Mathematical Validation, and Statutory Compliance Control | ACCEPTED |
+| DEC-044 | Source Capability Classification, Permitted AOI Sample Gates, Provider Health Monitoring, and Dependency Blocker Governance | ACCEPTED |
 
 
 
@@ -613,6 +614,26 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Consequences:** Any formula execution produces an auditable trace that can be replayed and verified independently by regulatory oversight bodies.
 - **Evidence:** `trd.md` FR-071–075, `rules.md` RUL-061–066, `architecture.md` §8.5, `equations.md`, `parameters.md`, Disaster Management Act 2005 §31(4), DPDP Rules 2025.
 - **Review trigger:** Statutory amendments, notification of new DM/data protection rules, or introduction of new validated geotechnical/hydrological formula packages.
+
+### DEC-044 — Source Capability Classification, Permitted AOI Sample Gates, Provider Health Monitoring, and Dependency Blocker Governance (Phase 13 / ARC-C13, FR-076–FR-084, RUL-076–RUL-083)
+
+- **Status:** ACCEPTED.
+- **Context:** `trd.md` (§3.13, FR-076–FR-084, NFR-034–NFR-035, AT-31–AT-38), `architecture.md` (§6, ARC-C13), `rules.md` (RUL-076–RUL-083), and `source-register.md` govern operational source acquisition, provider health monitoring, and blocker gating. In public spatial intelligence systems, treating catalog visibility or provider documentation as operational access causes catastrophic failure in production. Furthermore, counting duplicate satellite observations or building polygons across multiple platforms as independent evidence creates false confidence. In disaster recovery, public open data can support exposure screening and sandboxes, but missing field and administrative evidence (S45–S50: land title records, water tests, FRA clearances, consent, geotechnical boreholes, and sanctioned funding) must strictly block production site approval and household allocation.
+- **Decision:**
+  1. *Complete S01–S54 Capability Inventory (FR-076, RUL-076):* Pre-seed and register all 54 sources from `source-register.md` §5 with capability type (`PRODUCT`, `CATALOG`, `DOWNLOAD`, `PROCESSING`, `DISPLAY`, `AGENCY_RECORD`, `FIELD_ACQUISITION`), priority class (`CORE`, `SUPPORT`, `AGENCY`, `AGENCY_BLOCKER`, `FIELD_BLOCKER`, etc.), custodian, owner role, intended use, and explicit non-uses.
+  2. *Decoupled Capability Lifecycle & Catalog Visibility Separation (FR-077, RUL-076, AT-31):* Model discovery, authentication, entitlement, download, processing, and display separately. A successful catalog query sets state to `CATALOG_VISIBLE` or `DOCUMENTED`; it NEVER sets `APPROVED_FOR_USE`, downloaded, or licensed. Downstream decision dependencies remain `HOLD` until verified download/receipt succeeds.
+  3. *Permitted AOI Sample Gate & Immediate Quarantine (FR-078, RUL-077, AT-38):* Before reaching `APPROVED_FOR_USE`, a candidate AOI sample must pass 12 explicit criteria: license/offline rights, AOI spatial extent, temporal validity, schema format, projected CRS/vertical datum, resolution, plausible units and NoData, bit-for-bit SHA-256 checksum match, cadence, quota/cost, named reviewer, and reproducibility. Any violation (corrupt checksum, missing CRS, implausible units, stale observation) immediately transitions the source to `QUARANTINED` and halts dependent gates.
+  4. *Shared Lineage & Mirror Deduplication (FR-079, RUL-078, AT-32):* Group multi-platform observations (e.g. CDSE S10, Earth Search S11, Planetary Computer S12; Google Open Buildings S22, MS ML Buildings S23, OSM S41; DEMs S18–S21; Rainfall S32, S34, S35) into explicit `MirrorGroup` records. Prevent summing or treating mirror platforms as independent corroboration. Enforce reconciliation strategies (`PRIMARY_AUTHORITATIVE`, `UNION_DEDUPLICATED`, `LATEST_STABLE_ONLY`).
+  5. *Geography and Paused API Lockouts (FR-080, RUL-080, AT-33, AT-34):* C-FLOOD (S07) is locked out of Wayanad/Kerala with `UNSUPPORTED_GEOGRAPHY`; Himalayan Glacial Lake (S52) is locked out of Kerala; SoilGrids REST (S31) is locked out with `PAUSED_API` redirecting to WCS/file.
+  6. *Provider Health & Zero-Secret Leakage (FR-081, RUL-081, NFR-034):* Expose entitlement state, token status, rate limits, quota limits, observation age, latency, error rates, and file fallbacks. All secrets, API keys, tokens, and credentials are strictly redacted before output to API, logs, or UI.
+  7. *Sandbox Provenance & Isolation (FR-082):* Formally isolate synthetic test fixtures from production records; prevent accidental leakage or promotion of synthetic records into official administrative decisions.
+  8. *S45–S50 Production Blocker Gate Enforcement (FR-083, RUL-079, AT-35):* Hard-block any live site approval or household allocation if any of S45 (Land/Right), S46 (Water/Service), S47 (FRA/Forest), S48 (Household Consent), S49 (Qualified Geotechnical Survey), or S50 (Sanctioned Funding) evidence is missing, unverified, or pending review.
+  9. *Basemap Decoupling & Display Safeguards (FR-084, RUL-082, AT-37):* Basemaps (S53) are display infrastructure only; public OSM tile bulk downloading is forbidden. If basemap tiles fail or keys expire, analytical decision lineage is completely decoupled and intact, rendering graceful non-map tabular/fallback views.
+- **Why:** Replaces informal, brittle data ingestion with a rigorously governed, verifiable spatial intelligence engine that guarantees data integrity, regulatory compliance, and statutory safety in disaster relocation.
+- **Rejected:** Treating documentation or catalog hits as usable access; summing duplicate footprints from multiple vendors; silently substituting synthetic data or missing land records during production approvals; exposing raw API tokens or credentials in logs/APIs; allowing basemap failures to corrupt analytical lineage.
+- **Consequences:** All external spatial assets undergo deterministic AOI gate evaluation. Production allocation and site approvals cannot proceed without complete S45–S50 verified evidence.
+- **Evidence:** `trd.md` FR-076–084, NFR-034–035, AT-31–38; `rules.md` RUL-076–083; `architecture.md` ARC-C13; `source-register.md` §5, §6, §7.
+- **Review trigger:** Provider API changes, new statutory land/FRA data releases, or state-level geospatial policy updates.
 
 ## 4. Explicit research corrections adopted
 
