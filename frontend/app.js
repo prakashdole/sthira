@@ -24,6 +24,7 @@ const i18n = {
     tab_clearinghouse: "National Clearinghouse (Phase 6)",
     tab_phase9: "Approvals & Objections (Phase 9)",
     tab_phase10: "Delivery & Completion (Phase 10)",
+    tab_phase11: "Dossiers & Manifests (Phase 11)",
     tab_audit: "Audit & Integrity",
     site_card_capacity: "Dwelling Capacity",
     site_card_water: "Lean-Season Water",
@@ -51,6 +52,7 @@ const i18n = {
     tab_clearinghouse: "ദേശീയ ക്ലിയറിംഗ് ഹൗസ് (ഘട്ടം 6)",
     tab_phase9: "അംഗീകാരങ്ങളും പരാതികളും (ഘട്ടം 9)",
     tab_phase10: "നിർവ്വഹണവും പൂർത്തീകരണവും (ഘട്ടം 10)",
+    tab_phase11: "രേഖകളും മാനിഫെസ്റ്റുകളും (ഘട്ടം 11)",
     tab_audit: "ഓഡിറ്റ് പരിശോധന",
     site_card_capacity: "വീടുകളുടെ ശേഷി",
     site_card_water: "വേനൽക്കാല ജലലഭ്യത",
@@ -79,6 +81,7 @@ const i18n = {
     tab_clearinghouse: "राष्ट्रीय समाशोधन केंद्र (Phase 6)",
     tab_phase9: "अनुमोदन एवं आपत्तियां (Phase 9)",
     tab_phase10: "वितरण एवं पूर्णता (Phase 10)",
+    tab_phase11: "दस्तावेज़ एवं घोषणापत्र (Phase 11)",
     tab_audit: "ऑडिट एवं अखंडता",
     site_card_capacity: "आवास क्षमता",
     site_card_water: "ग्रीष्मकालीन जल उपलब्धता",
@@ -895,6 +898,93 @@ function renderActiveTab() {
             </div>
           </div>
           <div id="phase10-completion-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+      </div>
+    `;
+  } else if (activeTab === 'phase11') {
+    content.innerHTML = `
+      <div class="card" style="border-top: 4px solid #0284c7;">
+        <h3>Government Dossiers, Evidence-Bound Checklists & Cryptographic Manifests (Phase 11)</h3>
+        <p><strong>Normative Reference:</strong> rules.md (RUL-052–RUL-060, RUL-075), plan.md (#11), trd.md (§3.9, FR-053–FR-058, NFR-019–022, AT-12, AT-13, AT-23), DEC-012, DEC-013, DEC-042.</p>
+        <div style="background: #f0f9ff; border: 1px solid #7dd3fc; padding: 0.75rem; border-radius: 6px; margin-top: 0.5rem; font-size: 0.9em; color: #0369a1;">
+          <strong>Traceability & Truth Invariant (FR-053 / DEC-042):</strong> Every factual statement in government dossiers links mathematically to verified source data (S01–S54) or is flagged for human review. In Kerala LSGD DM Plan annexures, participatory approvals (Gram Sabha resolutions, LSG working groups) remain explicitly incomplete (never invented!). All exports are sealed with tamper-evident SHA-256 manifests.
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top: 1rem;">
+        <!-- Card 1: Evidence-Bound Government Dossiers & Checklists -->
+        <div class="card">
+          <h4>1. Government Dossiers & Field Checklists (FR-053 / FEAT-018)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Generate structured, evidence-linked review packs for town planners, welfare officers, and field engineers.</p>
+
+          <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+              <div>
+                <label style="font-size: 0.85em; font-weight: bold;">Site ID:</label>
+                <input type="text" id="ph11-site-id" value="SITE-NEDUMBALA-01" class="btn" style="text-align: left; background: #fff; cursor: text; width: 100%;">
+              </div>
+              <div>
+                <label style="font-size: 0.85em; font-weight: bold;">Household ID:</label>
+                <input type="text" id="ph11-hh-id" value="HH-WYD-900" class="btn" style="text-align: left; background: #fff; cursor: text; width: 100%;">
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
+              <button class="btn btn-primary" onclick="generateSiteDossierDemo()">Generate Site Dossier</button>
+              <button class="btn btn-secondary" onclick="generateBeneficiaryPackDemo()">Generate Beneficiary Pack</button>
+              <button class="btn" onclick="generateFieldChecklistDemo()">Field Verification Checklist</button>
+              <button class="btn" onclick="generateDecisionSummaryDemo()">Decision Provenance Dossier</button>
+            </div>
+          </div>
+          <div id="phase11-dossier-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+
+        <!-- Card 2: Kerala LSGD DM Plan Annex -->
+        <div class="card">
+          <h4>2. Kerala LSGD DM Plan Annexure (FR-054 / DEC-013)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Four-section Panchayati Raj / LSGI plan annex. Participatory governance fields remain explicitly incomplete.</p>
+
+          <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem;">
+            <label style="font-size: 0.85em; font-weight: bold;">Grama Panchayat / LSG Name:</label>
+            <input type="text" id="ph11-lsg-name" value="Meppadi Grama Panchayat" class="btn" style="text-align: left; background: #fff; cursor: text;">
+
+            <div style="margin-top: 0.5rem;">
+              <button class="btn btn-primary" onclick="generateLSGDAnnexDemo()">Generate Kerala LSGD Plan Annex (4 Sections)</button>
+            </div>
+          </div>
+          <div id="phase11-lsgd-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top: 1.5rem;">
+        <!-- Card 3: Machine-Readable Exports & Cryptographic Manifests -->
+        <div class="card">
+          <h4>3. Spatial & Tabular Exports with Cryptographic Manifests (FR-055 / FR-056)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">RFC 7946 GeoJSON and RFC 4180 CSV packages sealed with SHA-256 tamper-evident manifests.</p>
+
+          <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem;">
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <button class="btn btn-secondary" onclick="exportGeoJsonDemo()">Export GeoJSON Package</button>
+              <button class="btn btn-secondary" onclick="exportCsvDemo()">Export CSV Table</button>
+              <button class="btn btn-primary" onclick="verifyManifestDemo(false)">Verify Manifest Integrity (Valid)</button>
+              <button class="btn" style="border-color: #dc2626; color: #dc2626;" onclick="verifyManifestDemo(true)">Simulate Tamper Detection (Fail-Closed)</button>
+            </div>
+          </div>
+          <div id="phase11-export-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+
+        <!-- Card 4: Public Transparency & Disclosure Protection -->
+        <div class="card">
+          <h4>4. Public Transparency & Disclosure Protection (FEAT-019 / RUL-075 / AT-23)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Enforces k-anonymity (k ≥ 5), small-cell suppression, and detects differencing attacks across release rounds.</p>
+
+          <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem;">
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <button class="btn btn-primary" onclick="generatePublicProjectionDemo(1)">Round 1: Publish Aggregate with Cell Suppression (&lt;5)</button>
+              <button class="btn" style="border-color: #d97706; color: #d97706;" onclick="generatePublicProjectionDemo(2)">Round 2: Test Differencing Attack Detection (Δ=1)</button>
+            </div>
+          </div>
+          <div id="phase11-transparency-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
         </div>
       </div>
     `;
@@ -1951,6 +2041,478 @@ async function recordLivelihoodAuditDemo() {
       `;
     } else {
       resultDiv.innerHTML = `<div style="color: #b91c1c;">Error recording followup: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+// ==========================================
+// Phase 11: Government Dossiers, Spatial Exports & Manifests
+// ==========================================
+
+let phase11State = {
+  lastManifestId: null,
+  lastExportManifestId: null,
+  lastExportPayload: null,
+};
+
+async function generateSiteDossierDemo() {
+  const resultDiv = document.getElementById('phase11-dossier-result');
+  if (!resultDiv) return;
+  const siteId = document.getElementById('ph11-site-id')?.value || "SITE-NEDUMBALA-01";
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/reporting/dossiers/site`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        site_id: siteId,
+        site_name: "Nedumbala Model Resettlement Zone",
+        district: "Wayanad",
+        taluk: "Vythiri",
+        village: "Meppadi",
+        gross_area_cents: 450.0,
+        usable_area_cents: 380.0,
+        dwelling_capacity: 60,
+        water_source_description: "Borewell cluster connected to gravity distribution scheme",
+        lean_season_yield_lpcd: 78.0,
+        hazard_buffer_distance_m: 350.0,
+        slope_mean_deg: 14.5,
+        road_access_width_m: 4.5,
+        evidence_links: [
+          {
+            field_name: "hazard_buffer_distance_m",
+            statement: "Site boundary is 350m outside designated 2024 debris flow runout zone",
+            source_id: "S06_KSDMA_RUNOUT",
+            evidence_hash: "hash_s06_runout_val_2024",
+            is_verified: true
+          },
+          {
+            field_name: "lean_season_yield_lpcd",
+            statement: "KWA hydrogeological yield test confirmed 78 LPCD sustainable yield",
+            source_id: "S07_CGWB_KWA_YIELD",
+            evidence_hash: "hash_s07_kwa_yield_2024",
+            is_verified: true
+          }
+        ],
+        unresolved_conditions: ["COND-FRA-NOC-01"],
+        generating_user_id: "chief_town_planner",
+        approval_ref: "ORD-DDMA-WYD-2025-012"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      const data = json.data;
+      phase11State.lastManifestId = data.manifest_id;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>Site Review Dossier Generated (FR-053):</strong> <code>${data.site_id}</code><br>
+          Site: <strong>${data.site_name}</strong> | Capacity: <strong>${data.dwelling_capacity} dwellings</strong> (${data.usable_area_cents} cents usable)<br>
+          Water Yield: <strong>${data.lean_season_yield_lpcd} LPCD</strong> <span class="badge badge-pass">≥55 LPCD Pass</span> | Buffer: <strong>${data.hazard_buffer_distance_m}m</strong> | Slope: <strong>${data.slope_mean_deg}°</strong><br>
+          Evidence Links: <strong>${data.evidence_links.length} sources bound</strong> (S06, S07) | Unresolved: <em>${data.unresolved_conditions.join(', ') || 'None'}</em><br>
+          Sealed Manifest: <code>${data.manifest_id}</code> | Hash: <code>${data.sha256_checksum.substring(0, 16)}...</code>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function generateBeneficiaryPackDemo() {
+  const resultDiv = document.getElementById('phase11-dossier-result');
+  if (!resultDiv) return;
+  const hhId = document.getElementById('ph11-hh-id')?.value || "HH-WYD-900";
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/reporting/dossiers/beneficiary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        household_id: hhId,
+        head_of_household: "Pathumma K.",
+        member_count: 4,
+        vulnerability_score: 85.0,
+        disability_or_special_needs: true,
+        tenure_category: "OWNER",
+        relocation_necessity_review_id: "REV-NEC-009",
+        preferred_pathway: "TOWNSHIP",
+        assigned_site_id: "SITE-NEDUMBALA-01",
+        eligible_schemes: ["PUNARJANI_LAND_GRANT", "LIFE_MISSION_HOUSING"],
+        evidence_links: [
+          {
+            field_name: "vulnerability_score",
+            statement: "Senior citizen headed household with mobility impaired dependent",
+            source_id: "S49_FIELD_SURVEY",
+            evidence_hash: "hash_survey_hh_900",
+            is_verified: true
+          }
+        ],
+        consent_token_ref: "CONSENT-TKN-WYD-900",
+        unresolved_conditions: [],
+        generating_user_id: "social_welfare_officer"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      const data = json.data;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #eff6ff; border: 1px solid #3b82f6; border-radius: 4px; color: #1e40af;">
+          ✓ <strong>Beneficiary Review Pack Generated (FR-053):</strong> <code>${data.household_id}</code><br>
+          Head: <strong>${data.head_of_household}</strong> (${data.member_count} members) | Tenure: <strong>${data.tenure_category}</strong><br>
+          Vulnerability: <span class="badge badge-fail">${data.vulnerability_score} / 100</span> | Special Needs: <span class="badge badge-warn">ACCESSIBILITY REQUIRED</span><br>
+          Eligible Schemes: <strong>${data.eligible_schemes.join(', ')}</strong> | Preferred Pathway: <strong>${data.preferred_pathway}</strong><br>
+          Assigned Site: <code>${data.assigned_site_id}</code> | Consent Token: <code>${data.consent_token_ref}</code><br>
+          Sealed Manifest: <code>${data.manifest_id}</code>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function generateFieldChecklistDemo() {
+  const resultDiv = document.getElementById('phase11-dossier-result');
+  if (!resultDiv) return;
+  const siteId = document.getElementById('ph11-site-id')?.value || "SITE-NEDUMBALA-01";
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/reporting/dossiers/checklist`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        target_type: "SITE",
+        target_id: siteId,
+        items: [
+          {
+            item_id: "CHK-ROAD-01",
+            description: "Verify all-weather access road clear carriage width >= 3.66m",
+            mandatory: true,
+            verification_method: "DGPS_SURVEY_WHEEL",
+            status: "PASS",
+            officer_notes: "Carriage width measured 4.2m along 850m approach road."
+          },
+          {
+            item_id: "CHK-SLOPE-02",
+            description: "Inspect toe and crown scarp stability with inclinometer",
+            mandatory: true,
+            verification_method: "DIGITAL_INCLINOMETER",
+            status: "PASS",
+            officer_notes: "Slope 14.5° within stable bedrock envelope."
+          },
+          {
+            item_id: "CHK-WATER-03",
+            description: "Sample borewell drinking water quality (pH, turbidity, coliform)",
+            mandatory: true,
+            verification_method: "PORTABLE_SPECTROPHOTOMETER",
+            status: "UNKNOWN",
+            officer_notes: "Water lab culture test results awaited (24h incubation)."
+          }
+        ],
+        required_equipment: ["Trimble DGPS", "Digital Inclinometer", "Hach Water Testing Kit"],
+        safety_precautions: ["Hard hats & steel-toe boots mandatory", "Cease work if precipitation > 15mm/hr"],
+        generating_user_id: "pwd_executive_engineer"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      const data = json.data;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>Field Verification Checklist Created:</strong> ID <code>${data.checklist_id}</code><br>
+          Target: <strong>${data.target_type} ${data.target_id}</strong> | Inspection Items: <strong>${data.items.length} checks</strong><br>
+          Equipment: <em>${data.required_equipment.join(', ')}</em><br>
+          Safety: <small>${data.safety_precautions.join('; ')}</small><br>
+          Checklist Manifest: <code>${data.manifest_id}</code>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function generateDecisionSummaryDemo() {
+  const resultDiv = document.getElementById('phase11-dossier-result');
+  if (!resultDiv) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/reporting/dossiers/decision-summary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        decision_id: "DEC-SUMMARY-DEMO-01",
+        entity_type: "ALLOCATION_SCENARIO",
+        entity_id: "SCEN-WYD-2025-BATCH-A",
+        policy_version: "POL-WYD-2024.1",
+        source_checksums: {
+          "S01_SOI": "sha256_toposheet_v1",
+          "S04_GSI": "sha256_nlsm_landslide_2022",
+          "S06_KSDMA": "sha256_runout_meppadi_2024"
+        },
+        evidence_chain_hash: "chain_head_sha256_9981240182",
+        generating_user_id: "judicial_audit_liaison",
+        solver_seed: 42,
+        solver_tolerances: { "mip_gap": 0.01, "time_limit_sec": 60.0 },
+        approval_order_id: "GO(MS)-DMD-2025-04",
+        statutory_gazette_id: "GAZ-KL-WYD-2025-102",
+        objection_token_refs: ["RCPT-PUNARVAS-OBJ-001"]
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      const data = json.data;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #fff7ed; border: 1px solid #f97316; border-radius: 4px; color: #9a3412;">
+          ✓ <strong>Decision Provenance Dossier Generated (FEAT-020 / R3-01):</strong><br>
+          Dossier ID: <code>${data.dossier_id}</code> | Pinned Policy: <strong>${data.policy_version}</strong><br>
+          Deterministic Solver Seed: <code>${data.solver_seed}</code> | MIP Gap Tolerance: <strong>${data.solver_tolerances.mip_gap}</strong><br>
+          Official Order: <code>${data.approval_order_id}</code> | Gazette: <code>${data.statutory_gazette_id}</code><br>
+          Evidence Chain Hash: <code>${data.evidence_chain_hash}</code> | Manifest: <code>${data.manifest_id}</code>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function generateLSGDAnnexDemo() {
+  const resultDiv = document.getElementById('phase11-lsgd-result');
+  if (!resultDiv) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/reporting/lsgd-plan-annex`);
+    const json = await res.json();
+    if (res.ok) {
+      const data = json.data;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>Kerala LSGD DM Plan Annexure Generated (FR-054 / DEC-013):</strong><br>
+          Annexure ID: <code>${data.annex_id}</code> | Local Body: <strong>${data.lsg_name}</strong> (${data.district})<br>
+          <div style="margin-top: 0.5rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.9em;">
+            <div style="background: #fff; padding: 0.5rem; border-radius: 4px; border: 1px solid #a7f3d0;">
+              <strong>Section A: Hazard Profile</strong><br>
+              Wards: ${data.section_a_vulnerability_profile.vulnerable_wards.join(', ')}<br>
+              Classification: <em>${data.section_a_vulnerability_profile.hazard_classification}</em>
+            </div>
+            <div style="background: #fff; padding: 0.5rem; border-radius: 4px; border: 1px solid #a7f3d0;">
+              <strong>Section B: Beneficiaries</strong><br>
+              Needing Relocation: <strong>${data.section_b_relocation_beneficiaries.verified_households_needing_relocation} households</strong><br>
+              Status: <em>${data.section_b_relocation_beneficiaries.status}</em>
+            </div>
+          </div>
+          <div style="margin-top: 0.5rem; background: #fef3c7; border: 1px solid #f59e0b; padding: 0.5rem; border-radius: 4px; color: #92400e;">
+            <strong>Section D: Participatory & Statutory Approvals (DEC-013 Invariant):</strong><br>
+            • Gram Sabha Resolution: <span class="badge badge-warn">${data.section_d_statutory_approvals.gram_ward_sabha_resolution}</span><br>
+            • LSG Working Group: <span class="badge badge-warn">${data.section_d_statutory_approvals.lsg_working_group_recommendation}</span><br>
+            • DPC Concurrence: <span class="badge badge-warn">${data.section_d_statutory_approvals.district_planning_committee_approval}</span><br>
+            <small>⚠️ Participatory fields are preserved explicitly incomplete — never fabricated by algorithm!</small>
+          </div>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function exportGeoJsonDemo() {
+  const resultDiv = document.getElementById('phase11-export-result');
+  if (!resultDiv) return;
+
+  try {
+    const features = [
+      {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [76.1285, 11.5242] },
+        properties: { site_id: "SITE-ELSTONE-01", name: "Elstone Estate", dwellings: 80, status: "PASS" }
+      },
+      {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [76.1650, 11.5420] },
+        properties: { site_id: "SITE-NEDUMBALA-01", name: "Nedumbala Site", dwellings: 60, status: "PASS" }
+      }
+    ];
+
+    const res = await fetch(`${API_BASE}/api/v1/reporting/export/geojson`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        export_id: "EXP-GEO-01",
+        features: features,
+        generating_user_id: "gis_analyst"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      const data = json.data;
+      phase11State.lastExportPayload = JSON.stringify(data.geojson, null, 2);
+      phase11State.lastExportManifestId = data.manifest.manifest_id;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>RFC 7946 GeoJSON Export Generated:</strong><br>
+          Type: <code>${data.geojson.type}</code> | CRS: <code>${data.geojson.crs.properties.name}</code><br>
+          Features: <strong>${data.geojson.features.length} spatial features exported</strong><br>
+          Sealed Manifest: <code>${data.manifest.manifest_id}</code> | Checksum: <code>${data.checksum.substring(0, 16)}...</code>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function exportCsvDemo() {
+  const resultDiv = document.getElementById('phase11-export-result');
+  if (!resultDiv) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/reporting/export/csv`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        export_id: "EXP-TABULAR-01",
+        headers: ["Household_ID", "Head_Name", "Vulnerability", "Pathway", "Site_Assigned"],
+        rows: [
+          ["HH-WYD-001", "Raman K.", "78.5", "TOWNSHIP", "SITE-ELSTONE-01"],
+          ["HH-WYD-002", "Sita M.", "91.0", "TOWNSHIP", "SITE-ELSTONE-01"],
+          ["HH-WYD-003", "K. Biju", "45.0", "SELF_RELOCATION", "N/A"]
+        ],
+        generating_user_id: "case_worker"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      const data = json.data;
+      phase11State.lastExportPayload = data.csv_content;
+      phase11State.lastExportManifestId = data.manifest.manifest_id;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #eff6ff; border: 1px solid #3b82f6; border-radius: 4px; color: #1e40af;">
+          ✓ <strong>RFC 4180 CSV Export Generated:</strong><br>
+          Rows: <strong>3 household records</strong> | Sealed Manifest: <code>${data.manifest.manifest_id}</code><br>
+          Checksum: <code>${data.checksum.substring(0, 16)}...</code><br>
+          <pre style="background: #f8fafc; padding: 0.5rem; border-radius: 4px; font-size: 0.82em; margin-top: 0.25rem;">${data.csv_content}</pre>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function verifyManifestDemo(tamper = false) {
+  const resultDiv = document.getElementById('phase11-export-result');
+  if (!resultDiv) return;
+
+  if (!phase11State.lastExportManifestId) {
+    resultDiv.innerHTML = `<div style="padding: 0.75rem; background: #fee2e2; border: 1px solid #ef4444; border-radius: 4px; color: #b91c1c;">Please generate a GeoJSON or CSV export first.</div>`;
+    return;
+  }
+
+  const payloadToSend = tamper
+    ? (phase11State.lastExportPayload + "\nINJECTED_UNAUTHORIZED_MUTATION_ROW")
+    : phase11State.lastExportPayload;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/reporting/manifest/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        manifest_id: phase11State.lastExportManifestId,
+        payload_content: payloadToSend
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      const data = json.data;
+      if (data.verified) {
+        resultDiv.innerHTML = `
+          <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+            ✓ <strong>Cryptographic Manifest Verification PASSED (FR-056 / FR-057):</strong><br>
+            Manifest: <code>${data.manifest_id}</code> | Status: <span class="badge badge-pass">AUTHENTIC & UNTAMPERED</span><br>
+            Stored Hash: <code>${data.stored_checksum}</code><br>
+            Calculated Hash: <code>${data.calculated_checksum}</code><br>
+            Classification: <strong>${data.classification}</strong> | Generated by: <strong>${data.generating_user}</strong>
+          </div>
+        `;
+      } else {
+        resultDiv.innerHTML = `
+          <div style="padding: 0.75rem; background: #fef2f2; border: 1px solid #ef4444; border-radius: 4px; color: #991b1b;">
+            ✕ <strong>Tamper Alert: Manifest Verification FAILED (Fail-Closed):</strong><br>
+            Manifest: <code>${data.manifest_id}</code> | Status: <span class="badge badge-fail">CORRUPTED / TAMPERED</span><br>
+            Stored Hash: <code>${data.stored_checksum}</code><br>
+            Calculated Hash: <code>${data.calculated_checksum}</code><br>
+            <em>${data.reason}</em>
+          </div>
+        `;
+      }
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function generatePublicProjectionDemo(round = 1) {
+  const resultDiv = document.getElementById('phase11-transparency-result');
+  if (!resultDiv) return;
+
+  const counts = round === 1
+    ? { "Meppadi_Ward_1": 28, "Meppadi_Ward_2": 3, "Vellarimala_Ward_4": 19 }
+    : { "Meppadi_Ward_1": 29, "Meppadi_Ward_2": 3, "Vellarimala_Ward_4": 19 };
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/reporting/public-transparency-projection`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projection_id: `PUB-PROJ-WYD-ROUND-${round}`,
+        district: "Wayanad",
+        round_number: round,
+        subregion_counts: counts,
+        k_threshold: 5
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      const data = json.data;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: ${data.differencing_risk_detected ? '#fff7ed' : '#ecfdf5'}; border: 1px solid ${data.differencing_risk_detected ? '#f97316' : '#10b981'}; border-radius: 4px; color: ${data.differencing_risk_detected ? '#9a3412' : '#065f46'};">
+          <strong>Public Transparency Projection (Round ${data.round_number}):</strong><br>
+          k-Anonymity Threshold: <strong>k ≥ ${data.k_anonymity_threshold}</strong> | Cell Suppression: <span class="badge ${data.cell_suppression_applied ? 'badge-warn' : 'badge-pass'}">${data.cell_suppression_applied ? `${data.suppressed_cell_count} Cell(s) Suppressed` : 'None'}</span><br>
+          Coordinates: <em>${data.coordinate_generalization} (Dwelling points generalized)</em><br>
+          <div style="margin-top: 0.5rem; background: #fff; padding: 0.5rem; border-radius: 4px; border: 1px solid #e2e8f0;">
+            <pre style="margin: 0; font-size: 0.85em;">${JSON.stringify(data.aggregates, null, 2)}</pre>
+          </div>
+          ${data.differencing_risk_detected ? `
+            <div style="margin-top: 0.5rem; padding: 0.5rem; background: #fee2e2; border: 1px solid #ef4444; border-radius: 4px; color: #b91c1c;">
+              ⚠️ <strong>${data.differencing_warning}</strong>
+            </div>
+          ` : `
+            <div style="margin-top: 0.25rem; font-size: 0.85em; color: #065f46;">✓ Privacy check passed: No differencing attack risk against previous release.</div>
+          `}
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
     }
   } catch (e) {
     resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
