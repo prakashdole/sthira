@@ -66,6 +66,7 @@ A material change must add or supersede a decision rather than rewrite the old r
 | DEC-043 | Formula Classification, Parameter Registry, Mathematical Validation, and Statutory Compliance Control | ACCEPTED |
 | DEC-044 | Source Capability Classification, Permitted AOI Sample Gates, Provider Health Monitoring, and Dependency Blocker Governance | ACCEPTED |
 | DEC-045 | Platform Reliability, Transactional Outbox Resilience, Cross-Channel Leakage Prevention, and CERT-In Compliance Operations | ACCEPTED |
+| DEC-046 | Prototype P0 security boundary: HMAC sessions, bound step-up MFA, outbox retry, degraded writes | ACCEPTED |
 
 
 
@@ -652,6 +653,22 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Consequences:** All asynchronous events pass through the transactional outbox with durable dead-letter recovery. Restores are provably consistent. Release readiness is verifiable via machine-readable evidence reports.
 - **Evidence:** `trd.md` NFR-028–035, AT-24–30, §9; `rules.md` RUL-020, RUL-050–055; CERT-In Directions 2022; DPDP Act 2023 / Rules 2025.
 - **Review trigger:** Revisions to CERT-In guidelines, DPDP statutory enforcement dates, or changes to disaster recovery infrastructure.
+
+### DEC-046 — Prototype P0 security boundary: HMAC sessions, bound step-up MFA, outbox retry, degraded writes
+
+- **Status:** ACCEPTED.
+- **Context:** Revision 1.4 audit (REM-001, REM-002, REM-005, REM-007) found every API unauthenticated, prefix-matching MFA (`MFA-STEPUP-anything` produced `OFFICIALLY_APPROVED`), core outbox items stuck in `FAILED` without retry/dead-letter, and degraded mode reported but not enforced on mutations. Architecture still names Keycloak, PostgreSQL/PostGIS, and Celery as production targets.
+- **Decision:**
+  1. Protect every non-public HTTP route with a verified HMAC session. Identity, roles and geography come from the token, never from request body fields.
+  2. Use a local prototype identity directory as the OIDC adapter stand-in. Production remains Keycloak/OIDC (DEC-008/017). `PUNARVAS_AUTH_SECRET` and `PUNARVAS_PROTOTYPE_PASSWORD` override defaults; defaults are prototype-only.
+  3. Step-up MFA is issued for the authenticated principal, exact privileged action, nonce and short expiry, and is consumed on successful use. Prefix strings are rejected.
+  4. Core `TransactionalOutbox` retries `FAILED` items until `DEAD_LETTER`, then `reconcile_dead_letters()` re-queues without duplicating idempotency keys. The resilience service uses that outbox.
+  5. Degraded mode fails closed at the HTTP mutation boundary and at approval/reservation/notification command methods.
+- **Why:** Closes the demonstrated privilege-forgery and silent-drop bugs on the current in-memory prototype without claiming PH-1 persistence, RLS, or IdP federation.
+- **Rejected:** Shipping the prefix MFA check; treating client-supplied `user_id` as identity; adding Keycloak/PostgreSQL in this change (those remain REM-001 production and REM-003/004); rewriting the static UI into Next.js here (REM-012).
+- **Consequences:** Unauthenticated calls return 401. Forged `MFA-STEPUP-*` tokens return 403. Outbox failures progress to dead-letter and can be reconciled. Mutations during degraded mode return 503. PostgreSQL, RLS, object storage, MILP, Next.js PWA, CI and live connectors remain open (REM-003–022, REM-R01–R10).
+- **Evidence:** `changes.md` §13 REM-001/002/005/007; `rules.md` RUL-002, RUL-054; `trd.md` NFR-012, NFR-028; `architecture.md` §4–5 identity and outbox.
+- **Review trigger:** Keycloak/OIDC broker integration, PostgreSQL outbox table, or any claim of PH-1/PH-2 exit.
 
 ## 4. Explicit research corrections adopted
 
