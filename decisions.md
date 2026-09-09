@@ -65,6 +65,7 @@ A material change must add or supersede a decision rather than rewrite the old r
 | DEC-042 | Government Dossiers, Evidence-Bound Field Checklists, and Tamper-Evident Export Manifests | ACCEPTED |
 | DEC-043 | Formula Classification, Parameter Registry, Mathematical Validation, and Statutory Compliance Control | ACCEPTED |
 | DEC-044 | Source Capability Classification, Permitted AOI Sample Gates, Provider Health Monitoring, and Dependency Blocker Governance | ACCEPTED |
+| DEC-045 | Platform Reliability, Transactional Outbox Resilience, Cross-Channel Leakage Prevention, and CERT-In Compliance Operations | ACCEPTED |
 
 
 
@@ -634,6 +635,23 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Consequences:** All external spatial assets undergo deterministic AOI gate evaluation. Production allocation and site approvals cannot proceed without complete S45–S50 verified evidence.
 - **Evidence:** `trd.md` FR-076–084, NFR-034–035, AT-31–38; `rules.md` RUL-076–083; `architecture.md` ARC-C13; `source-register.md` §5, §6, §7.
 - **Review trigger:** Provider API changes, new statutory land/FRA data releases, or state-level geospatial policy updates.
+
+### DEC-045 — Platform Reliability, Transactional Outbox Resilience, Cross-Channel Leakage Prevention, and CERT-In Compliance Operations (Phase 14 / ARC-C11, ARC-C01, NFR-028–NFR-035, AT-24–AT-30)
+
+- **Status:** ACCEPTED.
+- **Context:** `trd.md` (§7.6, NFR-028–NFR-035, §8, AT-24–AT-30, §9), `architecture.md` (§6, ARC-C01, ARC-C11), and CERT-In Directions 2022 mandate enterprise reliability, transactional outbox resilience, multi-channel data leakage prevention, coordinated restore consistency validation, and statutory cyber-security compliance. In high-stakes disaster rehabilitation, data inconsistency between relational commits and async notification, or leakage of sensitive beneficiary identities through auxiliary channels (e.g. STAC metadata, vector tiles, search indexes, or cached exports), violates constitutional privacy and statutory mandates under DPDP 2025 and CERT-In Directions 2022.
+- **Decision:**
+  1. *Transactional Outbox Resilience & Idempotent Consumer Reconciliation (NFR-028, AT-25):* Enforce atomic database-outbox commit. If publishing fails or network partitions occur, the durable outbox retains pending messages with exponential backoff and circuit-breaking. Dead-letter queue captures messages exceeding retry limits. Outbox reconciliation ensures exactly-once semantics without state duplication or loss.
+  2. *Multi-Channel Leakage Prevention & RLS Lockout (NFR-029, NFR-030, AT-12, AT-24):* Authorization and classification boundaries are enforced across all 7 channels: REST API, HTML views, Search Index, OGC/STAC metadata, Vector Tiles, COG range requests, and Export caches. Any restricted entity (e.g. household vulnerability score or precise coordinate) is denied or returned only as an approved generalized projection across all paths. RLS pooled-connection reset and `BYPASSRLS` lockout are strictly enforced.
+  3. *Offline Key Custody & Device Eviction Resilience (NFR-031, AT-26):* Field device binding tokens, key unlock custody, shared-device logout, and local storage eviction handling. Emergency unsynced evidence recovery package export without making false claims of guaranteed remote wipe. Remote credential revocation on device loss.
+  4. *Coordinated Restore & Consistency Set Validation (NFR-032, AT-27):* Restore operations require database rows, object storage versions, audit hash checkpoints, cryptographic signing keys, and export manifests to reconcile as a single unbroken consistency set. If referenced objects or checkpoints are missing, the restore fails closed, blocking authoritative writes.
+  5. *CERT-In Directions & India ICT Log Preservation (NFR-033, RUL-020):* Registered Point of Contact (PoC), NTP clock synchronization with drift $< 1000$ ms, automated statutory 6-hour incident report generation, and 180-day rolling ICT audit log preservation within Indian territorial jurisdiction.
+  6. *Machine-Readable Release Assurance & Traceability Report (NFR-035, trd.md §9):* Generate automated release evidence reports verifying requirements-to-tests traceability, normative rules coverage, source activation posture, and cryptographic release digests (SHA-256).
+- **Why:** Delivers ironclad operational resilience, eliminates silent message drops or duplicates, guarantees zero data leakage across modern geospatial formats, and satisfies mandatory statutory compliance under Indian cyber-security and data protection law.
+- **Rejected:** Fire-and-forget message publishing; partial restores resuming writes with missing blobs; claiming guaranteed remote wipe on stolen mobile devices; trusting single-channel API middleware for authorization while tiles/search leak data; ignoring CERT-In 6-hour reporting mandates.
+- **Consequences:** All asynchronous events pass through the transactional outbox with durable dead-letter recovery. Restores are provably consistent. Release readiness is verifiable via machine-readable evidence reports.
+- **Evidence:** `trd.md` NFR-028–035, AT-24–30, §9; `rules.md` RUL-020, RUL-050–055; CERT-In Directions 2022; DPDP Act 2023 / Rules 2025.
+- **Review trigger:** Revisions to CERT-In guidelines, DPDP statutory enforcement dates, or changes to disaster recovery infrastructure.
 
 ## 4. Explicit research corrections adopted
 
