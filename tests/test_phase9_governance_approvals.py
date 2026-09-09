@@ -29,6 +29,7 @@ from punarvas.modules.allocation.reservation_ledger import (
     ReservationStatus,
     capacity_ledger,
 )
+from tests.authutil import issue_step_up
 
 
 @pytest.fixture(autouse=True)
@@ -125,7 +126,7 @@ def test_objection_freezes_dependent_approval_and_reservation():
             approving_officer_designation="DDMA Chairperson",
             statutory_authority_basis="DM Act 2005 §30(2)(v)",
             approval_order_number="ORDER-DDMA-2024-001",
-            step_up_token="MFA-STEPUP-VALID-TOKEN",
+            step_up_token=issue_step_up(approver),
             context=approver,
         )
     assert site_id in str(exc_info.value)
@@ -308,7 +309,7 @@ def test_official_approval_stepup_mfa_and_role_authorization():
             approving_officer_designation="Analyst",
             statutory_authority_basis="DM Act §30",
             approval_order_number="ORD-002",
-            step_up_token="MFA-STEPUP-TOKEN-12345",
+            step_up_token=issue_step_up(analyst),
             context=analyst,  # Lacks authority!
         )
     assert "statutory authority" in str(exc2.value)
@@ -322,7 +323,7 @@ def test_official_approval_stepup_mfa_and_role_authorization():
         approving_officer_designation="District Collector & DDMA Chairperson",
         statutory_authority_basis="Disaster Management Act 2005 §30(2)(v)",
         approval_order_number="G.O.(Ms) No. 44/2024/DMD",
-        step_up_token="MFA-STEPUP-VERIFIED-TOKEN-999",
+        step_up_token=issue_step_up(collector),
         context=collector,
     )
     assert approval.approval_id.startswith("APP-SITE-")
@@ -368,7 +369,7 @@ def test_conditional_approval_blocking_gates():
         statutory_authority_basis="DM Act §30",
         approval_order_number="ORD-COND-01",
         conditions=[cond_water, cond_cosmetic],
-        step_up_token="MFA-STEPUP-TOKEN-12345",
+        step_up_token=issue_step_up(collector),
         context=collector,
     )
 
@@ -433,7 +434,7 @@ def test_statutory_notification_distinct_from_approval():
         approving_officer_designation="State Executive Committee Chairperson",
         statutory_authority_basis="Disaster Management Act 2005 §22",
         approval_order_number="G.O.(P) No. 12/2024/DMD",
-        step_up_token="MFA-STEPUP-TOKEN-12345",
+        step_up_token=issue_step_up(collector),
         context=collector,
     )
     assert approval.authority_state == AuthorityState.OFFICIALLY_APPROVED
@@ -479,7 +480,7 @@ def test_supersession_workflow_preserving_history():
         approving_officer_designation="DDMA Chairperson",
         statutory_authority_basis="DM Act §30",
         approval_order_number="ORDER-V1",
-        step_up_token="MFA-STEPUP-TOKEN-12345",
+        step_up_token=issue_step_up(collector),
         context=collector,
     )
     assert app_v1.is_superseded is False
@@ -494,7 +495,7 @@ def test_supersession_workflow_preserving_history():
         statutory_authority_basis="DM Act §30",
         approval_order_number="ORDER-V2-REVISED",
         supersedes_approval_id=app_v1.approval_id,
-        step_up_token="MFA-STEPUP-TOKEN-12345",
+        step_up_token=issue_step_up(collector),
         context=collector,
     )
 

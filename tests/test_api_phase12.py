@@ -5,12 +5,12 @@ Normative Reference: trd.md (§3.12, FR-071–FR-075), rules.md (RUL-061–RUL-0
 
 import pytest
 from fastapi.testclient import TestClient
-from punarvas.api.app import app
+from tests.authutil import authed_client
 
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    return authed_client()
 
 
 def test_api_list_and_get_formulas(client: TestClient):

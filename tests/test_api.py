@@ -2,10 +2,9 @@
 Tests for PUNARVAS-AI FastAPI REST Endpoints.
 """
 
-from fastapi.testclient import TestClient
-from punarvas.api.app import app
+from tests.authutil import authed_client
 
-client = TestClient(app)
+client = authed_client()
 
 
 def test_api_health():

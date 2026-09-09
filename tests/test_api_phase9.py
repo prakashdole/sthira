@@ -3,10 +3,10 @@ Phase 9 REST API Integration Tests (ARC-C08, ARC-C09 / FEAT-015, FEAT-016, FEAT-
 """
 
 from datetime import datetime, timezone, timedelta
-from fastapi.testclient import TestClient
-from punarvas.api.app import app
+from tests.authutil import authed_client, issue_step_up
+from punarvas.core.identity import get_prototype_user
 
-client = TestClient(app)
+client = authed_client()
 
 
 def test_api_phase9_approval_and_statutory_notification_flow():
@@ -19,7 +19,7 @@ def test_api_phase9_approval_and_statutory_notification_flow():
         "approving_officer_designation": "DDMA Chairperson",
         "statutory_authority_basis": "Disaster Management Act 2005 §30(2)(v)",
         "approval_order_number": "DDMA/WYD/2024/APP-901",
-        "step_up_token": "MFA-STEPUP-VALID-TOKEN-12345",
+        "step_up_token": issue_step_up(get_prototype_user("collector.wayanad")),
         "conditions": [
             {
                 "condition_id": "COND-WATER-01",

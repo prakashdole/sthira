@@ -2,10 +2,9 @@
 Phase 10 REST API Integration Tests (ARC-C12 / FEAT-023, FEAT-025).
 """
 
-from fastapi.testclient import TestClient
-from punarvas.api.app import app
+from tests.authutil import authed_client
 
-client = TestClient(app)
+client = authed_client()
 
 
 def test_api_necessity_review():

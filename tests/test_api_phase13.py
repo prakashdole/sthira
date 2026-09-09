@@ -6,14 +6,12 @@ Normative Reference: source-register.md, rules.md (RUL-076-RUL-083), trd.md (FR-
 import hashlib
 from datetime import datetime, timedelta, timezone
 import pytest
-from fastapi.testclient import TestClient
-
-from punarvas.api.app import app
+from tests.authutil import authed_client
 
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    return authed_client()
 
 
 def test_api_list_and_get_capabilities(client):

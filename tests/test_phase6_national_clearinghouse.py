@@ -5,9 +5,7 @@ Normative Reference: Disaster Management Act 2005 §3/§6, rules.md (RUL-001, RU
 """
 
 import pytest
-from fastapi.testclient import TestClient
-
-from punarvas.api.app import app
+from tests.authutil import authed_client
 from punarvas.core.contracts import GeographyScope, UserContext
 from punarvas.core.enums import RoleType
 from punarvas.core.errors import AuthorityBypassError
@@ -25,7 +23,7 @@ from punarvas.modules.programme.state_package import state_package_loader
 from punarvas.spikes.fixture_loader import load_uttarakhand_fixture
 
 
-client = TestClient(app)
+client = authed_client()
 
 
 def test_trilingual_localization_engine():

@@ -6,9 +6,7 @@ Normative Reference: phases.md §6 & §12.6, rules.md (RUL-001, RUL-005, RUL-052
 import time
 import pytest
 from datetime import datetime, timezone
-from fastapi.testclient import TestClient
-
-from punarvas.api.app import app
+from tests.authutil import authed_client
 from punarvas.core.contracts import UserContext
 from punarvas.core.enums import AuthorityState, RoleType
 from punarvas.modules.live_ops import (
@@ -35,7 +33,7 @@ from punarvas.modules.reconstruction import (
     disclosure_review_engine,
 )
 
-client = TestClient(app)
+client = authed_client()
 
 
 # --- C3-01: Step-Up Auth & MFA Tests (AT-28) ---
@@ -333,7 +331,7 @@ def test_disclosure_review_k_anonymity_and_differencing():
 
 def test_api_phase3_endpoints():
     # 1. Step-up auth endpoint
-    resp = client.post("/api/v1/auth/step-up", json={"user_id": "collector_01", "action": "APPROVE_DECISION"})
+    resp = client.post("/api/v1/auth/step-up", json={"action": "APPROVE_DECISION"})
     assert resp.status_code == 200
     tok = resp.json()["data"]["token_id"]
     assert tok is not None

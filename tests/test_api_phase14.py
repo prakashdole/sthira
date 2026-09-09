@@ -5,14 +5,12 @@ Normative Reference: NFR-028 to NFR-035, AT-24 to AT-30, ARC-C01, ARC-C11, DEC-0
 
 from datetime import datetime, timezone
 import pytest
-from fastapi.testclient import TestClient
-
-from punarvas.api.app import app
+from tests.authutil import authed_client
 
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    return authed_client()
 
 
 def test_api_outbox_relay_and_reconcile(client):

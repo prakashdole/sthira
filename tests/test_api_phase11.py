@@ -6,13 +6,12 @@ rules.md (RUL-052-RUL-060, RUL-075), DEC-012, DEC-013, DEC-042.
 
 import json
 import pytest
-from starlette.testclient import TestClient
-from punarvas.api.app import app
+from tests.authutil import authed_client
 
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    return authed_client()
 
 
 def test_api_site_dossier_generation(client):

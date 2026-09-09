@@ -4,9 +4,7 @@ Normative Reference: phases.md §7 & §12.7, rules.md (RUL-017, RUL-018, RUL-054
 """
 
 import pytest
-from fastapi.testclient import TestClient
-
-from punarvas.api.app import app
+from tests.authutil import authed_client
 from punarvas.core.contracts import GeographyScope, UserContext
 from punarvas.core.enums import RoleType
 from punarvas.modules.district_scale import (
@@ -20,7 +18,7 @@ from punarvas.modules.district_scale import (
 )
 from punarvas.spikes import load_district_fixture, load_idukki_fixture, load_alappuzha_fixture
 
-client = TestClient(app)
+client = authed_client()
 
 
 # --- C4-01: Configuration-Driven District Onboarding & Profiling (DEC-036) ---
