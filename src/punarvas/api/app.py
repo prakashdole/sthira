@@ -35,6 +35,23 @@ from punarvas.modules.policy import (
     SiteCriteriaInput,
     policy_engine,
     sensitivity_analysis_engine,
+    FormulaClassification,
+    RegistryState,
+    StatuteApplicabilityState,
+    JurisdictionLevel,
+    FormulaDefinition,
+    ParameterDefinition,
+    PolicyFormulaActivation,
+    FormulaExecutionRequest,
+    FormulaExecutionResult,
+    StatutoryComplianceRecord,
+    ComplianceEvaluationResult,
+    compliance_service,
+    FormulaNotActivatedError,
+    UnvalidatedSpecialistFormulaError,
+    RejectedFormulaExecutionError,
+    NumericalDomainError,
+    MissingFormulaInputError,
 )
 from punarvas.modules.land_truth import (
     ParcelRecord,
@@ -2170,6 +2187,225 @@ def generate_public_transparency_projection(req: PublicTransparencyRequest):
         k_threshold=req.k_threshold,
     )
     return APIResponseEnvelope(data=proj.model_dump())
+
+
+# ==============================================================================
+# Phase 12: Formula, Parameter & Statutory Compliance Control Endpoints (ARC-C07)
+# ==============================================================================
+
+class RegisterFormulaApiRequest(BaseModel):
+    formula_id: str
+    name: str
+    classification: FormulaClassification
+    version: str = "1.0.0"
+    owner_role: str
+    description: str
+    mathematical_expression: str
+    applicable_parameters: List[str] = Field(default_factory=list)
+    requirement_links: List[str] = Field(default_factory=list)
+    test_links: List[str] = Field(default_factory=list)
+    actor_id: str = "POLICY_ADMIN"
+
+
+class RegisterParameterApiRequest(BaseModel):
+    parameter_id: str
+    version: str = "1.0.0"
+    formula_ids: List[str] = Field(default_factory=list)
+    name: str
+    definition: str
+    value: Optional[Any] = None
+    unit: str
+    spatial_support: str
+    temporal_support: str
+    source: str
+    acquisition_method: str
+    authority: str
+    actor_id: str = "POLICY_ADMIN"
+
+
+class CreatePolicyActivationApiRequest(BaseModel):
+    policy_id: str
+    programme_id: str
+    activated_formula_ids: List[str]
+    authorized_by: str = "DDMA_CHAIRPERSON"
+
+
+class ExecuteFormulaApiRequest(BaseModel):
+    formula_id: str
+    inputs: Dict[str, Any]
+    policy_activation_id: Optional[str] = None
+    reviewer_id: str = "OPERATIONAL_REVIEWER"
+
+
+class RegisterStatuteApiRequest(BaseModel):
+    statute_id: str
+    title: str
+    jurisdiction: JurisdictionLevel = JurisdictionLevel.UNION_OF_INDIA
+    statutory_authority: str
+    effective_date: str
+    key_sections: List[Dict[str, str]] = Field(default_factory=list)
+    mandatory_controls: List[str] = Field(default_factory=list)
+    actor_id: str = "STATE_LEGAL_ADVISOR"
+
+
+class EvaluateCompliancePostureApiRequest(BaseModel):
+    programme_id: str
+    active_control_ids: List[str]
+
+
+@app.get("/api/v1/compliance/formulas", response_model=APIResponseEnvelope)
+def list_formulas(classification: Optional[FormulaClassification] = None):
+    formulas = compliance_service.list_formulas(classification)
+    return APIResponseEnvelope(data=[f.model_dump() for f in formulas])
+
+
+@app.get("/api/v1/compliance/formulas/{formula_id}", response_model=APIResponseEnvelope)
+def get_formula(formula_id: str):
+    f = compliance_service.get_formula(formula_id)
+    if not f:
+        raise HTTPException(status_code=404, detail=f"Formula '{formula_id}' not found")
+    return APIResponseEnvelope(data=f.model_dump())
+
+
+@app.post("/api/v1/compliance/formulas", response_model=APIResponseEnvelope)
+def register_formula(req: RegisterFormulaApiRequest):
+    form_def = FormulaDefinition(
+        formula_id=req.formula_id,
+        name=req.name,
+        classification=req.classification,
+        version=req.version,
+        owner_role=req.owner_role,
+        description=req.description,
+        mathematical_expression=req.mathematical_expression,
+        applicable_parameters=req.applicable_parameters,
+        requirement_links=req.requirement_links,
+        test_links=req.test_links,
+    )
+    saved = compliance_service.register_formula(form_def, actor_id=req.actor_id)
+    return APIResponseEnvelope(data=saved.model_dump())
+
+
+@app.get("/api/v1/compliance/parameters", response_model=APIResponseEnvelope)
+def list_parameters():
+    params = compliance_service.list_parameters()
+    return APIResponseEnvelope(data=[p.model_dump() for p in params])
+
+
+@app.get("/api/v1/compliance/parameters/{parameter_id}", response_model=APIResponseEnvelope)
+def get_parameter(parameter_id: str):
+    p = compliance_service.get_parameter(parameter_id)
+    if not p:
+        raise HTTPException(status_code=404, detail=f"Parameter '{parameter_id}' not found")
+    return APIResponseEnvelope(data=p.model_dump())
+
+
+@app.post("/api/v1/compliance/parameters", response_model=APIResponseEnvelope)
+def register_parameter(req: RegisterParameterApiRequest):
+    param_def = ParameterDefinition(
+        parameter_id=req.parameter_id,
+        version=req.version,
+        formula_ids=req.formula_ids,
+        name=req.name,
+        definition=req.definition,
+        value=req.value,
+        unit=req.unit,
+        spatial_support=req.spatial_support,
+        temporal_support=req.temporal_support,
+        source=req.source,
+        acquisition_method=req.acquisition_method,
+        authority=req.authority,
+    )
+    saved = compliance_service.register_parameter(param_def, actor_id=req.actor_id)
+    return APIResponseEnvelope(data=saved.model_dump())
+
+
+@app.post("/api/v1/compliance/activations", response_model=APIResponseEnvelope)
+def create_policy_activation(req: CreatePolicyActivationApiRequest):
+    try:
+        activation = compliance_service.create_policy_activation(
+            policy_id=req.policy_id,
+            programme_id=req.programme_id,
+            activated_formula_ids=req.activated_formula_ids,
+            authorized_by=req.authorized_by,
+        )
+        return APIResponseEnvelope(data=activation.model_dump())
+    except RejectedFormulaExecutionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/compliance/activations/{activation_id}", response_model=APIResponseEnvelope)
+def get_policy_activation(activation_id: str):
+    act = compliance_service.get_policy_activation(activation_id)
+    if not act:
+        raise HTTPException(status_code=404, detail=f"Activation '{activation_id}' not found")
+    return APIResponseEnvelope(data=act.model_dump())
+
+
+@app.post("/api/v1/compliance/execute", response_model=APIResponseEnvelope)
+def execute_formula(req: ExecuteFormulaApiRequest):
+    try:
+        exec_req = FormulaExecutionRequest(
+            formula_id=req.formula_id,
+            inputs=req.inputs,
+            policy_activation_id=req.policy_activation_id,
+            reviewer_id=req.reviewer_id,
+        )
+        res = compliance_service.execute_formula(exec_req)
+        return APIResponseEnvelope(data=res.model_dump())
+    except (RejectedFormulaExecutionError, UnvalidatedSpecialistFormulaError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FormulaNotActivatedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except (NumericalDomainError, MissingFormulaInputError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.get("/api/v1/compliance/replay/{execution_id}", response_model=APIResponseEnvelope)
+def replay_formula_execution(execution_id: str):
+    try:
+        replay = compliance_service.reproduce_formula_execution(execution_id)
+        return APIResponseEnvelope(data=replay)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/api/v1/compliance/statutes", response_model=APIResponseEnvelope)
+def list_statutes():
+    stats = compliance_service.list_statutes()
+    return APIResponseEnvelope(data=[s.model_dump() for s in stats])
+
+
+@app.get("/api/v1/compliance/statutes/{statute_id}", response_model=APIResponseEnvelope)
+def get_statute(statute_id: str):
+    s = compliance_service.get_statute(statute_id)
+    if not s:
+        raise HTTPException(status_code=404, detail=f"Statute '{statute_id}' not found")
+    return APIResponseEnvelope(data=s.model_dump())
+
+
+@app.post("/api/v1/compliance/statutes", response_model=APIResponseEnvelope)
+def register_statute(req: RegisterStatuteApiRequest):
+    stat_rec = StatutoryComplianceRecord(
+        statute_id=req.statute_id,
+        title=req.title,
+        jurisdiction=req.jurisdiction,
+        statutory_authority=req.statutory_authority,
+        effective_date=req.effective_date,
+        key_sections=req.key_sections,
+        mandatory_controls=req.mandatory_controls,
+    )
+    saved = compliance_service.register_statute(stat_rec, actor_id=req.actor_id)
+    return APIResponseEnvelope(data=saved.model_dump())
+
+
+@app.post("/api/v1/compliance/evaluate-posture", response_model=APIResponseEnvelope)
+def evaluate_compliance_posture(req: EvaluateCompliancePostureApiRequest):
+    res = compliance_service.verify_compliance_posture(
+        programme_id=req.programme_id,
+        active_control_ids=req.active_control_ids,
+    )
+    return APIResponseEnvelope(data=res.model_dump())
+
 
 
 
