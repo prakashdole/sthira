@@ -23,6 +23,7 @@ const i18n = {
     tab_adaptation: "Multi-State Adaptation (PH-5)",
     tab_clearinghouse: "National Clearinghouse (Phase 6)",
     tab_phase9: "Approvals & Objections (Phase 9)",
+    tab_phase10: "Delivery & Completion (Phase 10)",
     tab_audit: "Audit & Integrity",
     site_card_capacity: "Dwelling Capacity",
     site_card_water: "Lean-Season Water",
@@ -49,6 +50,7 @@ const i18n = {
     tab_adaptation: "മറ്റ് സംസ്ഥാനങ്ങൾ (PH-5)",
     tab_clearinghouse: "ദേശീയ ക്ലിയറിംഗ് ഹൗസ് (ഘട്ടം 6)",
     tab_phase9: "അംഗീകാരങ്ങളും പരാതികളും (ഘട്ടം 9)",
+    tab_phase10: "നിർവ്വഹണവും പൂർത്തീകരണവും (ഘട്ടം 10)",
     tab_audit: "ഓഡിറ്റ് പരിശോധന",
     site_card_capacity: "വീടുകളുടെ ശേഷി",
     site_card_water: "വേനൽക്കാല ജലലഭ്യത",
@@ -76,6 +78,7 @@ const i18n = {
 
     tab_clearinghouse: "राष्ट्रीय समाशोधन केंद्र (Phase 6)",
     tab_phase9: "अनुमोदन एवं आपत्तियां (Phase 9)",
+    tab_phase10: "वितरण एवं पूर्णता (Phase 10)",
     tab_audit: "ऑडिट एवं अखंडता",
     site_card_capacity: "आवास क्षमता",
     site_card_water: "ग्रीष्मकालीन जल उपलब्धता",
@@ -782,6 +785,119 @@ function renderActiveTab() {
       </div>
     `;
     initPhase9Gauges();
+  } else if (activeTab === 'phase10') {
+    content.innerHTML = `
+      <div class="card" style="border-top: 4px solid #059669;">
+        <h3>Delivery Execution, Defect Clearance & Post-Relocation Follow-Up (Phase 10)</h3>
+        <p><strong>Normative Reference:</strong> rules.md (RUL-067 through RUL-072), plan.md (#10), trd.md (§3.12, §3.13, FR-064–FR-070), DEC-026, DEC-040, AT-18, AT-22.</p>
+        <div style="background: #ecfdf5; border: 1px solid #6ee7b7; padding: 0.75rem; border-radius: 6px; margin-top: 0.5rem; font-size: 0.9em; color: #065f46;">
+          <strong>Completion Invariant (RUL-072):</strong> Official approval, funding sanction, or ceremonial handover NEVER counts as completed relocation. Real completion requires functioning basic services (water ≥ 55 LPCD, domestic power, road access), 0 unresolved critical/major defects, beneficiary offer acceptance, formal possession handover, verified physical on-ground occupation, and 6/12-month post-relocation livelihood follow-up.
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top: 1rem;">
+        <!-- Card 1: Necessity Assessment & Scheme Entitlement -->
+        <div class="card">
+          <h4>1. Relocation Necessity & Scheme Entitlements (RUL-067, RUL-068, AT-18)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Verify in-situ feasibility alternatives and preserve tenant relocation need across schemes.</p>
+          
+          <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem;">
+            <label style="font-size: 0.85em; font-weight: bold;">Household Case ID:</label>
+            <input type="text" id="ph10-case-id" value="CASE-WYD-001" class="btn" style="text-align: left; background: #fff; cursor: text;">
+
+            <label style="font-size: 0.85em; font-weight: bold;">Tenure Category:</label>
+            <select id="ph10-tenure" class="btn" style="text-align: left; background: #fff;">
+              <option value="TENANT">TENANT (Ineligible for Land Grant, Need Preserved)</option>
+              <option value="OWNER">OWNER (Full Package Entitled)</option>
+              <option value="LANDLESS">LANDLESS (Punarjani Patta Allotment)</option>
+            </select>
+
+            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
+              <button class="btn btn-primary" onclick="submitNecessityReviewDemo()">Record Necessity Review (RUL-067)</button>
+              <button class="btn btn-secondary" onclick="assessSchemeEntitlementDemo()">Assess Scheme Entitlement (AT-18)</button>
+            </div>
+          </div>
+          <div id="phase10-necessity-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+
+        <!-- Card 2: Multi-Tier Funding Gap Calculator -->
+        <div class="card">
+          <h4>2. Funding Gap Calculator (Equation E17 / RUL-069)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Formula: <code>G = max(0, Σ C_i - Σ F_j)</code>. Announced budgets DO NOT reduce the gap.</p>
+
+          <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+              <div>
+                <label style="font-size: 0.85em; font-weight: bold;">Required Cost (₹):</label>
+                <input type="number" id="ph10-cost-req" value="1500000" class="btn" style="text-align: left; background: #fff; cursor: text; width: 100%;">
+              </div>
+              <div>
+                <label style="font-size: 0.85em; font-weight: bold;">Funding Action:</label>
+                <select id="ph10-funding-action" class="btn" style="text-align: left; background: #fff; width: 100%;">
+                  <option value="ANNOUNCED">Announce ₹10L CMDRF (Flagged: Gap Remains)</option>
+                  <option value="RECEIVED_PARTIAL">Receive ₹10L SDRF (Gap Drops to ₹5L)</option>
+                  <option value="RECEIVED_FULL">Receive ₹5L CSR Partner (Fully Funded: ₹0 Gap)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="margin-top: 0.5rem;">
+              <button class="btn btn-primary" onclick="calculateFundingGapDemo()">Execute Funding Transition & Calculate Gap</button>
+            </div>
+          </div>
+          <div id="phase10-funding-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top: 1.5rem;">
+        <!-- Card 3: Basic Services & Defect Clearance Gating -->
+        <div class="card">
+          <h4>3. Basic Services & Defect Handover Gating (RUL-072, AT-05, AT-22)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Handover fails closed if water &lt; 55 LPCD, services missing, or critical/major defects remain.</p>
+
+          <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+              <div>
+                <label style="font-size: 0.85em; font-weight: bold;">Water Yield (LPCD):</label>
+                <input type="number" id="ph10-water-lpcd" value="40" class="btn" style="text-align: left; background: #fff; cursor: text; width: 100%;">
+              </div>
+              <div>
+                <label style="font-size: 0.85em; font-weight: bold;">Defect Severity:</label>
+                <select id="ph10-defect-sev" class="btn" style="text-align: left; background: #fff; width: 100%;">
+                  <option value="CRITICAL">CRITICAL (Structural / Safety Defect)</option>
+                  <option value="MAJOR">MAJOR (Power / Road Cutoff)</option>
+                  <option value="MINOR">MINOR (Paint / Finish Touch-up)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
+              <button class="btn btn-secondary" onclick="verifyBasicServicesDemo()">Verify Services (Try 40 vs 75 LPCD)</button>
+              <button class="btn" onclick="logDefectDemo()">Log Defect</button>
+              <button class="btn" onclick="resolveDefectDemo()">Resolve Defect (Engineering Cert)</button>
+              <button class="btn btn-primary" onclick="attemptHandoverDemo()">Attempt Possession Handover (AT-22)</button>
+            </div>
+          </div>
+          <div id="phase10-handover-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+
+        <!-- Card 4: Occupation, Completion & External Handoff -->
+        <div class="card">
+          <h4>4. Physical Occupation & External Handoff (FR-068, FR-069, RUL-072)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Verify on-ground move-in, check all 6 completion gates, and track post-relocation welfare.</p>
+
+          <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem;">
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <button class="btn btn-primary" onclick="recordOccupationDemo()">Verify Physical Occupation</button>
+              <button class="btn btn-secondary" onclick="evaluateCompletionStatusDemo()">Check 6-Gate Completion (RUL-072)</button>
+              <button class="btn" onclick="registerExternalHandoffDemo()">Register LIFE Mission Handoff (FR-069)</button>
+              <button class="btn" onclick="recordLivelihoodAuditDemo()">Record 6-Month Livelihood Audit</button>
+            </div>
+          </div>
+          <div id="phase10-completion-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+      </div>
+    `;
   }
 }
 
@@ -1346,6 +1462,497 @@ async function releaseCapacityDemo() {
       resultDiv.innerHTML = `<div style="color: #b91c1c;">Release error: ${json.detail}</div>`;
     }
   } catch(e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+// ==========================================
+// Phase 10: Delivery Execution & Completion Tracking
+// ==========================================
+
+let phase10State = {
+  lastCaseId: "CASE-WYD-001",
+  lastDefectId: null,
+};
+
+async function submitNecessityReviewDemo() {
+  const resultDiv = document.getElementById('phase10-necessity-result');
+  if (!resultDiv) return;
+  const caseId = document.getElementById('ph10-case-id')?.value || "CASE-WYD-001";
+  phase10State.lastCaseId = caseId;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/delivery/necessity-review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        case_id: caseId,
+        household_id: "HH-WYD-701",
+        in_situ_mitigation_feasible: false,
+        permanent_relocation_necessary: true,
+        reviewer_name: "Dr. V. Ramanathan",
+        reviewer_credentials: "Chief Geotechnical Engineer, GSI / KSDMA Panel",
+        reasons: "Site located within active debris flow runout zone; slope angle 38° with crown scarp fractures. In-situ retention exceeds safety threshold.",
+        uncertainty_level: "LOW",
+        settlement_community_effects: "Relocation in planned cluster preserves hamlet social fabric and tribal kinship ties (RUL-067).",
+        in_situ_description: "Terracing and anchor piling evaluated; estimated cost ₹48L per structure with residual risk > 60%",
+        estimated_in_situ_cost_inr: 4800000.0,
+        actor_id: "ksdma_special_officer"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>Necessity Review Recorded (RUL-067):</strong> Review ID: <code>${json.data.review_id}</code><br>
+          In-Situ Mitigation Feasible: <strong>${json.data.in_situ_mitigation_feasible ? 'YES' : 'NO (Unfeasible)'}</strong> | Relocation Necessary: <span class="badge badge-fail">${json.data.permanent_relocation_necessary ? 'YES' : 'NO'}</span><br>
+          Reviewer: <strong>${json.data.competent_reviewer_name}</strong> (${json.data.competent_reviewer_credentials})<br>
+          <em>Community Effects:</em> ${json.data.settlement_community_effects}
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="padding: 0.75rem; background: #fee2e2; border: 1px solid #ef4444; border-radius: 4px; color: #b91c1c;">
+        ✕ Error (${res.status}): ${json.detail}
+      </div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function assessSchemeEntitlementDemo() {
+  const resultDiv = document.getElementById('phase10-necessity-result');
+  if (!resultDiv) return;
+  const tenure = document.getElementById('ph10-tenure')?.value || "TENANT";
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/delivery/scheme-assessment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        household_id: "HH-WYD-701",
+        tenure_category: tenure,
+        pathway: "TOWNSHIP"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #eff6ff; border: 1px solid #3b82f6; border-radius: 4px; color: #1e40af;">
+          ✓ <strong>Scheme Entitlement Assessed (AT-18 / RUL-068):</strong><br>
+          Tenure: <strong>${json.data.tenure_category}</strong> | Relocation Need Preserved: <span class="badge badge-pass">${json.data.relocation_need_preserved ? 'YES' : 'NO'}</span><br>
+          Eligible Package: <strong>${json.data.eligible_package}</strong><br>
+          <small>Note: ${json.data.tenure_category === 'TENANT' ? 'Tenant status preserves relocation assistance without land grant disqualification.' : 'Full homeowner resettlement entitlement with title clearance.'}</small>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="padding: 0.75rem; background: #fee2e2; border: 1px solid #ef4444; border-radius: 4px; color: #b91c1c;">
+        ✕ Error (${res.status}): ${json.detail}
+      </div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function calculateFundingGapDemo() {
+  const resultDiv = document.getElementById('phase10-funding-result');
+  if (!resultDiv) return;
+  const caseId = document.getElementById('ph10-case-id')?.value || "CASE-WYD-001";
+  const costReq = parseFloat(document.getElementById('ph10-cost-req')?.value || "1500000");
+  const action = document.getElementById('ph10-funding-action')?.value || "ANNOUNCED";
+
+  try {
+    // 1. Set required cost
+    await fetch(`${API_BASE}/api/v1/delivery/funding/required-cost`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ case_id: caseId, required_cost_inr: costReq })
+    });
+
+    // 2. Record specific funding transaction
+    let fundingPayload = null;
+    if (action === "ANNOUNCED") {
+      fundingPayload = {
+        case_id: caseId,
+        source_agency: "CMDRF_ANNOUNCEMENT",
+        cost_head: "CONSTRUCTION",
+        state: "COMMITTED",
+        amount_inr: 1000000.0,
+        actor_id: "treasury_desk",
+        sanction_order_ref: "PRESS-RELEASE-CMDRF-2025",
+        is_announced_budget_only: true
+      };
+    } else if (action === "RECEIVED_PARTIAL") {
+      fundingPayload = {
+        case_id: caseId,
+        source_agency: "SDRF_KERALA",
+        cost_head: "CONSTRUCTION",
+        state: "RECEIVED",
+        amount_inr: 1000000.0,
+        actor_id: "treasury_desk",
+        sanction_order_ref: "GO(RT)-SDRF-WYD-2025-102",
+        is_announced_budget_only: false
+      };
+    } else if (action === "RECEIVED_FULL") {
+      fundingPayload = {
+        case_id: caseId,
+        source_agency: "CSR_CONSORTIUM",
+        cost_head: "LAND_DEVELOPMENT",
+        state: "RECEIVED",
+        amount_inr: 500000.0,
+        actor_id: "treasury_desk",
+        sanction_order_ref: "CSR-GRANT-TOWNSHIP-09",
+        is_announced_budget_only: false
+      };
+    }
+
+    if (fundingPayload) {
+      await fetch(`${API_BASE}/api/v1/delivery/funding`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fundingPayload)
+      });
+    }
+
+    // 3. Query funding gap report
+    const res = await fetch(`${API_BASE}/api/v1/delivery/funding-gap/${caseId}`);
+    const json = await res.json();
+    if (res.ok) {
+      const data = json.data;
+      const isFullyFunded = data.is_fully_funded;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: ${isFullyFunded ? '#ecfdf5' : '#fef3c7'}; border: 1px solid ${isFullyFunded ? '#10b981' : '#f59e0b'}; border-radius: 4px; color: ${isFullyFunded ? '#065f46' : '#92400e'};">
+          <strong>Funding Gap Report (Equation E17 / RUL-069):</strong><br>
+          Required Cost (Σ C_i): <strong>₹${Number(data.required_cost_inr).toLocaleString()}</strong><br>
+          Disbursed / Received (Σ F_j): <strong>₹${Number(data.received_cost_inr).toLocaleString()}</strong><br>
+          Announced Budget (Excluded from Gap Reduction): <strong>₹${Number(data.announced_only_inr).toLocaleString()}</strong><br>
+          Funding Gap (G): <span style="font-weight: bold; font-size: 1.1em; color: ${isFullyFunded ? '#059669' : '#dc2626'};">₹${Number(data.gap_inr).toLocaleString()}</span><br>
+          Status: <span class="badge ${isFullyFunded ? 'badge-pass' : 'badge-fail'}">${isFullyFunded ? 'FULLY FUNDED (Gap = ₹0)' : 'DEFICIT (Unfunded Gap)'}</span>
+          ${data.announced_only_inr > 0 && !isFullyFunded ? '<br><small>⚠️ Invariant Enforced: Announced budgets NEVER reduce the calculated funding gap until disbursed/received.</small>' : ''}
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error fetching funding gap: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function verifyBasicServicesDemo() {
+  const resultDiv = document.getElementById('phase10-handover-result');
+  if (!resultDiv) return;
+  const caseId = document.getElementById('ph10-case-id')?.value || "CASE-WYD-001";
+  const lpcd = parseFloat(document.getElementById('ph10-water-lpcd')?.value || "40");
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/delivery/services-readiness`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        case_id: caseId,
+        water_supply_lpcd: lpcd,
+        electricity_energised: true,
+        all_weather_road_functional: true,
+        sanitation_drainage_functional: true,
+        officer_name: "K. Harikumar, Executive Engineer PWD/KWA"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      const data = json.data;
+      const pass = data.all_services_functional;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: ${pass ? '#ecfdf5' : '#fef2f2'}; border: 1px solid ${pass ? '#10b981' : '#ef4444'}; border-radius: 4px; color: ${pass ? '#065f46' : '#991b1b'};">
+          ${pass ? '✓' : '✕'} <strong>Basic Services Inspection (RUL-072 / AT-05):</strong><br>
+          Water Supply: <strong>${data.water_supply_lpcd} LPCD</strong> ${data.water_supply_lpcd >= 55 ? '(≥ 55 LPCD Pass)' : '<strong style="color: #dc2626;">(&lt; 55 LPCD FAIL)</strong>'}<br>
+          Domestic Power: <strong>${data.electricity_energised ? 'Energised' : 'Missing'}</strong> | Road Access: <strong>${data.all_weather_road_functional ? 'Functional' : 'Missing'}</strong> | Sanitation: <strong>${data.sanitation_drainage_functional ? 'Operational' : 'Missing'}</strong><br>
+          Ready for Possession Handover: <span class="badge ${pass ? 'badge-pass' : 'badge-fail'}">${pass ? 'PASSED (Services Compliant)' : 'FAILED (Unserviced Units Blocked)'}</span>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function logDefectDemo() {
+  const resultDiv = document.getElementById('phase10-handover-result');
+  if (!resultDiv) return;
+  const caseId = document.getElementById('ph10-case-id')?.value || "CASE-WYD-001";
+  const severity = document.getElementById('ph10-defect-sev')?.value || "CRITICAL";
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/delivery/defects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        case_id: caseId,
+        site_id: "SITE-ELSTONE-01",
+        unit_id: "UNIT-04B",
+        category: severity === "CRITICAL" ? "STRUCTURAL" : (severity === "MAJOR" ? "ELECTRICAL" : "FINISHING"),
+        severity: severity,
+        description: severity === "CRITICAL" ? "Load-bearing foundation hairline shear crack detected near footing" : (severity === "MAJOR" ? "Distribution feeder conduit disconnected" : "Interior paint scuff on hallway wall"),
+        officer_name: "S. Rajesh, Quality Assurance Inspector"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      phase10State.lastDefectId = json.data.defect_id;
+      const isBlocking = severity === "CRITICAL" || severity === "MAJOR";
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #fff7ed; border: 1px solid #f97316; border-radius: 4px; color: #9a3412;">
+          ⚠️ <strong>Unit Defect Logged:</strong> ID <code>${json.data.defect_id}</code><br>
+          Category: <strong>${json.data.category}</strong> | Severity: <span class="badge ${isBlocking ? 'badge-fail' : 'badge-warn'}">${json.data.severity}</span><br>
+          Description: <em>${json.data.description}</em><br>
+          Status: <strong>${json.data.status}</strong><br>
+          ${isBlocking ? '<strong style="color: #dc2626;">Handover Gate: BLOCKED by unresolved Critical/Major defect (RUL-072 / AT-22).</strong>' : 'Minor defect logged; does not block handover but must be tracked.'}
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function resolveDefectDemo() {
+  const resultDiv = document.getElementById('phase10-handover-result');
+  if (!resultDiv) return;
+  const caseId = document.getElementById('ph10-case-id')?.value || "CASE-WYD-001";
+
+  if (!phase10State.lastDefectId) {
+    resultDiv.innerHTML = `<div style="padding: 0.75rem; background: #fee2e2; border: 1px solid #ef4444; border-radius: 4px; color: #b91c1c;">No open defect recorded to resolve. Please click 'Log Defect' first.</div>`;
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/delivery/defects/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        defect_id: phase10State.lastDefectId,
+        case_id: caseId,
+        evidence_ref: "CERT-ENG-QA-2025-089 (Structural Retrofit & Core Compression Test Passed)",
+        officer_name: "Chief Structural Engineer, Kerala PWD"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>Defect Resolved (DEC-040):</strong> ID <code>${json.data.defect_id}</code><br>
+          Resolution Status: <span class="badge badge-pass">${json.data.status}</span><br>
+          Engineering Clearance: <em>${json.data.resolution_evidence_ref}</em><br>
+          Handover Blocker: <span class="badge badge-pass">CLEARED</span>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error resolving defect: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function attemptHandoverDemo() {
+  const resultDiv = document.getElementById('phase10-handover-result');
+  if (!resultDiv) return;
+  const caseId = document.getElementById('ph10-case-id')?.value || "CASE-WYD-001";
+
+  try {
+    // Ensure unit-constructed and offer-acceptance are recorded first
+    await fetch(`${API_BASE}/api/v1/delivery/unit-constructed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ case_id: caseId, officer_name: "Site Executive Engineer" })
+    });
+    await fetch(`${API_BASE}/api/v1/delivery/offer-acceptance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ case_id: caseId, officer_name: "Beneficiary Welfare Officer" })
+    });
+
+    const res = await fetch(`${API_BASE}/api/v1/delivery/handover`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        case_id: caseId,
+        officer_name: "Sub-Collector & RDO Wayanad"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>Possession Handover Executed (AT-22 / RUL-072):</strong> Case <code>${json.data.case_id}</code><br>
+          Status: <span class="badge badge-pass">${json.data.status}</span> | Authorised By: <strong>${json.data.officer}</strong><br>
+          Unit keys and physical patta title handed to beneficiary household after meeting all preconditions.
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #fee2e2; border: 1px solid #ef4444; border-radius: 4px; color: #b91c1c;">
+          ✕ <strong>Handover Gating Blocked (${res.status}):</strong><br>
+          ${json.detail}<br>
+          <small><em>Normative Rule: Handover fails closed if water &lt; 55 LPCD, services missing, or critical/major defects remain.</em></small>
+        </div>
+      `;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function recordOccupationDemo() {
+  const resultDiv = document.getElementById('phase10-completion-result');
+  if (!resultDiv) return;
+  const caseId = document.getElementById('ph10-case-id')?.value || "CASE-WYD-001";
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/delivery/occupation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        case_id: caseId,
+        field_officer_name: "Village Officer, Meppadi"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>Physical On-Ground Occupation Verified (FR-068):</strong><br>
+          Case: <code>${json.data.case_id}</code> | Status: <span class="badge badge-pass">${json.data.status}</span><br>
+          Verified by Field Officer: <strong>${json.data.field_officer}</strong> (On-site visit confirmed household is residing).
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #fee2e2; border: 1px solid #ef4444; border-radius: 4px; color: #b91c1c;">
+          ✕ <strong>Occupation Verification Failed (${res.status}):</strong> ${json.detail}
+        </div>
+      `;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function evaluateCompletionStatusDemo() {
+  const resultDiv = document.getElementById('phase10-completion-result');
+  if (!resultDiv) return;
+  const caseId = document.getElementById('ph10-case-id')?.value || "CASE-WYD-001";
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/delivery/completion-status/${caseId}`);
+    const json = await res.json();
+    if (res.ok) {
+      const data = json.data;
+      const isDone = data.is_relocation_complete;
+      const blockers = data.blocking_reasons || [];
+
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: ${isDone ? '#ecfdf5' : '#fef2f2'}; border: 1px solid ${isDone ? '#10b981' : '#ef4444'}; border-radius: 4px; color: ${isDone ? '#065f46' : '#991b1b'};">
+          <strong>Relocation Completion Status (RUL-072 / AT-05):</strong><br>
+          Case: <code>${data.case_id}</code><br>
+          Verdict: <span class="badge ${isDone ? 'badge-pass' : 'badge-fail'}">${isDone ? 'COMPLETED RELOCATION' : 'IN PROGRESS / BLOCKED'}</span><br>
+          ${isDone ? '<div style="margin-top: 0.5rem; color: #065f46;">✓ All 6 mandatory gates passed: Unit Constructed, Basic Services Active (≥55 LPCD, Power, Road), 0 Defects, Offer Accepted, Possession Handed Over, Physical Occupation Verified.</div>' : `
+            <div style="margin-top: 0.5rem;">
+              <strong>Blocking Gates:</strong>
+              <ul style="margin: 0.25rem 0 0 1.25rem; padding: 0;">
+                ${blockers.map(b => `<li>${b}</li>`).join('')}
+              </ul>
+            </div>
+          `}
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function registerExternalHandoffDemo() {
+  const resultDiv = document.getElementById('phase10-completion-result');
+  if (!resultDiv) return;
+  const caseId = document.getElementById('ph10-case-id')?.value || "CASE-WYD-001";
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/delivery/external-handoff`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        case_id: caseId,
+        external_system_name: "LIFE_MISSION_PORTAL",
+        external_reference_id: "LIFE-WYD-2025-0842",
+        accountable_agency: "Local Self Government Department (LSGD) / LIFE Mission Kerala",
+        accountable_officer: "District Coordinator, LIFE Mission Wayanad",
+        delegated_scope: "Unit Superstructure Construction & Direct Benefit Transfer",
+        reconciliation_method: "PERIODIC_API_SYNC_AND_SITE_AUDIT"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #eff6ff; border: 1px solid #3b82f6; border-radius: 4px; color: #1e40af;">
+          ✓ <strong>Accountable External Handoff Registered (FR-069):</strong><br>
+          External System: <strong>${json.data.external_system_name}</strong> (Ref: <code>${json.data.external_reference_id}</code>)<br>
+          Accountable Agency: <strong>${json.data.accountable_agency}</strong> | Officer: <strong>${json.data.accountable_officer}</strong><br>
+          Delegated Scope: <em>${json.data.delegated_scope}</em><br>
+          <small>Normative Guard: External handoff does NOT mark relocation as complete until on-ground physical occupation is verified.</small>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error registering external handoff: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function recordLivelihoodAuditDemo() {
+  const resultDiv = document.getElementById('phase10-completion-result');
+  if (!resultDiv) return;
+  const caseId = document.getElementById('ph10-case-id')?.value || "CASE-WYD-001";
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/delivery/followup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        case_id: caseId,
+        milestone_stage: "SIX_MONTH",
+        livelihood_restored: true,
+        income_restoration_pct: 92.5,
+        schooling_continuity: true,
+        healthcare_accessible: true,
+        infrastructure_rating: "SATISFACTORY",
+        community_satisfaction: 4.5,
+        officer_name: "K. Biju, Taluk Welfare Officer",
+        grievance_notes: "Minor request for feeder bus route timing adjustment forwarded to KSRTC"
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          ✓ <strong>6-Month Post-Relocation Livelihood Audit Recorded (RUL-072):</strong><br>
+          Milestone: <strong>${json.data.milestone_stage}</strong> | Income Restoration: <strong>${json.data.income_restoration_pct}%</strong><br>
+          Schooling Continuity: <strong>${json.data.schooling_continuity ? 'Maintained' : 'Disrupted'}</strong> | Healthcare Access: <strong>${json.data.healthcare_accessible ? 'Available' : 'Restricted'}</strong><br>
+          Community Satisfaction: <strong>${json.data.community_satisfaction} / 5.0</strong> | Grievance: <em>${json.data.grievance_notes}</em>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error recording followup: ${json.detail}</div>`;
+    }
+  } catch (e) {
     resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
   }
 }

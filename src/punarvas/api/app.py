@@ -20,6 +20,7 @@ from punarvas.core.enums import (
     AuthorityState,
     ClassificationLevel,
     ConsentPurpose,
+    FundingState,
     RelocationPathway,
     RoleType,
 )
@@ -115,6 +116,18 @@ from punarvas.modules.reconstruction import (
     delivery_completion_tracker,
     decision_reconstruction_engine,
     disclosure_review_engine,
+    DefectSeverity,
+    DefectCategory,
+    DefectRecord,
+    RelocationNecessityReview,
+    HouseholdSchemeAssessment,
+    FundingRecord,
+    FundingGapReport,
+    BasicServicesReadiness,
+    ExternalHandoffRecord,
+    PostRelocationFollowUp,
+    CaseDeliveryTracker,
+    delivery_tracker,
 )
 from punarvas.modules.district_scale import (
     DistrictPolicyOverride,
@@ -129,6 +142,8 @@ from punarvas.core.errors import (
     EntityFrozenByObjectionError,
     ApprovalConditionUnmetError,
     UnauthorizedActionError,
+    DefectsBlockCompletionError,
+    UnservicedUnitHandoverError,
 )
 from punarvas.spikes import load_wayanad_fixture
 
@@ -1522,6 +1537,317 @@ def get_capacity_reservation(reservation_id: str):
     if not res:
         raise HTTPException(status_code=404, detail=f"Reservation '{reservation_id}' not found")
     return APIResponseEnvelope(data=res.model_dump())
+
+
+# --- Phase 10: Delivery Execution, Defect Clearance, Funding Gap & Post-Relocation Follow-up ---
+
+class NecessityReviewRequest(BaseModel):
+    case_id: str
+    household_id: str
+    in_situ_mitigation_feasible: bool
+    permanent_relocation_necessary: bool
+    reviewer_name: str
+    reviewer_credentials: str
+    reasons: str
+    uncertainty_level: str = "LOW"
+    settlement_community_effects: str = "Preserves hamlet integrity"
+    in_situ_description: Optional[str] = None
+    estimated_in_situ_cost_inr: Optional[float] = None
+    actor_id: Optional[str] = None
+
+
+class SchemeAssessmentRequest(BaseModel):
+    household_id: str
+    tenure_category: str
+    pathway: RelocationPathway = RelocationPathway.TOWNSHIP
+
+
+class RecordFundingRequest(BaseModel):
+    case_id: str
+    source_agency: str
+    cost_head: str
+    state: FundingState
+    amount_inr: float
+    actor_id: Optional[str] = "treasury_officer"
+    sanction_order_ref: Optional[str] = None
+    is_announced_budget_only: bool = False
+
+
+class SetRequiredCostRequest(BaseModel):
+    case_id: str
+    required_cost_inr: float
+
+
+class VerifyServicesRequest(BaseModel):
+    case_id: str
+    water_supply_lpcd: float
+    electricity_energised: bool
+    all_weather_road_functional: bool
+    sanitation_drainage_functional: bool
+    officer_name: str
+
+
+class LogDefectRequest(BaseModel):
+    case_id: str
+    site_id: str
+    unit_id: str
+    category: DefectCategory
+    severity: DefectSeverity
+    description: str
+    officer_name: str
+
+
+class ResolveDefectRequest(BaseModel):
+    defect_id: str
+    evidence_ref: str
+    officer_name: str
+    case_id: Optional[str] = None
+
+
+class HandoverPossessionRequest(BaseModel):
+    case_id: str
+    officer_name: str
+
+
+class PhysicalOccupationRequest(BaseModel):
+    case_id: str
+    field_officer_name: str
+
+
+class ExternalHandoffRequest(BaseModel):
+    case_id: str
+    external_system_name: str
+    external_reference_id: str
+    accountable_agency: str
+    accountable_officer: str
+    delegated_scope: str
+    reconciliation_method: str = "PERIODIC_API_SYNC_AND_SITE_AUDIT"
+
+
+class LivelihoodFollowupRequest(BaseModel):
+    case_id: str
+    milestone_stage: str
+    livelihood_restored: bool
+    income_restoration_pct: float
+    schooling_continuity: bool
+    healthcare_accessible: bool
+    infrastructure_rating: str
+    community_satisfaction: float
+    officer_name: str
+    grievance_notes: Optional[str] = None
+
+
+# Endpoints
+
+@app.post("/api/v1/delivery/necessity-review", response_model=APIResponseEnvelope)
+def record_necessity_review(req: NecessityReviewRequest):
+    rev = delivery_tracker.record_necessity_review(
+        case_id=req.case_id,
+        household_id=req.household_id,
+        in_situ_mitigation_feasible=req.in_situ_mitigation_feasible,
+        permanent_relocation_necessary=req.permanent_relocation_necessary,
+        reviewer_name=req.reviewer_name,
+        reviewer_credentials=req.reviewer_credentials,
+        reasons=req.reasons,
+        uncertainty_level=req.uncertainty_level,
+        settlement_community_effects=req.settlement_community_effects,
+        in_situ_description=req.in_situ_description,
+        estimated_in_situ_cost_inr=req.estimated_in_situ_cost_inr,
+        actor_id=req.actor_id,
+    )
+    return APIResponseEnvelope(data=rev.model_dump())
+
+
+@app.get("/api/v1/delivery/necessity-review/{case_id}", response_model=APIResponseEnvelope)
+def get_necessity_review(case_id: str):
+    rev = delivery_tracker.get_necessity_review(case_id)
+    if not rev:
+        raise HTTPException(status_code=404, detail=f"Necessity review for case '{case_id}' not found")
+    return APIResponseEnvelope(data=rev.model_dump())
+
+
+@app.post("/api/v1/delivery/scheme-assessment", response_model=APIResponseEnvelope)
+def assess_household_scheme(req: SchemeAssessmentRequest):
+    assessment = delivery_tracker.assess_household_scheme(
+        household_id=req.household_id,
+        tenure_category=req.tenure_category,
+        pathway=req.pathway,
+    )
+    return APIResponseEnvelope(data=assessment.model_dump())
+
+
+@app.get("/api/v1/delivery/scheme-assessment/{household_id}", response_model=APIResponseEnvelope)
+def get_scheme_assessment(household_id: str):
+    assessment = delivery_tracker.get_scheme_assessment(household_id)
+    if not assessment:
+        raise HTTPException(status_code=404, detail=f"Scheme assessment for household '{household_id}' not found")
+    return APIResponseEnvelope(data=assessment.model_dump())
+
+
+@app.post("/api/v1/delivery/funding/required-cost", response_model=APIResponseEnvelope)
+def set_case_required_cost(req: SetRequiredCostRequest):
+    delivery_tracker.set_required_cost(req.case_id, req.required_cost_inr)
+    return APIResponseEnvelope(data={"case_id": req.case_id, "required_cost_inr": req.required_cost_inr})
+
+
+@app.post("/api/v1/delivery/funding", response_model=APIResponseEnvelope)
+def record_case_funding(req: RecordFundingRequest):
+    rec = delivery_tracker.record_funding(
+        case_id=req.case_id,
+        source_agency=req.source_agency,
+        cost_head=req.cost_head,
+        state=req.state,
+        amount_inr=req.amount_inr,
+        actor_id=req.actor_id or "treasury_officer",
+        sanction_order_ref=req.sanction_order_ref,
+        is_announced_budget_only=req.is_announced_budget_only,
+    )
+    return APIResponseEnvelope(data=rec.model_dump())
+
+
+@app.get("/api/v1/delivery/funding/{case_id}", response_model=APIResponseEnvelope)
+def list_case_funding(case_id: str):
+    records = delivery_tracker.list_funding(case_id)
+    return APIResponseEnvelope(data=[r.model_dump() for r in records])
+
+
+@app.get("/api/v1/delivery/funding-gap/{case_id}", response_model=APIResponseEnvelope)
+def calculate_funding_gap(case_id: str, required_cost_inr: Optional[float] = None):
+    gap_report = delivery_tracker.calculate_funding_gap(case_id, required_cost_inr)
+    return APIResponseEnvelope(data=gap_report.model_dump())
+
+
+@app.post("/api/v1/delivery/services-readiness", response_model=APIResponseEnvelope)
+def verify_services_readiness(req: VerifyServicesRequest):
+    services = delivery_tracker.verify_services_readiness(
+        case_id=req.case_id,
+        water_supply_lpcd=req.water_supply_lpcd,
+        electricity_energised=req.electricity_energised,
+        all_weather_road_functional=req.all_weather_road_functional,
+        sanitation_drainage_functional=req.sanitation_drainage_functional,
+        officer_name=req.officer_name,
+    )
+    return APIResponseEnvelope(data=services.model_dump())
+
+
+@app.post("/api/v1/delivery/defects", response_model=APIResponseEnvelope)
+def log_unit_defect(req: LogDefectRequest):
+    defect = delivery_tracker.log_defect(
+        case_id=req.case_id,
+        site_id=req.site_id,
+        unit_id=req.unit_id,
+        category=req.category,
+        severity=req.severity,
+        description=req.description,
+        officer_name=req.officer_name,
+    )
+    return APIResponseEnvelope(data=defect.model_dump())
+
+
+@app.get("/api/v1/delivery/defects/{case_id}", response_model=APIResponseEnvelope)
+def list_case_defects(case_id: str):
+    defects = delivery_tracker.list_defects(case_id)
+    return APIResponseEnvelope(data=[d.model_dump() for d in defects])
+
+
+@app.post("/api/v1/delivery/defects/resolve", response_model=APIResponseEnvelope)
+def resolve_unit_defect(req: ResolveDefectRequest):
+    try:
+        resolved = delivery_tracker.resolve_defect(
+            defect_id=req.defect_id,
+            evidence_ref=req.evidence_ref,
+            officer_name=req.officer_name,
+            case_id=req.case_id,
+        )
+        return APIResponseEnvelope(data=resolved.model_dump())
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/v1/delivery/handover", response_model=APIResponseEnvelope)
+def record_possession_handover(req: HandoverPossessionRequest):
+    try:
+        delivery_tracker.record_possession_handover(req.case_id, req.officer_name)
+        return APIResponseEnvelope(data={"case_id": req.case_id, "status": "HANDED_OVER", "officer": req.officer_name})
+    except UnservicedUnitHandoverError as e:
+        raise HTTPException(status_code=412, detail=str(e))
+    except DefectsBlockCompletionError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/v1/delivery/unit-constructed", response_model=APIResponseEnvelope)
+def mark_unit_constructed(req: HandoverPossessionRequest):
+    delivery_tracker.mark_unit_constructed(req.case_id, req.officer_name)
+    return APIResponseEnvelope(data={"case_id": req.case_id, "status": "CONSTRUCTED", "officer": req.officer_name})
+
+
+@app.post("/api/v1/delivery/offer-acceptance", response_model=APIResponseEnvelope)
+def record_offer_acceptance(req: HandoverPossessionRequest):
+    delivery_tracker.record_offer_acceptance(req.case_id, req.officer_name)
+    return APIResponseEnvelope(data={"case_id": req.case_id, "status": "OFFER_ACCEPTED", "officer": req.officer_name})
+
+
+@app.post("/api/v1/delivery/occupation", response_model=APIResponseEnvelope)
+def record_physical_occupation(req: PhysicalOccupationRequest):
+    try:
+        delivery_tracker.record_physical_occupation(req.case_id, req.field_officer_name)
+        return APIResponseEnvelope(data={"case_id": req.case_id, "status": "OCCUPIED", "field_officer": req.field_officer_name})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/delivery/completion-status/{case_id}", response_model=APIResponseEnvelope)
+def evaluate_relocation_completion(case_id: str):
+    is_complete, blockers = delivery_tracker.evaluate_relocation_completion(case_id)
+    return APIResponseEnvelope(data={"case_id": case_id, "is_relocation_complete": is_complete, "blocking_reasons": blockers})
+
+
+@app.post("/api/v1/delivery/external-handoff", response_model=APIResponseEnvelope)
+def register_external_handoff(req: ExternalHandoffRequest):
+    rec = delivery_tracker.register_external_handoff(
+        case_id=req.case_id,
+        external_system_name=req.external_system_name,
+        external_reference_id=req.external_reference_id,
+        accountable_agency=req.accountable_agency,
+        accountable_officer=req.accountable_officer,
+        delegated_scope=req.delegated_scope,
+        reconciliation_method=req.reconciliation_method,
+    )
+    return APIResponseEnvelope(data=rec.model_dump())
+
+
+@app.get("/api/v1/delivery/external-handoff/{case_id}", response_model=APIResponseEnvelope)
+def get_external_handoff(case_id: str):
+    rec = delivery_tracker.get_external_handoff(case_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"External handoff for case '{case_id}' not found")
+    return APIResponseEnvelope(data=rec.model_dump())
+
+
+@app.post("/api/v1/delivery/followup", response_model=APIResponseEnvelope)
+def record_livelihood_followup(req: LivelihoodFollowupRequest):
+    fol = delivery_tracker.record_livelihood_followup(
+        case_id=req.case_id,
+        milestone_stage=req.milestone_stage,
+        livelihood_restored=req.livelihood_restored,
+        income_restoration_pct=req.income_restoration_pct,
+        schooling_continuity=req.schooling_continuity,
+        healthcare_accessible=req.healthcare_accessible,
+        infrastructure_rating=req.infrastructure_rating,
+        community_satisfaction=req.community_satisfaction,
+        officer_name=req.officer_name,
+        grievance_notes=req.grievance_notes,
+    )
+    return APIResponseEnvelope(data=fol.model_dump())
+
+
+@app.get("/api/v1/delivery/followup/{case_id}", response_model=APIResponseEnvelope)
+def list_livelihood_followups(case_id: str):
+    fols = delivery_tracker.list_followups(case_id)
+    return APIResponseEnvelope(data=[f.model_dump() for f in fols])
+
 
 
 
