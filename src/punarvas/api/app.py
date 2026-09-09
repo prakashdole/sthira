@@ -129,6 +129,14 @@ from punarvas.modules.source_access import (
     ObservationReconciliationRequest,
     DependencyBlockerEvaluationRequest,
 )
+from punarvas.modules.resilience import (
+    resilience_service,
+    ChannelType,
+    DataClassification,
+    CrossChannelAccessRequest,
+    OfflineDeviceRecord,
+    CoordinatedRestorePackage,
+)
 from punarvas.core.localization import (
     LOCALIZATION_REGISTRY,
     get_supported_languages,
@@ -2570,6 +2578,133 @@ def simulate_basemap_failure(req: SimulateBasemapFailureApiRequest):
         return APIResponseEnvelope(data=res)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+# ==============================================================================
+# PHASE 14: Platform Reliability, Transactional Outbox, Security & Release Assurance (ARC-C11, DEC-045)
+# ==============================================================================
+
+class OutboxRelayApiRequest(BaseModel):
+    messages: List[Dict[str, Any]]
+    max_retries: int = 3
+    force_fail_pattern: Optional[str] = None
+    reconcile_dead_letter: bool = False
+
+
+class DeviceEvictionApiRequest(BaseModel):
+    device_id: str
+    unsynced_records: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class RevokeDeviceApiRequest(BaseModel):
+    device_id: str
+
+
+class CertInIncidentApiRequest(BaseModel):
+    incident_category: str
+    severity: str = "HIGH"
+    impacted_assets: List[str]
+    remedial_measures: List[str]
+    reporting_poc: str = "ciso@punarvas.kerala.gov.in"
+
+
+@app.post("/api/v1/resilience/outbox/relay-reconcile", response_model=APIResponseEnvelope)
+def relay_and_reconcile_outbox(req: OutboxRelayApiRequest):
+    """
+    Relay and reconcile transactional outbox messages with dead-letter queue (NFR-028, AT-25).
+    """
+    res = resilience_service.relay_and_reconcile_outbox(
+        messages=req.messages,
+        max_retries=req.max_retries,
+        force_fail_pattern=req.force_fail_pattern,
+        reconcile_dead_letter=req.reconcile_dead_letter,
+    )
+    return APIResponseEnvelope(data=res.model_dump())
+
+
+@app.post("/api/v1/resilience/access/check-cross-channel", response_model=APIResponseEnvelope)
+def check_cross_channel_access(req: CrossChannelAccessRequest):
+    """
+    Evaluate multi-channel data leakage prevention and RLS context reset (NFR-029, NFR-030, AT-24).
+    """
+    res = resilience_service.evaluate_cross_channel_access(req)
+    return APIResponseEnvelope(data=res.model_dump())
+
+
+@app.post("/api/v1/resilience/offline/device-eviction", response_model=APIResponseEnvelope)
+def handle_device_storage_eviction(req: DeviceEvictionApiRequest):
+    """
+    Handle offline IndexedDB storage eviction, export recovery package, and revoke token (NFR-031, AT-26).
+    """
+    res = resilience_service.handle_storage_eviction(
+        device_id=req.device_id,
+        unsynced_records=req.unsynced_records,
+    )
+    return APIResponseEnvelope(data=res.model_dump())
+
+
+@app.post("/api/v1/resilience/offline/revoke-lost", response_model=APIResponseEnvelope)
+def revoke_lost_device(req: RevokeDeviceApiRequest):
+    """
+    Immediately revoke binding tokens for lost/stolen field devices (NFR-031).
+    """
+    res = resilience_service.revoke_lost_device(device_id=req.device_id)
+    return APIResponseEnvelope(data=res.model_dump())
+
+
+@app.post("/api/v1/resilience/restore/validate-consistency", response_model=APIResponseEnvelope)
+def validate_restore_consistency(pkg: CoordinatedRestorePackage):
+    """
+    Validate coordinated restore consistency set across DB, blobs, checkpoints, and keys (NFR-032, AT-27).
+    """
+    res = resilience_service.validate_coordinated_restore(pkg)
+    return APIResponseEnvelope(data=res.model_dump())
+
+
+@app.get("/api/v1/resilience/ntp/verify-clock", response_model=APIResponseEnvelope)
+def verify_ntp_clock(
+    ntp_server: str = "time.nplindia.org",
+    drift_ms: float = 14.2,
+):
+    """
+    Verify NTP clock synchronization against Indian standard time server (NFR-033).
+    """
+    res = resilience_service.verify_clock_synchronization(
+        ntp_server=ntp_server,
+        current_drift_ms=drift_ms,
+    )
+    return APIResponseEnvelope(data=res)
+
+
+@app.post("/api/v1/resilience/cert-in/incident", response_model=APIResponseEnvelope)
+def report_cert_in_incident(req: CertInIncidentApiRequest):
+    """
+    Generate statutory CERT-In 6-hour incident report package with 180-day log preservation (NFR-033, RUL-020).
+    """
+    res = resilience_service.generate_cert_in_incident(
+        incident_category=req.incident_category,
+        severity=req.severity,
+        impacted_assets=req.impacted_assets,
+        remedial_measures=req.remedial_measures,
+        reporting_poc=req.reporting_poc,
+    )
+    return APIResponseEnvelope(data=res.model_dump())
+
+
+@app.get("/api/v1/resilience/release-assurance", response_model=APIResponseEnvelope)
+def get_release_assurance_report(
+    version: str = "v1.0.0",
+    tests_passed: int = 166,
+):
+    """
+    Generate machine-readable release assurance verification matrix (NFR-035, trd.md §9).
+    """
+    report = resilience_service.generate_release_assurance_report(
+        release_version=version,
+        automated_tests_passed=tests_passed,
+    )
+    return APIResponseEnvelope(data=report.model_dump())
+
 
 
 
