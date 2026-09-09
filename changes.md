@@ -1,17 +1,19 @@
 ---
-title: PUNARVAS-AI Revision 1.3 Change Record
+title: PUNARVAS-AI Revision 1.4 Change Record
 document_id: PUN-CHANGES
-version: 1.3
-status: Implemented documentation revision
-as_of: 2026-09-08
+version: 1.4
+status: Post-implementation audit and remaining-work register
+as_of: 2026-09-09
 audience: Product, programme, legal, domain, engineering, QA, assurance, and future maintainers
 owner: Product owner
 normative_scope: Change history, migration map, source-to-disposition traceability, and validation record
 ---
 
-# PUNARVAS-AI Revision 1.3 Change Record
+# PUNARVAS-AI Revision 1.4 Change Record
 
 ## 1. Revision basis
+
+Revision 1.4 records the 9 September 2026 repository, commit, test, architecture-conformance, security, and production-readiness audit. It does **not** declare the software complete. The current repository is a useful synthetic-data demonstrator and domain/API prototype, but it does not yet implement the production architecture or satisfy the PH-1 through PH-3 exit gates. Sections 11–15 are the controlling current implementation status and remaining-work register; earlier sections remain the historical documentation-change record.
 
 Revision 1.3 reorganizes [phases.md](./phases.md) into agent-ready research, coding, integration, and assurance work packages. It adds contract-first ownership, parallel waves, dependencies, merge evidence, file/module ownership, and stop conditions without changing product scope or phase gates.
 
@@ -203,6 +205,128 @@ The complete formulas, symbols, units and limitations are in [equations.md](./eq
 - Confirmed all 26 feature entries retain users, behavior, dependencies, requirements, outcome/component mapping, rules/decisions, acceptance, and phase, and their dependency graph is acyclic.
 - Confirmed no reference exceeds the defined ID range and no source-package instruction/code was promoted as evidence of operational access.
 
-## 10. Still unvalidated
+## 10. Historical validation boundary through revision 1.3
 
-No software, schema migration, integration, formula implementation, field observation, legal workflow, funding route, public disclosure profile, accessibility conformance, security control, SLO, recovery target or pilot outcome has been implemented or verified by this documentation change. See [open-decisions.md](./open-decisions.md) and [source-register.md](./source-register.md).
+Revisions 1.1–1.3 changed documentation only. At that point no software, schema migration, integration, formula implementation, field observation, legal workflow, funding route, public disclosure profile, accessibility conformance, security control, SLO, recovery target, or pilot outcome had been implemented or verified. Application code was added in later commits. Its current audited status is recorded below and supersedes any later commit message or decision entry that describes a phase as complete without the required exit evidence.
+
+## 11. Revision 1.4 repository and test audit
+
+Audit target: clean `main` at commit `1e4aa90` on 9 September 2026.
+
+| Check | Result | Qualification |
+| --- | --- | --- |
+| Git working tree | PASS | Clean before and after the audit |
+| Commit/object integrity | PASS | 41 commits; `git fsck --full` returned no error |
+| Python tests | PASS | 172 tests passed with two third-party deprecation warnings using `.venv/bin/python -m pytest -q` |
+| Test isolation | PASS | Every `tests/test_*.py` file also passed in its own Python process |
+| Python syntax/import compilation | PASS | `python -m compileall -q src` |
+| JavaScript syntax | PASS | `node --check frontend/app.js` |
+| Installed dependency consistency | PASS | `.venv/bin/python -m pip check` |
+| FastAPI smoke check | PASS | Application started; `/health`, `/ui/`, and `/openapi.json` returned HTTP 200 |
+| API authentication audit | FAIL | All 147 FastAPI routes have zero authentication/authorization dependencies |
+| Privileged approval abuse check | FAIL | An unauthenticated request with the invented token `MFA-STEPUP-anything` returned HTTP 200 and `OFFICIALLY_APPROVED` |
+| Durable outbox retry check | FAIL | A failed core outbox item became `FAILED`, was not retried, and never reached `DEAD_LETTER` |
+| Browser-wide UI crawl | UNAVAILABLE | No Reticle-instrumented browser session or project configuration exists; this must not be reported as a passed UI audit |
+| Coverage, lint, typing, SAST and dependency vulnerability scan | UNAVAILABLE | No configured tools, thresholds, or CI gates exist |
+| Production architecture conformance | FAIL | Required database, migrations, identity, workers, object storage, GIS delivery, observability and deployment assets are absent |
+
+The 172 passing tests are useful regression evidence for the current in-memory model. They are not evidence of production authentication, database isolation, real provider integration, browser accessibility, load capacity, recovery objectives, or government/field validation.
+
+## 12. Current implementation classification
+
+### 12.1 Implemented as prototype behavior
+
+- FastAPI application shell and OpenAPI schema with broad domain-route coverage.
+- Pydantic contracts, enums, structured error types, advisory envelopes, and synthetic fixtures.
+- In-process domain services for programmes, hazards, households, land discrepancies, policy evaluation, governance, objections, allocation, delivery, reporting, source readiness, resilience, scaling, and adaptation.
+- Hash-linked in-process audit records and demonstrator outbox structures.
+- Static HTML/CSS/JavaScript demonstration interface with English, Malayalam, and partial Hindi strings.
+- Synthetic scenario tests for many rules and acceptance cases.
+
+### 12.2 Not implemented as production capability
+
+- Persistent PostgreSQL/PostGIS data model, database constraints, row-level security, migrations, bitemporal history, and transactional repositories.
+- Real OIDC/SAML login, identity-provider integration, verified MFA, session management, role/geography/classification enforcement, and protected endpoints.
+- India-resident versioned object storage, immutable evidence objects, signing-key custody, signed URLs, and retention/legal-hold enforcement.
+- Celery/RabbitMQ or equivalent durable jobs, a transactional database outbox, working retry/backoff/dead-letter processing, and reconciliation workers.
+- STAC, OGC API Features, MVT, COG, GDAL/PROJ processing, authenticated map/data delivery, and actual MapLibre rendering.
+- Real S01–S54 acquisition adapters, provider telemetry, AOI downloads, checksums, licenses/entitlements, quarantines, and source-refresh/supersession jobs. Current health values and many source states are seeded demonstrations.
+- The specified Next.js/TypeScript installable PWA, service worker, encrypted offline store, reliable IndexedDB synchronization, device binding, and browser eviction recovery.
+- A real capacity-constrained MILP adapter and independent solver verification. Current allocation is a deterministic greedy matcher.
+- Controlled PDF/GeoPackage generation, durable manifest/signature verification, official-template management, notification delivery, and external departmental reconciliation.
+- Metrics, logs, traces, SIEM integration, alerting, rate limits, CSP/security headers, secrets management, backup automation, failover, RPO/RTO measurement, or load-tested scaling.
+- OCI/container definitions, infrastructure-as-code, deployment environments, reproducible lock files, release pipeline, rollback automation, and operator runbooks.
+
+## 13. Required code changes and remaining coding work
+
+Priority meanings: **P0** blocks any live or restricted-data use; **P1** blocks a credible shadow pilot; **P2** is required before broader scaling or maintainable release.
+
+| ID | Priority | Required change / remaining code | Minimum completion evidence |
+| --- | --- | --- | --- |
+| REM-001 | P0 | **Prototype done (DEC-046):** HMAC sessions from a local identity directory; identity/roles/geography from the token; non-public routes return 401. **Still open:** Keycloak/OIDC/SAML broker, issuer/audience from a real IdP, session revocation store. | Unauthorized/expired/forged token tests pass on the prototype; OIDC federation tests remain open |
+| REM-002 | P0 | **Prototype done (DEC-046):** step-up tokens bound to principal, action, nonce and expiry; consume-on-use; `MFA-STEPUP-anything` returns 403; frontend no longer ships a privileged token. **Still open:** IdP-backed MFA/step-up. | Forgery, replay and cross-action tests pass |
+| REM-003 | P0 | Introduce PostgreSQL/PostGIS repositories, transactional unit-of-work boundaries and Alembic migrations. Move all domain state, audit events, approvals and reservations out of process memory. | Restart-persistence, migration upgrade/rollback, concurrency, constraint and transaction tests against real PostgreSQL/PostGIS |
+| REM-004 | P0 | Implement database-enforced RLS and scoped service identities; ensure application owners, superusers, `BYPASSRLS`, views, functions and pooled-connection reuse cannot leak records. | NFR-012/NFR-030 and AT-24 tests run against PostgreSQL, not an input-based simulator |
+| REM-005 | P0 | **In-process done (DEC-046):** core outbox retries `FAILED` through `DEAD_LETTER` and reconciles without duplicating idempotency keys; resilience service uses that outbox. **Still open:** durable PostgreSQL outbox table, broker worker, exponential wall-clock backoff. | Injected broker failure progresses through retries to dead letter and later reconciliation |
+| REM-006 | P0 | Add encryption and managed-key boundaries for databases, objects, backups, sensitive fields and offline packages. Add secret management and remove all demonstrator credentials/tokens from client code. Client MFA example token is removed; server prototype secrets remain env-overridable defaults. | Key-rotation, redaction, secret-scan, lost-device and authorized-decryption tests |
+| REM-007 | P0 | **Prototype done (DEC-046):** HTTP mutations and approval/reservation/notification commands fail closed while degraded (503). **Still open:** hold/outage flags at a real transaction boundary once PostgreSQL exists. | Approval and other mutations fail closed during degraded mode |
+| REM-008 | P1 | Implement immutable/versioned S3-compatible object storage, checksums, evidence links, signed export manifests, retention, legal holds and coordinated DB/object/key restore. | Real backup-and-restore exercise proves NFR-007/008/032 and AT-27 |
+| REM-009 | P1 | Implement selected S01–S54 connectors and governed uploads with real entitlement, coverage, freshness, CRS, unit, license and checksum validation. Remove seeded provider-health claims from production paths. | Permitted AOI sample receipts and failure/fallback tests for each activated source; S45–S50 remain blocked until authorized |
+| REM-010 | P1 | Implement PostGIS/GDAL spatial ingestion and reproducible overlays, uncertainty handling, STAC catalog, authorized OGC/vector/COG delivery, MVT tiles and MapLibre map/non-map parity. | AT-01–05/10/30/34/36 with real spatial fixtures and cross-channel authorization |
+| REM-011 | P1 | Replace greedy allocation with the approved capacity-constrained MILP adapter, pinned inputs, solver status/gap/seed, explicit unassigned results, policy-approved objective, sensitivity analysis and independent feasibility validation. | AT-08 and AT-15–17 plus infeasible, tie, concurrent reservation and reproducibility cases |
+| REM-012 | P1 | Replace the static 3,903-line JavaScript page with the architecture-approved componentized Next.js/TypeScript PWA, or formally revise the architecture through an ADR. Implement service worker/offline workflow and secure storage rather than UI simulations. | Production build, browser E2E tests, offline/reconnect/conflict tests and no client-side privileged token |
+| REM-013 | P1 | Complete accessible HTML/PDF, CSV, GeoJSON and GeoPackage outputs, template versioning, cryptographic signing, public/private projections and withdrawal/regeneration. | Deterministic/content-equivalent reproduction, tamper, privacy and assisted non-map tests |
+| REM-014 | P1 | Add notification and external-system adapter boundaries with idempotent delivery and reconciliation. Do not claim Gazette, treasury, land, water or departmental publication from locally created records. | Sandbox/agency contract tests, delivery receipts and explicit unavailable/manual states |
+| REM-015 | P1 | Split the 2,715-line API module and duplicate services into bounded routers/application services/repositories. Stop reading private service fields directly and remove duplicated capacity, district-scaling, recovery and outbox implementations. | Dependency-boundary tests, smaller reviewable modules and one authoritative implementation per capability |
+| REM-016 | P1 | Add CI with locked/reproducible dependencies, formatting/linting, typing, unit/integration tests, schema compatibility, secret/dependency/container scanning and build artifacts. | A clean pipeline on a fresh runner; protected merge gate and retained reports |
+| REM-017 | P1 | Add browser E2E and accessibility verification for every critical workflow, including keyboard and screen-reader checks, English/Malayalam completeness, non-map parity, error/empty/loading states and responsive layouts. | WCAG 2.2 AA/GIGW evidence plus a full non-truncated UI crawl with zero unexplained failures |
+| REM-018 | P1 | Add performance and reliability tests for the TRD reference load, asynchronous jobs, source failure, concurrent reservations, cache isolation and restart/failover. | Measured NFR-001–010 and NFR-028–035 results; no configuration-only claims |
+| REM-019 | P2 | Add OCI containers, environment configuration, infrastructure-as-code, ingress separation, observability, alerts, backup schedules, patching, rollback and operational runbooks. | Reproducible staging deployment and exercised rollback/restore/incident drills |
+| REM-020 | P2 | Add API pagination/filtering, optimistic concurrency, idempotency keys, structured error consistency, version compatibility and generated-client contract tests. | Contract suite and migration/rollback compatibility report |
+| REM-021 | P2 | Add measurable test coverage thresholds and tests for malformed/hostile inputs, boundary values, clock behavior, large uploads, injection, authorization abuse, data leakage and denial of service. | Coverage report plus SAST/DAST/fuzz/property/security results with no unresolved critical/high issue |
+| REM-022 | P2 | Align implementation labels and ADR claims with evidence. Until PH-2/PH-3 gates pass, replace “controlled live,” “release assured,” and similar completion claims with `PROTOTYPE`, `SYNTHETIC`, or `SIMULATED`. | Traceability report links every claim to code, test type, data provenance and approval evidence |
+
+## 14. Remaining research, governance, and external work
+
+These items cannot be completed truthfully by adding code or synthetic tests:
+
+| ID | Remaining work | Required evidence |
+| --- | --- | --- |
+| REM-R01 | Confirm statutory authority, approval/notification, objection/appeal, acquisition/transfer, scheme and completion workflows with Kerala/Wayanad owners. | Signed RACI, approved workflow, forms and legal review; closes or narrows ODN-001–003/010/017–018 |
+| REM-R02 | Obtain permitted Wayanad AOI samples for the selected S01–S44 stack and verify licenses, entitlement, coverage, resolution, CRS, units, cadence, quotas, costs, mirrors and fallbacks. | Acquisition receipts, checksums, data dictionaries and reviewer approvals satisfying FR-078 |
+| REM-R03 | Obtain formal agreements and governed transfer routes for restricted/agency/field dependencies S45–S50. | Agreements, named custodians, retention/privacy classification, sample schemas and tested transfers |
+| REM-R04 | Independently validate hazard/runout, parcel/right, geotechnical, drainage, lean-season water, access, capacity and cost methods for Wayanad. | Signed specialist reviews and benchmark/reference cases; no software-generated certification |
+| REM-R05 | Complete community, livelihood, consent-purpose, accessibility, assisted-service, grievance and English/Malayalam comprehension research. | Approved forms/glossary, participant protocol and documented user/accessibility findings |
+| REM-R06 | Complete DPIA/threat modelling, publication/disclosure analysis, records schedule, CERT-In applicability, hosting/residency and incident procedures. | Approved security/privacy/records matrices and exercised response plan |
+| REM-R07 | Establish baseline measures, evaluation protocol, staffing, procurement, hosting, device, training, support, operating-cost and field-season plans. | Approved costed delivery/operations plan and preregistered PH-2 evaluation |
+| REM-R08 | Run the authorized shadow pilot with independent reviewers and real permitted evidence; measure accuracy, reversals, unknowns, fairness, comprehension and source/model sensitivity. | PH-2 exit dossier with met/unmet/inconclusive results and unresolved risks |
+| REM-R09 | Run independent penetration, accessibility, privacy, scientific, legal and operational assurance before any controlled live use. | Signed assurance findings with no unresolved critical/high risk |
+| REM-R10 | Operate the minimum six-month bounded PH-3 window before claiming Kerala scale readiness. | Measured SLO, recovery, incident, decision-reconstruction, outcome, cost and residual-risk evidence |
+
+## 15. Quality verdict and release boundary
+
+The repository is **not rubbish**: it contains coherent domain vocabulary, many typed contracts, explicit safety states, synthetic fixtures, broad API examples, and a fast regression suite. As a demonstrator, it is useful.
+
+Current qualitative assessment:
+
+| Dimension | Assessment |
+| --- | --- |
+| Domain modelling / prototype value | Moderate; a useful foundation with considerable duplication and hard-coding |
+| Automated unit/API regression | Moderate; broad happy-path and rule-simulation coverage, but no coverage metric or production integration evidence |
+| Maintainability | Low; very large `app.py` and `frontend/app.js`, private-field access, duplicate services, no lint/type/CI gates |
+| Security and privacy readiness | Prototype HMAC/session and bound step-up MFA now reject unauthenticated and forged privileged calls; still not an IdP, RLS, or encrypted-at-rest system |
+| Architecture conformance | Low; most production dependencies and boundaries are absent |
+| Controlled-production readiness | **Not ready** |
+
+Release boundary: the current build may be used only as a local synthetic/public-data prototype. It must not ingest production personal/restricted records, issue or represent official approval/notification, reserve real resources, publish authoritative hazard claims, or be described as a completed PH-2/PH-3 system until all applicable P0/P1 work and phase exit gates have objective evidence.
+
+## 16. Revision 1.4 P0 prototype follow-up
+
+Same-day implementation of DEC-046 closed the demonstrated audit holes on the in-memory prototype:
+
+- Non-public APIs require a verified HMAC session (REM-001 prototype).
+- `MFA-STEPUP-anything` no longer grants `OFFICIALLY_APPROVED` (REM-002).
+- Core outbox retries `FAILED` items through `DEAD_LETTER` and reconciliation (REM-005 in-process).
+- Degraded mode fails closed on HTTP mutations and approval/reservation/notification commands (REM-007 prototype).
+
+Evidence: 180 pytest tests, including `tests/test_p0_security.py`. PostgreSQL/PostGIS, RLS, Keycloak, object storage, Next.js PWA, MILP, CI, and REM-R01–R10 remain open.
