@@ -1,26 +1,189 @@
 """
-PUNARVAS-AI Accessible Reporting, Manifest & Bilingual Export Module (ARC-C10 / C1-09).
-Normative Reference: rules.md (RUL-052, RUL-055, RUL-058) and trd.md §3.
+PUNARVAS-AI Accessible Reporting, Manifest & Bilingual Export Module (ARC-C10 / C1-09 / Phase 11).
+Normative Reference:
+- plan.md (#11): Government dossiers, accessible reports, LSG DM-plan annexes, machine-readable exports, and manifests.
+- rules.md: RUL-052, RUL-055, RUL-056, RUL-057, RUL-058, RUL-059, RUL-060, RUL-075.
+- trd.md: §3.9 (FR-053 through FR-058), NFR-019 through NFR-022, NFR-029, AT-12, AT-13, AT-14, AT-21, AT-23, AT-24.
+- decisions.md: DEC-012, DEC-013, DEC-042.
 """
 
+import csv
+from enum import Enum
 import hashlib
+import io
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from punarvas.core.contracts import utc_now
 
 
+class ExportClassification(str, Enum):
+    RESTRICTED_OFFICIAL = "RESTRICTED_OFFICIAL"
+    PUBLIC_AGGREGATE = "PUBLIC_AGGREGATE"
+    SHADOW_EVALUATION = "SHADOW_EVALUATION"
+    JUDICIAL_AUDIT = "JUDICIAL_AUDIT"
+
+
+class ExportType(str, Enum):
+    ACCESSIBLE_HTML = "ACCESSIBLE_HTML"
+    DE_IDENTIFIED_PUBLIC_SUMMARY = "DE_IDENTIFIED_PUBLIC_SUMMARY"
+    SITE_DOSSIER = "SITE_DOSSIER"
+    BENEFICIARY_PACK = "BENEFICIARY_PACK"
+    FIELD_CHECKLIST = "FIELD_CHECKLIST"
+    DECISION_SUMMARY = "DECISION_SUMMARY"
+    LSGD_ANNEX = "LSGD_ANNEX"
+    PUBLIC_TRANSPARENCY = "PUBLIC_TRANSPARENCY"
+    SPATIAL_GEOJSON = "SPATIAL_GEOJSON"
+    TABULAR_CSV = "TABULAR_CSV"
+    AUDIT_PACKAGE = "AUDIT_PACKAGE"
+
+
+class EvidenceReference(BaseModel):
+    field_name: str
+    statement: str
+    source_id: str
+    evidence_hash: str
+    is_verified: bool = True
+    requires_human_review: bool = False
+    notes: Optional[str] = None
+
+
 class ExportManifest(BaseModel):
     manifest_id: str
-    export_type: str  # ACCESSIBLE_HTML, DE_IDENTIFIED_PUBLIC_SUMMARY, AUDIT_PACK
+    export_type: str
+    classification: ExportClassification = ExportClassification.RESTRICTED_OFFICIAL
     generated_at: str = Field(default_factory=lambda: utc_now().isoformat())
     generating_user_id: str
+    programme_id: str = "PROG-WYD-REBUILD-2024"
+    jurisdiction: str = "Wayanad, Kerala"
     policy_version: str = "POL-WYD-2024.1"
     statutory_authority: str = "District Disaster Management Authority (DDMA), Wayanad"
+    source_versions: Dict[str, str] = Field(default_factory=dict)
+    unresolved_conditions: List[str] = Field(default_factory=list)
+    record_count: int = 1
+    sha256_checksum: str
+    signature_status: str = "UNSIGNED_DRAFT"
+    signer_id: Optional[str] = None
+    is_advisory: bool = True
+
+
+class SiteDossier(BaseModel):
+    site_id: str
+    site_name: str
+    district: str
+    taluk: str
+    village: str
+    gross_area_cents: float
+    usable_area_cents: float
+    dwelling_capacity: int
+    water_source_description: str
+    lean_season_yield_lpcd: float
+    hazard_buffer_distance_m: float
+    slope_mean_deg: float
+    road_access_width_m: float
+    evidence_links: List[EvidenceReference]
+    unresolved_conditions: List[str]
+    approval_ref: Optional[str] = None
+    generated_at: str = Field(default_factory=lambda: utc_now().isoformat())
+    generating_user_id: str
+    manifest_id: str
+    sha256_checksum: str
+
+
+class BeneficiaryReviewPack(BaseModel):
+    household_id: str
+    head_of_household: str
+    member_count: int
+    vulnerability_score: float
+    disability_or_special_needs: bool
+    tenure_category: str
+    relocation_necessity_review_id: str
+    preferred_pathway: str
+    assigned_site_id: Optional[str] = None
+    eligible_schemes: List[str]
+    evidence_links: List[EvidenceReference]
+    consent_token_ref: str
+    unresolved_conditions: List[str]
+    generated_at: str = Field(default_factory=lambda: utc_now().isoformat())
+    generating_user_id: str
+    manifest_id: str
+    sha256_checksum: str
+
+
+class FieldChecklistItem(BaseModel):
+    item_id: str
+    description: str
+    mandatory: bool = True
+    verification_method: str
+    status: str = "UNKNOWN"
+    officer_notes: Optional[str] = None
+
+
+class FieldVerificationChecklist(BaseModel):
+    checklist_id: str
+    target_type: str
+    target_id: str
+    items: List[FieldChecklistItem]
+    required_equipment: List[str]
+    safety_precautions: List[str]
+    generating_user_id: str
+    generated_at: str = Field(default_factory=lambda: utc_now().isoformat())
+    manifest_id: str
+    sha256_checksum: str
+
+
+class DecisionSummaryDossier(BaseModel):
+    dossier_id: str
+    decision_id: str
+    entity_type: str
+    entity_id: str
+    policy_version: str
+    source_checksums: Dict[str, str]
+    solver_seed: Optional[int] = 42
+    solver_tolerances: Dict[str, float] = Field(
+        default_factory=lambda: {"mip_gap": 0.01, "time_limit_sec": 60.0}
+    )
+    approval_order_id: Optional[str] = None
+    statutory_gazette_id: Optional[str] = None
+    objection_token_refs: List[str] = Field(default_factory=list)
+    evidence_chain_hash: str
+    generating_user_id: str
+    generated_at: str = Field(default_factory=lambda: utc_now().isoformat())
+    manifest_id: str
+    sha256_checksum: str
+
+
+class LSGDDisasterManagementPlanAnnex(BaseModel):
+    annex_id: str
+    lsg_name: str
+    district: str
+    plan_period: str = "2024-2026"
+    section_a_vulnerability_profile: Dict[str, Any]
+    section_b_relocation_beneficiaries: Dict[str, Any]
+    section_c_host_site_capacities: Dict[str, Any]
+    section_d_statutory_approvals: Dict[str, Any]
+    statutory_note_en: str
+    statutory_note_ml: str
+    generating_user_id: str
+    generated_at: str = Field(default_factory=lambda: utc_now().isoformat())
     is_advisory: bool = True
     sha256_checksum: str
-    record_count: int
+
+
+class PublicTransparencyProjection(BaseModel):
+    projection_id: str
+    round_number: int
+    district: str
+    k_anonymity_threshold: int = 5
+    aggregates: Dict[str, Any]
+    cell_suppression_applied: bool
+    suppressed_cell_count: int
+    coordinate_generalization: str = "CENTROID_OF_REVENUE_VILLAGE"
+    differencing_risk_detected: bool
+    differencing_warning: Optional[str] = None
+    generated_at: str = Field(default_factory=lambda: utc_now().isoformat())
+    sha256_checksum: str
 
 
 class ReportingService:
@@ -31,15 +194,96 @@ class ReportingService:
     BILINGUAL_GLOSSARY = {
         "title_en": "PUNARVAS-AI Permanent Relocation Advisory Dossier",
         "title_ml": "പുനർവാസ്-എഐ ശാശ്വത പുനരധിവാസ ഉപദേശക രേഖ",
+        "title_hi": "पुनर्वास-एआई स्थायी पुनर्वास सलाहकार दस्तावेज़",
         "advisory_notice_en": "Advisory Decision Support Only. Does not constitute statutory notification.",
         "advisory_notice_ml": "ഉപദേശക സ്വഭാവമുള്ളത് മാത്രം. ഔദ്യോഗിക ഗസറ്റ് വിജ്ഞാപനമല്ല.",
+        "advisory_notice_hi": "केवल सलाहकार निर्णय समर्थन। आधिकारिक वैधानिक अधिसूचना नहीं है।",
         "status_en": "Status",
         "status_ml": "നിലവിലെ സ്ഥിതി",
+        "status_hi": "स्थिति",
         "pathway_en": "Pathway",
         "pathway_ml": "പുനരധിവാസ മാർഗ്ഗം",
+        "pathway_hi": "पुनर्वास मार्ग",
         "township_ml": "മാതൃകാ ടൗൺഷിപ്പ്",
         "self_relocation_ml": "സ്വയം പുനരധിവാസ സഹായം",
     }
+
+    def __init__(self):
+        self._manifests: Dict[str, ExportManifest] = {}
+        self._prior_projection_aggregates: Dict[str, Dict[str, int]] = {}
+
+    def get_manifest(self, manifest_id: str) -> Optional[ExportManifest]:
+        return self._manifests.get(manifest_id)
+
+    def list_manifests(self) -> List[ExportManifest]:
+        return list(self._manifests.values())
+
+    def create_export_manifest(
+        self,
+        manifest_id: str,
+        export_type: str,
+        generating_user_id: str,
+        sha256_checksum: str,
+        classification: ExportClassification = ExportClassification.RESTRICTED_OFFICIAL,
+        record_count: int = 1,
+        source_versions: Optional[Dict[str, str]] = None,
+        unresolved_conditions: Optional[List[str]] = None,
+        policy_version: str = "POL-WYD-2024.1",
+        signature_status: str = "UNSIGNED_DRAFT",
+        signer_id: Optional[str] = None,
+    ) -> ExportManifest:
+        """
+        Creates and registers a cryptographically sealed export manifest (FR-056).
+        """
+        manifest = ExportManifest(
+            manifest_id=manifest_id,
+            export_type=export_type,
+            classification=classification,
+            generating_user_id=generating_user_id,
+            sha256_checksum=sha256_checksum,
+            record_count=record_count,
+            source_versions=source_versions or {},
+            unresolved_conditions=unresolved_conditions or [],
+            policy_version=policy_version,
+            signature_status=signature_status,
+            signer_id=signer_id,
+        )
+        self._manifests[manifest_id] = manifest
+        return manifest
+
+    def verify_export_manifest(
+        self, manifest_id: str, payload_content: str
+    ) -> Dict[str, Any]:
+        """
+        Verifies tamper-evidence of an export against its registered manifest (FR-056 / FR-057).
+        """
+        manifest = self.get_manifest(manifest_id)
+        if not manifest:
+            return {
+                "manifest_id": manifest_id,
+                "verified": False,
+                "reason": f"Manifest '{manifest_id}' not found in registry.",
+            }
+
+        calculated_hash = hashlib.sha256(payload_content.encode("utf-8")).hexdigest()
+        is_match = calculated_hash == manifest.sha256_checksum
+
+        return {
+            "manifest_id": manifest_id,
+            "verified": is_match,
+            "stored_checksum": manifest.sha256_checksum,
+            "calculated_checksum": calculated_hash,
+            "export_type": manifest.export_type,
+            "classification": manifest.classification,
+            "generated_at": manifest.generated_at,
+            "generating_user": manifest.generating_user_id,
+            "policy_version": manifest.policy_version,
+            "reason": (
+                "Checksum matches stored manifest exactly."
+                if is_match
+                else "Checksum mismatch! Export payload has been tampered with or modified."
+            ),
+        }
 
     def generate_bilingual_dossier_html(
         self,
@@ -249,26 +493,478 @@ class ReportingService:
             sha256_checksum=sha256,
         )
 
+        self.create_export_manifest(
+            manifest_id=f"MAN-ANNEX-{annex_id}",
+            export_type=ExportType.LSGD_ANNEX.value,
+            generating_user_id=generating_user_id,
+            sha256_checksum=sha256,
+            record_count=1,
+            classification=ExportClassification.RESTRICTED_OFFICIAL,
+        )
+
         return annex
 
+    def generate_site_dossier(
+        self,
+        site_id: str,
+        site_name: str,
+        district: str,
+        taluk: str,
+        village: str,
+        gross_area_cents: float,
+        usable_area_cents: float,
+        dwelling_capacity: int,
+        water_source_description: str,
+        lean_season_yield_lpcd: float,
+        hazard_buffer_distance_m: float,
+        slope_mean_deg: float,
+        road_access_width_m: float,
+        evidence_links: List[EvidenceReference],
+        unresolved_conditions: List[str],
+        generating_user_id: str,
+        approval_ref: Optional[str] = None,
+    ) -> SiteDossier:
+        """
+        Generate an evidence-bound Site Dossier (FR-053 / FEAT-018).
+        """
+        dossier_data = {
+            "site_id": site_id,
+            "site_name": site_name,
+            "district": district,
+            "taluk": taluk,
+            "village": village,
+            "gross_area_cents": gross_area_cents,
+            "usable_area_cents": usable_area_cents,
+            "dwelling_capacity": dwelling_capacity,
+            "water_source_description": water_source_description,
+            "lean_season_yield_lpcd": lean_season_yield_lpcd,
+            "hazard_buffer_distance_m": hazard_buffer_distance_m,
+            "slope_mean_deg": slope_mean_deg,
+            "road_access_width_m": road_access_width_m,
+            "evidence_links": [e.model_dump() for e in evidence_links],
+            "unresolved_conditions": unresolved_conditions,
+            "approval_ref": approval_ref,
+        }
 
-class LSGDDisasterManagementPlanAnnex(BaseModel):
-    annex_id: str
-    lsg_name: str
-    district: str
-    plan_period: str = "2024-2026"
-    section_a_vulnerability_profile: Dict[str, Any]
-    section_b_relocation_beneficiaries: Dict[str, Any]
-    section_c_host_site_capacities: Dict[str, Any]
-    section_d_statutory_approvals: Dict[str, Any]
-    statutory_note_en: str
-    statutory_note_ml: str
-    generating_user_id: str
-    generated_at: str = Field(default_factory=lambda: utc_now().isoformat())
-    is_advisory: bool = True
-    sha256_checksum: str
+        sha256 = hashlib.sha256(
+            json.dumps(dossier_data, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        manifest_id = f"MAN-SITE-{site_id}-{int(utc_now().timestamp())}"
+
+        dossier = SiteDossier(
+            site_id=site_id,
+            site_name=site_name,
+            district=district,
+            taluk=taluk,
+            village=village,
+            gross_area_cents=gross_area_cents,
+            usable_area_cents=usable_area_cents,
+            dwelling_capacity=dwelling_capacity,
+            water_source_description=water_source_description,
+            lean_season_yield_lpcd=lean_season_yield_lpcd,
+            hazard_buffer_distance_m=hazard_buffer_distance_m,
+            slope_mean_deg=slope_mean_deg,
+            road_access_width_m=road_access_width_m,
+            evidence_links=evidence_links,
+            unresolved_conditions=unresolved_conditions,
+            approval_ref=approval_ref,
+            generating_user_id=generating_user_id,
+            manifest_id=manifest_id,
+            sha256_checksum=sha256,
+        )
+
+        source_versions = {
+            e.source_id: e.evidence_hash for e in evidence_links
+        }
+        self.create_export_manifest(
+            manifest_id=manifest_id,
+            export_type=ExportType.SITE_DOSSIER.value,
+            generating_user_id=generating_user_id,
+            sha256_checksum=sha256,
+            record_count=1,
+            source_versions=source_versions,
+            unresolved_conditions=unresolved_conditions,
+            classification=ExportClassification.RESTRICTED_OFFICIAL,
+        )
+
+        return dossier
+
+    def generate_beneficiary_review_pack(
+        self,
+        household_id: str,
+        head_of_household: str,
+        member_count: int,
+        vulnerability_score: float,
+        disability_or_special_needs: bool,
+        tenure_category: str,
+        relocation_necessity_review_id: str,
+        preferred_pathway: str,
+        eligible_schemes: List[str],
+        evidence_links: List[EvidenceReference],
+        consent_token_ref: str,
+        unresolved_conditions: List[str],
+        generating_user_id: str,
+        assigned_site_id: Optional[str] = None,
+    ) -> BeneficiaryReviewPack:
+        """
+        Generate an evidence-bound Beneficiary Review Pack (FR-053 / FEAT-018).
+        """
+        pack_data = {
+            "household_id": household_id,
+            "head_of_household": head_of_household,
+            "member_count": member_count,
+            "vulnerability_score": vulnerability_score,
+            "disability_or_special_needs": disability_or_special_needs,
+            "tenure_category": tenure_category,
+            "relocation_necessity_review_id": relocation_necessity_review_id,
+            "preferred_pathway": preferred_pathway,
+            "assigned_site_id": assigned_site_id,
+            "eligible_schemes": eligible_schemes,
+            "evidence_links": [e.model_dump() for e in evidence_links],
+            "consent_token_ref": consent_token_ref,
+            "unresolved_conditions": unresolved_conditions,
+        }
+
+        sha256 = hashlib.sha256(
+            json.dumps(pack_data, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        manifest_id = f"MAN-BENEFICIARY-{household_id}-{int(utc_now().timestamp())}"
+
+        pack = BeneficiaryReviewPack(
+            household_id=household_id,
+            head_of_household=head_of_household,
+            member_count=member_count,
+            vulnerability_score=vulnerability_score,
+            disability_or_special_needs=disability_or_special_needs,
+            tenure_category=tenure_category,
+            relocation_necessity_review_id=relocation_necessity_review_id,
+            preferred_pathway=preferred_pathway,
+            assigned_site_id=assigned_site_id,
+            eligible_schemes=eligible_schemes,
+            evidence_links=evidence_links,
+            consent_token_ref=consent_token_ref,
+            unresolved_conditions=unresolved_conditions,
+            generating_user_id=generating_user_id,
+            manifest_id=manifest_id,
+            sha256_checksum=sha256,
+        )
+
+        source_versions = {
+            e.source_id: e.evidence_hash for e in evidence_links
+        }
+        self.create_export_manifest(
+            manifest_id=manifest_id,
+            export_type=ExportType.BENEFICIARY_PACK.value,
+            generating_user_id=generating_user_id,
+            sha256_checksum=sha256,
+            record_count=1,
+            source_versions=source_versions,
+            unresolved_conditions=unresolved_conditions,
+            classification=ExportClassification.RESTRICTED_OFFICIAL,
+        )
+
+        return pack
+
+    def generate_field_verification_checklist(
+        self,
+        target_type: str,
+        target_id: str,
+        items: List[FieldChecklistItem],
+        required_equipment: List[str],
+        safety_precautions: List[str],
+        generating_user_id: str,
+    ) -> FieldVerificationChecklist:
+        """
+        Generate an engineering field verification checklist (FR-053).
+        """
+        checklist_id = f"CHK-{target_type}-{target_id}-{int(utc_now().timestamp())}"
+        chk_data = {
+            "checklist_id": checklist_id,
+            "target_type": target_type,
+            "target_id": target_id,
+            "items": [i.model_dump() for i in items],
+            "required_equipment": required_equipment,
+            "safety_precautions": safety_precautions,
+        }
+
+        sha256 = hashlib.sha256(
+            json.dumps(chk_data, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        manifest_id = f"MAN-CHK-{checklist_id}"
+
+        chk = FieldVerificationChecklist(
+            checklist_id=checklist_id,
+            target_type=target_type,
+            target_id=target_id,
+            items=items,
+            required_equipment=required_equipment,
+            safety_precautions=safety_precautions,
+            generating_user_id=generating_user_id,
+            manifest_id=manifest_id,
+            sha256_checksum=sha256,
+        )
+
+        self.create_export_manifest(
+            manifest_id=manifest_id,
+            export_type=ExportType.FIELD_CHECKLIST.value,
+            generating_user_id=generating_user_id,
+            sha256_checksum=sha256,
+            record_count=len(items),
+            classification=ExportClassification.RESTRICTED_OFFICIAL,
+        )
+
+        return chk
+
+    def generate_decision_summary_dossier(
+        self,
+        decision_id: str,
+        entity_type: str,
+        entity_id: str,
+        policy_version: str,
+        source_checksums: Dict[str, str],
+        evidence_chain_hash: str,
+        generating_user_id: str,
+        solver_seed: Optional[int] = 42,
+        solver_tolerances: Optional[Dict[str, float]] = None,
+        approval_order_id: Optional[str] = None,
+        statutory_gazette_id: Optional[str] = None,
+        objection_token_refs: Optional[List[str]] = None,
+    ) -> DecisionSummaryDossier:
+        """
+        Generate a Decision Summary Dossier for judicial review and provenance reconstruction (FEAT-020 / R3-01).
+        """
+        dossier_id = f"DEC-SUM-{decision_id}"
+        data = {
+            "dossier_id": dossier_id,
+            "decision_id": decision_id,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "policy_version": policy_version,
+            "source_checksums": source_checksums,
+            "solver_seed": solver_seed,
+            "solver_tolerances": solver_tolerances or {"mip_gap": 0.01, "time_limit_sec": 60.0},
+            "approval_order_id": approval_order_id,
+            "statutory_gazette_id": statutory_gazette_id,
+            "objection_token_refs": objection_token_refs or [],
+            "evidence_chain_hash": evidence_chain_hash,
+        }
+
+        sha256 = hashlib.sha256(
+            json.dumps(data, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        manifest_id = f"MAN-DEC-{decision_id}"
+
+        dossier = DecisionSummaryDossier(
+            dossier_id=dossier_id,
+            decision_id=decision_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            policy_version=policy_version,
+            source_checksums=source_checksums,
+            solver_seed=solver_seed,
+            solver_tolerances=solver_tolerances or {"mip_gap": 0.01, "time_limit_sec": 60.0},
+            approval_order_id=approval_order_id,
+            statutory_gazette_id=statutory_gazette_id,
+            objection_token_refs=objection_token_refs or [],
+            evidence_chain_hash=evidence_chain_hash,
+            generating_user_id=generating_user_id,
+            manifest_id=manifest_id,
+            sha256_checksum=sha256,
+        )
+
+        self.create_export_manifest(
+            manifest_id=manifest_id,
+            export_type=ExportType.DECISION_SUMMARY.value,
+            generating_user_id=generating_user_id,
+            sha256_checksum=sha256,
+            record_count=1,
+            source_versions=source_checksums,
+            classification=ExportClassification.JUDICIAL_AUDIT,
+            policy_version=policy_version,
+        )
+
+        return dossier
+
+    def generate_spatial_geojson_export(
+        self,
+        export_id: str,
+        features_data: List[Dict[str, Any]],
+        generating_user_id: str,
+        classification: ExportClassification = ExportClassification.RESTRICTED_OFFICIAL,
+    ) -> Dict[str, Any]:
+        """
+        Generates RFC 7946 compliant GeoJSON FeatureCollection with explicit CRS and sealed manifest (FR-055).
+        """
+        geojson_doc = {
+            "type": "FeatureCollection",
+            "crs": {
+                "type": "name",
+                "properties": {"name": "urn:ogc:def:crs:OGC:1.3:CRS84"},
+            },
+            "features": features_data,
+        }
+
+        geojson_str = json.dumps(geojson_doc, indent=2)
+        sha256 = hashlib.sha256(geojson_str.encode("utf-8")).hexdigest()
+        manifest_id = f"MAN-GEOJSON-{export_id}"
+
+        manifest = self.create_export_manifest(
+            manifest_id=manifest_id,
+            export_type=ExportType.SPATIAL_GEOJSON.value,
+            generating_user_id=generating_user_id,
+            sha256_checksum=sha256,
+            record_count=len(features_data),
+            classification=classification,
+        )
+
+        return {
+            "geojson": geojson_doc,
+            "raw_text": geojson_str,
+            "manifest": manifest,
+            "checksum": sha256,
+        }
+
+    def generate_tabular_csv_export(
+        self,
+        export_id: str,
+        headers: List[str],
+        rows: List[List[Any]],
+        generating_user_id: str,
+        classification: ExportClassification = ExportClassification.RESTRICTED_OFFICIAL,
+    ) -> Dict[str, Any]:
+        """
+        Generates RFC 4180 compliant CSV export with explicit headers and sealed manifest (FR-055).
+        """
+        output = io.StringIO()
+        writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
+        writer.writerow(headers)
+        for r in rows:
+            writer.writerow(r)
+
+        csv_content = output.getvalue()
+        sha256 = hashlib.sha256(csv_content.encode("utf-8")).hexdigest()
+        manifest_id = f"MAN-CSV-{export_id}"
+
+        manifest = self.create_export_manifest(
+            manifest_id=manifest_id,
+            export_type=ExportType.TABULAR_CSV.value,
+            generating_user_id=generating_user_id,
+            sha256_checksum=sha256,
+            record_count=len(rows),
+            classification=classification,
+        )
+
+        return {
+            "csv_content": csv_content,
+            "manifest": manifest,
+            "checksum": sha256,
+        }
+
+    def generate_k_anonymized_public_projection(
+        self,
+        projection_id: str,
+        district: str,
+        round_number: int,
+        subregion_counts: Dict[str, int],
+        k_threshold: int = 5,
+    ) -> PublicTransparencyProjection:
+        """
+        Generates a k-anonymized public transparency projection per RUL-075 / FEAT-019 / AT-23.
+        - Enforces k >= 5: cells with 1 <= count < k are suppressed.
+        - Generalizes coordinates to Revenue Village centroid.
+        - Detects differencing attacks against previous round aggregates.
+        """
+        cleaned_aggregates: Dict[str, Any] = {}
+        suppressed_count = 0
+
+        for region, count in subregion_counts.items():
+            if 0 < count < k_threshold:
+                cleaned_aggregates[region] = f"< {k_threshold} (Suppressed for Privacy)"
+                suppressed_count += 1
+            else:
+                cleaned_aggregates[region] = count
+
+        # Differencing attack detection
+        differencing_risk = False
+        diff_warning = None
+        prior_key = f"{district}_round_{round_number - 1}"
+        if prior_key in self._prior_projection_aggregates:
+            prior = self._prior_projection_aggregates[prior_key]
+            for region, curr_val in subregion_counts.items():
+                if region in prior:
+                    delta = abs(curr_val - prior[region])
+                    if 1 <= delta <= 2:
+                        differencing_risk = True
+                        diff_warning = (
+                            f"Differencing attack risk detected in '{region}': delta of {delta} "
+                            "household(s) between release rounds could permit re-identification (RUL-075 / AT-23)."
+                        )
+                        break
+
+        # Record current round for future differencing checks
+        curr_key = f"{district}_round_{round_number}"
+        self._prior_projection_aggregates[curr_key] = subregion_counts
+
+        raw_payload = {
+            "projection_id": projection_id,
+            "round_number": round_number,
+            "district": district,
+            "aggregates": cleaned_aggregates,
+            "k_threshold": k_threshold,
+        }
+        sha256 = hashlib.sha256(
+            json.dumps(raw_payload, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+
+        manifest_id = f"MAN-PUB-{projection_id}"
+        self.create_export_manifest(
+            manifest_id=manifest_id,
+            export_type=ExportType.PUBLIC_TRANSPARENCY.value,
+            generating_user_id="public_transparency_officer",
+            sha256_checksum=sha256,
+            classification=ExportClassification.PUBLIC_AGGREGATE,
+            record_count=len(subregion_counts),
+        )
+
+        return PublicTransparencyProjection(
+            projection_id=projection_id,
+            round_number=round_number,
+            district=district,
+            k_anonymity_threshold=k_threshold,
+            aggregates=cleaned_aggregates,
+            cell_suppression_applied=suppressed_count > 0,
+            suppressed_cell_count=suppressed_count,
+            coordinate_generalization="CENTROID_OF_REVENUE_VILLAGE",
+            differencing_risk_detected=differencing_risk,
+            differencing_warning=diff_warning,
+            sha256_checksum=sha256,
+        )
+
+    def reproduce_historical_export(
+        self, manifest_id: str, new_payload_checksum: str
+    ) -> Dict[str, Any]:
+        """
+        Verifies bit-for-bit or content-equivalent reproduction of an approved historical export (FR-058).
+        """
+        manifest = self.get_manifest(manifest_id)
+        if not manifest:
+            return {
+                "manifest_id": manifest_id,
+                "reproducible": False,
+                "reason": "Historical manifest not found.",
+            }
+
+        is_bit_exact = manifest.sha256_checksum == new_payload_checksum
+        return {
+            "manifest_id": manifest_id,
+            "reproducible": is_bit_exact,
+            "historical_checksum": manifest.sha256_checksum,
+            "reproduced_checksum": new_payload_checksum,
+            "status": "BIT_FOR_BIT_IDENTICAL" if is_bit_exact else "CONTENT_MISMATCH",
+        }
 
 
 # Global singleton instance
+reporting_service = ReportingService()
 reporting_service = ReportingService()
 

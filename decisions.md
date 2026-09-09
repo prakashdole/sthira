@@ -62,6 +62,7 @@ A material change must add or supersede a decision rather than rewrite the old r
 | DEC-039 | Controlled Live Wayanad Operations, Recovery Harness, and Delivery Completion Verification | ACCEPTED |
 | DEC-040 | Delivery Execution, Defect Severity Classification, and External Interface Reconciliation | ACCEPTED |
 | DEC-041 | Official Approvals, Statutory Notifications, Citizen Objections, and Capacity Reservation | ACCEPTED |
+| DEC-042 | Government Dossiers, Evidence-Bound Field Checklists, and Tamper-Evident Export Manifests | ACCEPTED |
 
 
 
@@ -561,6 +562,22 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Consequences:** All approvals, notifications, objections, and capacity locks are cryptographically chained in the append-only audit ledger.
 - **Evidence:** `plan.md` #9, `rules.md` RUL-003–006, RUL-040, RUL-046–049, RUL-070–071, `trd.md` FR-047–052, FR-070, AT-06, AT-09, AT-10, AT-15, AT-20, AT-21, Disaster Management Act 2005 §30, §65.
 - **Review trigger:** Judicial orders or statutory amendments regarding public notification periods or grievance redressal SLAs.
+
+### DEC-042 — Government Dossiers, Evidence-Bound Field Checklists, and Tamper-Evident Export Manifests (Phase 11 / ARC-C10)
+
+- **Status:** ACCEPTED.
+- **Context:** `plan.md` (#11), `trd.md` (§3.9, FR-053–FR-058, NFR-019–NFR-022, NFR-029), and `rules.md` (RUL-052–RUL-060) govern the generation of official review dossiers, evidence-bound field checklists, Local Self Government Department (LSGD) disaster management plan annexures, machine-readable data packages, and tamper-evident cryptographic export manifests. Relocation decisions undergo judicial review, statutory audit, and public scrutiny; every factual claim must be mathematically traceable to underlying evidence sources, and participatory governance steps must never be fabricated.
+- **Decision:**
+  1. *Evidence-Bound Dossiers & Structured Checklists (FR-053, RUL-059):* Every factual statement in site dossiers, beneficiary packs, decision summaries, and field verification checklists MUST be explicitly linked to a source dataset ID (S01–S54) and cryptographic evidence hash, or visibly flagged as an unverified assertion requiring field inspection. Unverified participatory inputs (Gram Sabha consent, LSG working group recommendations) must never be hallucinated or pre-populated (`DEC-013`).
+  2. *Standardized Kerala LSGD DM Plan Annexure (FR-054):* Generate formal 4-section annexures for Kerala Panchayati Raj and Municipality disaster management plans under DM Act 2005 §31. Sections A, B, and C provide technical hazard and site evidence, while Section D preserves all statutory and participatory approval fields as explicitly incomplete (`PENDING_GRAM_SABHA_APPROVAL`, etc.) until lawfully transacted.
+  3. *Tamper-Evident Export Manifests & Checksumming (FR-056, FR-057, RUL-056–058):* Every generated export (HTML, PDF, JSON, GeoJSON, CSV) is bundled with a cryptographically sealed `ComprehensiveExportManifest` recording manifest ID, export type, data classification, programme/jurisdiction, generating officer, timestamp, pinned policy version, pinned source checksums (S01–S54), unresolved conditions, record count, and SHA-256 payload checksum. A canonical verification API enables auditors to verify bit-for-bit authenticity (`FR-058`).
+  4. *Multi-Format Machine-Readable and Accessible Delivery (FR-055, NFR-019–022):* Implement WCAG 2.2 AA / GIGW 3.0 compliant accessible HTML, RFC 7946 GeoJSON FeatureCollections, and RFC 4180 CSV exports with non-map equivalent flows and Indian number/date formatting.
+  5. *Public Transparency Disclosure Controls & Differencing Attack Defense (FEAT-019, RUL-052, RUL-075, AT-23):* Public transparency projections strictly enforce $k$-anonymity ($k \ge 5$), suppress small cells ($< 5$), generalize dwelling coordinates to revenue village centroids, and detect differencing attacks between successive publication rounds to prevent re-identification of vulnerable disaster survivors.
+- **Why:** Guarantees constitutional due process, auditability, and data subject privacy under DPDP Act 2023 / Rules 2025, while ensuring field engineers and district magistrates have verifiable, tamper-evident evidence dossiers.
+- **Rejected:** Free-form unconstrained generative prose without fixed templates; pre-filling Gram Sabha consent as "approved" by default; publishing raw household coordinates in public releases; unverified exports lacking SHA-256 manifests.
+- **Consequences:** All exports are immutable once sealed and can be independently validated by court-appointed auditors or appellate authorities.
+- **Evidence:** `plan.md` #11, `rules.md` RUL-052–060, RUL-075, `trd.md` FR-053–058, NFR-019–022, AT-12, AT-13, AT-14, AT-21, AT-23, AT-24, Disaster Management Act 2005 §31, Kerala Panchayat Raj Act 1994 §166.
+- **Review trigger:** Revisions to Kerala LSGD Disaster Management planning guidelines, Comptroller & Auditor General (CAG) audit standards, or MeitY GIGW requirements.
 
 ## 4. Explicit research corrections adopted
 
