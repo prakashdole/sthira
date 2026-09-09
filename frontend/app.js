@@ -5,6 +5,70 @@
 
 const API_BASE = window.location.origin;
 
+const _nativeFetch = window.fetch.bind(window);
+window.fetch = function(url, opts) {
+  opts = opts || {};
+  const token = sessionStorage.getItem('punarvas_token');
+  if (token && String(url).startsWith(API_BASE)) {
+    if (opts.headers instanceof Headers) {
+      opts.headers.set('Authorization', 'Bearer ' + token);
+    } else {
+      opts.headers = Object.assign({}, opts.headers || {}, { Authorization: 'Bearer ' + token });
+    }
+  }
+  return _nativeFetch(url, opts);
+};
+
+function currentSessionUser() {
+  try {
+    return JSON.parse(sessionStorage.getItem('punarvas_user') || 'null');
+  } catch (e) {
+    return null;
+  }
+}
+
+function renderSessionStatus() {
+  const el = document.getElementById('session-status');
+  if (!el) return;
+  const user = currentSessionUser();
+  el.textContent = user ? `Signed in: ${user.username} (${(user.roles || []).join(', ')})` : 'Not signed in';
+}
+
+async function loginPrototype() {
+  const username = document.getElementById('login-username')?.value || '';
+  const password = document.getElementById('login-password')?.value || '';
+  const status = document.getElementById('login-status');
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      sessionStorage.removeItem('punarvas_token');
+      sessionStorage.removeItem('punarvas_user');
+      if (status) status.textContent = json.detail || 'Login failed';
+      renderSessionStatus();
+      return;
+    }
+    sessionStorage.setItem('punarvas_token', json.data.access_token);
+    sessionStorage.setItem('punarvas_user', JSON.stringify(json.data.user));
+    const pwd = document.getElementById('login-password');
+    if (pwd) pwd.value = '';
+    if (status) status.textContent = '';
+    renderSessionStatus();
+  } catch (e) {
+    if (status) status.textContent = 'Login failed';
+  }
+}
+
+function logoutPrototype() {
+  sessionStorage.removeItem('punarvas_token');
+  sessionStorage.removeItem('punarvas_user');
+  renderSessionStatus();
+}
+
 let currentLang = 'en';
 
 const i18n = {
@@ -716,8 +780,7 @@ function renderActiveTab() {
             <label style="font-size: 0.85em; font-weight: bold;">Entity ID & Target:</label>
             <input type="text" id="ph9-app-entity-id" value="SITE-ELSTONE-01" class="btn" style="text-align: left; background: #fff; cursor: text;">
             
-            <label style="font-size: 0.85em; font-weight: bold;">Step-Up MFA Token (RUL-054):</label>
-            <input type="text" id="ph9-app-token" value="MFA-STEPUP-DDMA-SECURE-99" class="btn" style="text-align: left; background: #fff; cursor: text;">
+            <p style="font-size: 0.85em; color: #6b7280;">Step-up MFA is issued for the signed-in principal and this approval action. It is not typed by the client.</p>
 
             <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
               <button class="btn btn-primary" onclick="submitOfficialApprovalDemo()">Issue Official Approval</button>
@@ -1365,9 +1428,18 @@ async function submitOfficialApprovalDemo() {
   const resultDiv = document.getElementById('phase9-approval-result');
   if (!resultDiv) return;
   const entityId = document.getElementById('ph9-app-entity-id')?.value || "SITE-ELSTONE-01";
-  const token = document.getElementById('ph9-app-token')?.value || "MFA-STEPUP-DDMA-SECURE-99";
   
   try {
+    const stepRes = await fetch(`${API_BASE}/api/v1/auth/step-up`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'APPROVE_DECISION' }),
+    });
+    const stepJson = await stepRes.json();
+    if (!stepRes.ok) {
+      resultDiv.innerHTML = `<p style="color:#b91c1c;">Step-up failed: ${stepJson.detail || stepRes.status}</p>`;
+      return;
+    }
     const payload = {
       entity_type: "SITE_SELECTION",
       entity_id: entityId,
@@ -1376,7 +1448,7 @@ async function submitOfficialApprovalDemo() {
       approving_officer_designation: "District Magistrate & Chairperson DDMA",
       statutory_authority_basis: "Disaster Management Act 2005 §30(2)(v)",
       approval_order_number: `DDMA/WYD/2024/ORD-${Math.floor(100 + Math.random()*900)}`,
-      step_up_token: token,
+      step_up_token: stepJson.data.token_id,
       conditions: [
         {
           condition_id: "COND-WATER-01",
@@ -3898,6 +3970,7 @@ async function loadReleaseAssuranceReportDemo() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  renderSessionStatus();
   loadData();
   renderActiveTab();
 });

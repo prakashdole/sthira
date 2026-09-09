@@ -25,6 +25,16 @@
         <p data-i18n="brand_subtitle">Proactive Permanent Relocation Decision Support — Wayanad Pilot</p>
       </div>
       <div class="lang-toggle">
+        <form class="login-bar" onsubmit="event.preventDefault(); loginPrototype();">
+          <label class="sr-only" for="login-username">Username</label>
+          <input id="login-username" name="username" type="text" autocomplete="username" placeholder="collector.wayanad" class="btn">
+          <label class="sr-only" for="login-password">Password</label>
+          <input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="password" class="btn">
+          <button type="submit" class="btn btn-primary">Sign in</button>
+          <button type="button" class="btn" onclick="logoutPrototype()">Sign out</button>
+        </form>
+        <p id="session-status" class="session-status">Not signed in</p>
+        <p id="login-status" class="login-status" role="status"></p>
         <button class="btn" onclick="switchLanguage('en')">English</button>
         <button class="btn" onclick="switchLanguage('ml')">മലയാളം</button>
         <button class="btn" onclick="switchLanguage('hi')">हिन्दी</button>
