@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from punarvas.core.contracts import (
     APIResponseEnvelope,
@@ -70,7 +70,21 @@ from punarvas.modules.governance import (
     ObjectionCase,
     SLAEscalationRecommendation,
 )
-from punarvas.modules.reporting import reporting_service
+from punarvas.modules.reporting import (
+    BeneficiaryReviewPack,
+    DecisionSummaryDossier,
+    EvidenceReference,
+    ExportClassification,
+    ExportManifest,
+    ExportType,
+    FieldChecklistItem,
+    FieldVerificationChecklist,
+    LSGDDisasterManagementPlanAnnex,
+    PublicTransparencyProjection,
+    ReportingService,
+    SiteDossier,
+    reporting_service,
+)
 from punarvas.modules.evaluation import (
     evaluation_harness_service,
     CaseShadowEvaluation,
@@ -1847,6 +1861,315 @@ def record_livelihood_followup(req: LivelihoodFollowupRequest):
 def list_livelihood_followups(case_id: str):
     fols = delivery_tracker.list_followups(case_id)
     return APIResponseEnvelope(data=[f.model_dump() for f in fols])
+
+
+# --- Phase 11: Government Dossiers, Evidence-Bound Checklists, Spatial Exports & Manifests ---
+
+class GenerateSiteDossierRequest(BaseModel):
+    site_id: str
+    site_name: str
+    district: str = "Wayanad"
+    taluk: str = "Vythiri"
+    village: str = "Meppadi"
+    gross_area_cents: float = 450.0
+    usable_area_cents: float = 380.0
+    dwelling_capacity: int = 60
+    water_source_description: str = "Borewell cluster connected to gravity distribution scheme"
+    lean_season_yield_lpcd: float = 78.0
+    hazard_buffer_distance_m: float = 350.0
+    slope_mean_deg: float = 14.5
+    road_access_width_m: float = 4.5
+    evidence_links: List[EvidenceReference] = Field(default_factory=list)
+    unresolved_conditions: List[str] = Field(default_factory=list)
+    generating_user_id: str = "chief_town_planner"
+    approval_ref: Optional[str] = None
+
+
+class GenerateBeneficiaryPackRequest(BaseModel):
+    household_id: str
+    head_of_household: str
+    member_count: int = 4
+    vulnerability_score: float = 85.0
+    disability_or_special_needs: bool = False
+    tenure_category: str = "OWNER"
+    relocation_necessity_review_id: str = "REV-NEC-001"
+    preferred_pathway: str = "TOWNSHIP"
+    assigned_site_id: Optional[str] = "SITE-ELSTONE-01"
+    eligible_schemes: List[str] = Field(
+        default_factory=lambda: ["PUNARJANI_LAND_GRANT", "LIFE_MISSION_HOUSING"]
+    )
+    evidence_links: List[EvidenceReference] = Field(default_factory=list)
+    consent_token_ref: str = "CONSENT-TKN-001"
+    unresolved_conditions: List[str] = Field(default_factory=list)
+    generating_user_id: str = "social_welfare_officer"
+
+
+class GenerateChecklistRequest(BaseModel):
+    target_type: str = "SITE"
+    target_id: str = "SITE-ELSTONE-01"
+    items: List[FieldChecklistItem] = Field(default_factory=list)
+    required_equipment: List[str] = Field(
+        default_factory=lambda: ["Trimble DGPS", "Total Station", "Water Quality Kit"]
+    )
+    safety_precautions: List[str] = Field(
+        default_factory=lambda: ["Hard hats mandatory", "No work during heavy rainfall > 15mm/hr"]
+    )
+    generating_user_id: str = "field_executive_engineer"
+
+
+class GenerateDecisionSummaryRequest(BaseModel):
+    decision_id: str
+    entity_type: str = "ALLOCATION_SCENARIO"
+    entity_id: str
+    policy_version: str = "POL-WYD-2024.1"
+    source_checksums: Dict[str, str] = Field(
+        default_factory=lambda: {"S01": "hash_s01_soi", "S04": "hash_s04_gsi"}
+    )
+    evidence_chain_hash: str = "chain_head_hash_9827361"
+    generating_user_id: str = "appellate_clerk"
+    solver_seed: Optional[int] = 42
+    solver_tolerances: Optional[Dict[str, float]] = None
+    approval_order_id: Optional[str] = None
+    statutory_gazette_id: Optional[str] = None
+    objection_token_refs: Optional[List[str]] = None
+
+
+class GeoJsonExportRequest(BaseModel):
+    export_id: str
+    features: List[Dict[str, Any]] = Field(default_factory=list)
+    generating_user_id: str = "gis_analyst"
+    classification: ExportClassification = ExportClassification.RESTRICTED_OFFICIAL
+
+
+class CsvExportRequest(BaseModel):
+    export_id: str
+    headers: List[str]
+    rows: List[List[Any]]
+    generating_user_id: str = "clerk"
+    classification: ExportClassification = ExportClassification.RESTRICTED_OFFICIAL
+
+
+class VerifyManifestRequest(BaseModel):
+    manifest_id: str
+    payload_content: str
+
+
+class PublicTransparencyRequest(BaseModel):
+    projection_id: str
+    district: str = "Wayanad"
+    round_number: int = 1
+    subregion_counts: Dict[str, int]
+    k_threshold: int = 5
+
+
+@app.post("/api/v1/reporting/dossiers/site", response_model=APIResponseEnvelope)
+def generate_site_dossier(req: GenerateSiteDossierRequest):
+    dossier = reporting_service.generate_site_dossier(
+        site_id=req.site_id,
+        site_name=req.site_name,
+        district=req.district,
+        taluk=req.taluk,
+        village=req.village,
+        gross_area_cents=req.gross_area_cents,
+        usable_area_cents=req.usable_area_cents,
+        dwelling_capacity=req.dwelling_capacity,
+        water_source_description=req.water_source_description,
+        lean_season_yield_lpcd=req.lean_season_yield_lpcd,
+        hazard_buffer_distance_m=req.hazard_buffer_distance_m,
+        slope_mean_deg=req.slope_mean_deg,
+        road_access_width_m=req.road_access_width_m,
+        evidence_links=req.evidence_links,
+        unresolved_conditions=req.unresolved_conditions,
+        generating_user_id=req.generating_user_id,
+        approval_ref=req.approval_ref,
+    )
+    return APIResponseEnvelope(data=dossier.model_dump())
+
+
+@app.get("/api/v1/reporting/dossiers/site/{site_id}", response_model=APIResponseEnvelope)
+def get_site_dossier(site_id: str):
+    # Generates standard dossier for site with default evidence links if not dynamically created
+    evidence = [
+        EvidenceReference(
+            field_name="hazard_buffer_distance_m",
+            statement=f"Site {site_id} is 350m outside designated 2024 debris flow runout zone",
+            source_id="S06_KSDMA_RUNOUT",
+            evidence_hash="hash_s06_runout_val_2024",
+            is_verified=True,
+        ),
+        EvidenceReference(
+            field_name="lean_season_yield_lpcd",
+            statement="KWA hydrogeological yield test confirmed 78 LPCD sustainable yield",
+            source_id="S07_CGWB_KWA_YIELD",
+            evidence_hash="hash_s07_kwa_yield_2024",
+            is_verified=True,
+        ),
+    ]
+    dossier = reporting_service.generate_site_dossier(
+        site_id=site_id,
+        site_name=f"Site {site_id} Candidate Relocation Township",
+        district="Wayanad",
+        taluk="Vythiri",
+        village="Meppadi",
+        gross_area_cents=450.0,
+        usable_area_cents=380.0,
+        dwelling_capacity=60,
+        water_source_description="Borewell cluster connected to gravity distribution scheme",
+        lean_season_yield_lpcd=78.0,
+        hazard_buffer_distance_m=350.0,
+        slope_mean_deg=14.5,
+        road_access_width_m=4.5,
+        evidence_links=evidence,
+        unresolved_conditions=["COND-FRA-NOC-01"],
+        generating_user_id="town_planning_officer",
+    )
+    return APIResponseEnvelope(data=dossier.model_dump())
+
+
+@app.post("/api/v1/reporting/dossiers/beneficiary", response_model=APIResponseEnvelope)
+def generate_beneficiary_pack(req: GenerateBeneficiaryPackRequest):
+    pack = reporting_service.generate_beneficiary_review_pack(
+        household_id=req.household_id,
+        head_of_household=req.head_of_household,
+        member_count=req.member_count,
+        vulnerability_score=req.vulnerability_score,
+        disability_or_special_needs=req.disability_or_special_needs,
+        tenure_category=req.tenure_category,
+        relocation_necessity_review_id=req.relocation_necessity_review_id,
+        preferred_pathway=req.preferred_pathway,
+        assigned_site_id=req.assigned_site_id,
+        eligible_schemes=req.eligible_schemes,
+        evidence_links=req.evidence_links,
+        consent_token_ref=req.consent_token_ref,
+        unresolved_conditions=req.unresolved_conditions,
+        generating_user_id=req.generating_user_id,
+    )
+    return APIResponseEnvelope(data=pack.model_dump())
+
+
+@app.get("/api/v1/reporting/dossiers/beneficiary/{household_id}", response_model=APIResponseEnvelope)
+def get_beneficiary_pack(household_id: str):
+    evidence = [
+        EvidenceReference(
+            field_name="vulnerability_score",
+            statement=f"Field survey verification completed for household {household_id}",
+            source_id="S49_FIELD_SURVEY",
+            evidence_hash="hash_survey_field_verified_2024",
+            is_verified=True,
+        )
+    ]
+    pack = reporting_service.generate_beneficiary_review_pack(
+        household_id=household_id,
+        head_of_household="Pathumma K.",
+        member_count=4,
+        vulnerability_score=85.0,
+        disability_or_special_needs=True,
+        tenure_category="OWNER",
+        relocation_necessity_review_id="REV-NEC-001",
+        preferred_pathway="TOWNSHIP",
+        assigned_site_id="SITE-ELSTONE-01",
+        eligible_schemes=["PUNARJANI_LAND_GRANT", "LIFE_MISSION_HOUSING"],
+        evidence_links=evidence,
+        consent_token_ref="CONSENT-TKN-001",
+        unresolved_conditions=[],
+        generating_user_id="social_welfare_officer",
+    )
+    return APIResponseEnvelope(data=pack.model_dump())
+
+
+@app.post("/api/v1/reporting/dossiers/checklist", response_model=APIResponseEnvelope)
+def generate_field_checklist(req: GenerateChecklistRequest):
+    chk = reporting_service.generate_field_verification_checklist(
+        target_type=req.target_type,
+        target_id=req.target_id,
+        items=req.items,
+        required_equipment=req.required_equipment,
+        safety_precautions=req.safety_precautions,
+        generating_user_id=req.generating_user_id,
+    )
+    return APIResponseEnvelope(data=chk.model_dump())
+
+
+@app.post("/api/v1/reporting/dossiers/decision-summary", response_model=APIResponseEnvelope)
+def generate_decision_summary_dossier(req: GenerateDecisionSummaryRequest):
+    dossier = reporting_service.generate_decision_summary_dossier(
+        decision_id=req.decision_id,
+        entity_type=req.entity_type,
+        entity_id=req.entity_id,
+        policy_version=req.policy_version,
+        source_checksums=req.source_checksums,
+        evidence_chain_hash=req.evidence_chain_hash,
+        generating_user_id=req.generating_user_id,
+        solver_seed=req.solver_seed,
+        solver_tolerances=req.solver_tolerances,
+        approval_order_id=req.approval_order_id,
+        statutory_gazette_id=req.statutory_gazette_id,
+        objection_token_refs=req.objection_token_refs,
+    )
+    return APIResponseEnvelope(data=dossier.model_dump())
+
+
+@app.post("/api/v1/reporting/export/geojson", response_model=APIResponseEnvelope)
+def export_spatial_geojson(req: GeoJsonExportRequest):
+    res = reporting_service.generate_spatial_geojson_export(
+        export_id=req.export_id,
+        features_data=req.features,
+        generating_user_id=req.generating_user_id,
+        classification=req.classification,
+    )
+    return APIResponseEnvelope(data={
+        "geojson": res["geojson"],
+        "manifest": res["manifest"].model_dump(),
+        "checksum": res["checksum"],
+    })
+
+
+@app.post("/api/v1/reporting/export/csv", response_model=APIResponseEnvelope)
+def export_tabular_csv(req: CsvExportRequest):
+    res = reporting_service.generate_tabular_csv_export(
+        export_id=req.export_id,
+        headers=req.headers,
+        rows=req.rows,
+        generating_user_id=req.generating_user_id,
+        classification=req.classification,
+    )
+    return APIResponseEnvelope(data={
+        "csv_content": res["csv_content"],
+        "manifest": res["manifest"].model_dump(),
+        "checksum": res["checksum"],
+    })
+
+
+@app.post("/api/v1/reporting/manifest/verify", response_model=APIResponseEnvelope)
+def verify_export_manifest(req: VerifyManifestRequest):
+    res = reporting_service.verify_export_manifest(req.manifest_id, req.payload_content)
+    return APIResponseEnvelope(data=res)
+
+
+@app.get("/api/v1/reporting/manifests/{manifest_id}", response_model=APIResponseEnvelope)
+def get_export_manifest(manifest_id: str):
+    manifest = reporting_service.get_manifest(manifest_id)
+    if not manifest:
+        raise HTTPException(status_code=404, detail=f"Manifest '{manifest_id}' not found")
+    return APIResponseEnvelope(data=manifest.model_dump())
+
+
+@app.get("/api/v1/reporting/manifests", response_model=APIResponseEnvelope)
+def list_export_manifests():
+    manifests = reporting_service.list_manifests()
+    return APIResponseEnvelope(data=[m.model_dump() for m in manifests])
+
+
+@app.post("/api/v1/reporting/public-transparency-projection", response_model=APIResponseEnvelope)
+def generate_public_transparency_projection(req: PublicTransparencyRequest):
+    proj = reporting_service.generate_k_anonymized_public_projection(
+        projection_id=req.projection_id,
+        district=req.district,
+        round_number=req.round_number,
+        subregion_counts=req.subregion_counts,
+        k_threshold=req.k_threshold,
+    )
+    return APIResponseEnvelope(data=proj.model_dump())
 
 
 
