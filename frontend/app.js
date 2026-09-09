@@ -25,6 +25,7 @@ const i18n = {
     tab_phase9: "Approvals & Objections (Phase 9)",
     tab_phase10: "Delivery & Completion (Phase 10)",
     tab_phase11: "Dossiers & Manifests (Phase 11)",
+    tab_phase12: "Formulas & Compliance (Phase 12)",
     tab_audit: "Audit & Integrity",
     site_card_capacity: "Dwelling Capacity",
     site_card_water: "Lean-Season Water",
@@ -53,6 +54,7 @@ const i18n = {
     tab_phase9: "അംഗീകാരങ്ങളും പരാതികളും (ഘട്ടം 9)",
     tab_phase10: "നിർവ്വഹണവും പൂർത്തീകരണവും (ഘട്ടം 10)",
     tab_phase11: "രേഖകളും മാനിഫെസ്റ്റുകളും (ഘട്ടം 11)",
+    tab_phase12: "ഫോർമുലകളും ചട്ടങ്ങളും (ഘട്ടം 12)",
     tab_audit: "ഓഡിറ്റ് പരിശോധന",
     site_card_capacity: "വീടുകളുടെ ശേഷി",
     site_card_water: "വേനൽക്കാല ജലലഭ്യത",
@@ -82,6 +84,7 @@ const i18n = {
     tab_phase9: "अनुमोदन एवं आपत्तियां (Phase 9)",
     tab_phase10: "वितरण एवं पूर्णता (Phase 10)",
     tab_phase11: "दस्तावेज़ एवं घोषणापत्र (Phase 11)",
+    tab_phase12: "सूत्र एवं अनुपालन (Phase 12)",
     tab_audit: "ऑडिट एवं अखंडता",
     site_card_capacity: "आवास क्षमता",
     site_card_water: "ग्रीष्मकालीन जल उपलब्धता",
@@ -985,6 +988,56 @@ function renderActiveTab() {
             </div>
           </div>
           <div id="phase11-transparency-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+      </div>
+    `;
+  } else if (activeTab === 'phase12') {
+    container.innerHTML = `
+      <div class="phase-container">
+        <div class="card" style="border-left: 4px solid #4f46e5; margin-bottom: 1.5rem;">
+          <h3>Phase 12: Formula, Parameter & Statutory Compliance Control (ARC-C07)</h3>
+          <p>Strict mathematical allow-listing, parameter immutability, numerical domain guards, lineage replay, and statutory compliance register (FR-071–FR-075, RUL-061–RUL-066, DEC-043).</p>
+        </div>
+
+        <div class="card">
+          <h4>1. Immutable Formula Registry & Deny-List Enforcement (FR-071, FR-072, RUL-035, RUL-061)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Only approved CORE formulas may execute in decision pipelines. Rejected formulas (Master Score Ω, unverified flood rules) and unvalidated specialist models fail closed.</p>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
+            <button class="btn btn-primary" onclick="executeFormulaDemo('E01')">Execute E01: Unit Conversion (1.0 L/s → 86,400 L/day)</button>
+            <button class="btn" style="border-color: #dc2626; color: #dc2626;" onclick="executeFormulaDemo('E60')">Test Deny-List: Execute Rejected Master Score Ω (E60)</button>
+            <button class="btn" style="border-color: #d97706; color: #d97706;" onclick="executeFormulaDemo('E37')">Test Deny-List: Execute Unvalidated Specialist Model (E37)</button>
+          </div>
+          <div id="phase12-formula-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+
+        <div class="card">
+          <h4>2. Parameter Registry & JJM Demand Baseline (FR-071, parameters.md, DEC-043)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Immutable parameter contracts bound to source registers (S01–S54). Mandatory unverified parameters remain UNSET with fail-closed behavior rather than silent defaults.</p>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
+            <button class="btn btn-primary" onclick="executeWaterDemandDemo()">Execute E11: Water Carrying Capacity (JJM 55 LPCD Benchmark)</button>
+            <button class="btn" style="border-color: #4f46e5; color: #4f46e5;" onclick="executeFundingGapDemo()">Execute E17: Funding Gap (Excludes Announced Budgets)</button>
+          </div>
+          <div id="phase12-param-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+
+        <div class="card">
+          <h4>3. Numerical Domain Guards & Bit-for-Bit Lineage Replay (FR-073, FR-074, RUL-063)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Every calculation produces an auditable SHA-256 hash. Replays verify bit-for-bit historical identity without silent NaN/zero coercions.</p>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
+            <button class="btn btn-primary" onclick="executeCompositeScoreAndReplayDemo()">Execute E06 & Verify Bit-for-Bit Replay Hash</button>
+            <button class="btn" style="border-color: #dc2626; color: #dc2626;" onclick="testMissingInputUnknownDemo()">Test Non-Coercion: Missing Input → UNKNOWN (RUL-063)</button>
+          </div>
+          <div id="phase12-replay-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+
+        <div class="card">
+          <h4>4. Statutory Compliance Applicability Register (FR-075, DEC-043)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Tracks legal mandates across DM Act 2005 (amended 2025 §31(4)), RFCTLARR 2013, FRA 2006, DPDP Act 2023 / Rules 2025, and CERT-In Directions 2022.</p>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
+            <button class="btn btn-primary" onclick="evaluateComplianceDemo(true)">Audit Fully Compliant Programme Posture</button>
+            <button class="btn" style="border-color: #d97706; color: #d97706;" onclick="evaluateComplianceDemo(false)">Audit Programme with Missing Controls (Detect Open Blockers)</button>
+          </div>
+          <div id="phase12-compliance-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
         </div>
       </div>
     `;
@@ -2508,6 +2561,297 @@ async function generatePublicProjectionDemo(round = 1) {
             </div>
           ` : `
             <div style="margin-top: 0.25rem; font-size: 0.85em; color: #065f46;">✓ Privacy check passed: No differencing attack risk against previous release.</div>
+          `}
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+// --- Phase 12: Formula, Parameter & Statutory Compliance Control Demos ---
+
+let phase12State = {
+  lastExecutionId: null,
+};
+
+async function executeFormulaDemo(formulaId) {
+  const resultDiv = document.getElementById('phase12-formula-result');
+  if (!resultDiv) return;
+  resultDiv.innerHTML = '<span style="color: #6b7280;">Evaluating formula with numerical guard...</span>';
+
+  let inputs = {};
+  if (formulaId === 'E01') {
+    inputs = { mode: "L_S_TO_L_DAY", val: 1.0, operating_hours: 24.0 };
+  } else if (formulaId === 'E60') {
+    inputs = { H: 0.5, E: 0.4, V: 0.8, C: 0.5 };
+  } else if (formulaId === 'E37') {
+    inputs = { beta: 28.0, c_prime: 15.0 };
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/compliance/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        formula_id: formulaId,
+        inputs: inputs,
+        reviewer_id: "OFFICER_PH12_DEMO",
+      }),
+    });
+
+    const json = await res.json();
+    if (res.ok) {
+      const d = json.data;
+      phase12State.lastExecutionId = d.execution_id;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          <strong>✓ Formula Execution Succeeded: ${d.formula_id} (${d.classification})</strong><br>
+          Computed Result: <strong>${JSON.stringify(d.computed_value)}</strong><br>
+          Execution ID: <code>${d.execution_id}</code> | SHA-256: <code>${d.execution_sha256.substring(0, 16)}...</code><br>
+          Status: <span class="badge badge-pass">${d.status}</span>
+        </div>
+      `;
+    } else {
+      // Rejection or error caught by allow-list / deny-list guard
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #fef2f2; border: 1px solid #ef4444; border-radius: 4px; color: #991b1b;">
+          <strong>⛔ Fail-Closed Deny-List Blocked Execution (RUL-035 / RUL-061 / RUL-066)</strong><br>
+          Formula: <strong>${formulaId}</strong> | HTTP Status: <strong>${res.status}</strong><br>
+          <em>${json.detail || json.message}</em>
+        </div>
+      `;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Network Error: ${e.message}</div>`;
+  }
+}
+
+async function executeWaterDemandDemo() {
+  const resultDiv = document.getElementById('phase12-param-result');
+  if (!resultDiv) return;
+  resultDiv.innerHTML = '<span style="color: #6b7280;">Calculating water carrying capacity with JJM baseline...</span>';
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/compliance/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        formula_id: "E11",
+        inputs: {
+          tested_yield_lpcd: 86400.0,
+          delivery_loss_pct: 20.0,
+          population: 1000,
+        },
+        reviewer_id: "WATER_ENGINEER_DEMO",
+      }),
+    });
+
+    const json = await res.json();
+    if (res.ok) {
+      const d = json.data;
+      const v = d.computed_value;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+          <strong>✓ Water Carrying Capacity (E11) — JJM Baseline (PAR-006: 55 LPCD)</strong><br>
+          Net Water Available: <strong>${v.net_yield_lpcd.toLocaleString()} L/day</strong> (after 20% loss)<br>
+          Demand for 1,000 People: <strong>${v.required_lpcd.toLocaleString()} L/day</strong> (55 LPCD)<br>
+          Status: <span class="badge ${v.is_sufficient ? 'badge-pass' : 'badge-fail'}">${v.is_sufficient ? 'SUFFICIENT (Surplus: ' + v.surplus_lpcd.toLocaleString() + ' L/day)' : 'INSUFFICIENT'}</span><br>
+          Max Supported Population: <strong>${v.max_supported_people.toLocaleString()} persons</strong>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function executeFundingGapDemo() {
+  const resultDiv = document.getElementById('phase12-param-result');
+  if (!resultDiv) return;
+  resultDiv.innerHTML = '<span style="color: #6b7280;">Evaluating multi-tier funding gap...</span>';
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/compliance/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        formula_id: "E17",
+        inputs: {
+          required_costs: [5000000.0, 3000000.0],
+          verified_funds: [2000000.0],
+          announced_budgets: [6000000.0],
+        },
+        reviewer_id: "FINANCE_OFFICER_DEMO",
+      }),
+    });
+
+    const json = await res.json();
+    if (res.ok) {
+      const d = json.data;
+      const v = d.computed_value;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #eff6ff; border: 1px solid #3b82f6; border-radius: 4px; color: #1e40af;">
+          <strong>Multi-Tier Funding Gap (E17 / RUL-069):</strong><br>
+          Total Required Cost: <strong>₹${v.total_required_cost.toLocaleString()}</strong> | Verified Receipts: <strong>₹${v.total_verified_funding.toLocaleString()}</strong><br>
+          Unspent Announced Budget: <em>₹${v.unspent_announced_budget.toLocaleString()} (Excluded from gap reduction until received)</em><br>
+          Current Verified Funding Gap: <span class="badge ${v.funding_gap > 0 ? 'badge-fail' : 'badge-pass'}">₹${v.funding_gap.toLocaleString()}</span><br>
+          <small style="color: #b45309;">⚠️ ${d.warnings.join(' ')}</small>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function executeCompositeScoreAndReplayDemo() {
+  const resultDiv = document.getElementById('phase12-replay-result');
+  if (!resultDiv) return;
+  resultDiv.innerHTML = '<span style="color: #6b7280;">Calculating score and performing bit-for-bit replay verification...</span>';
+
+  try {
+    // 1. Execute E06
+    const res = await fetch(`${API_BASE}/api/v1/compliance/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        formula_id: "E06",
+        inputs: {
+          weights: { accessibility: 0.4, infrastructure: 0.6 },
+          values: { accessibility: 0.75, infrastructure: 0.90 },
+        },
+        reviewer_id: "REPLAY_AUDITOR_DEMO",
+      }),
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Execution Error: ${json.detail}</div>`;
+      return;
+    }
+
+    const execData = json.data;
+    const execId = execData.execution_id;
+
+    // 2. Replay historical execution
+    const replayRes = await fetch(`${API_BASE}/api/v1/compliance/replay/${execId}`).then(r => r.json());
+    const r = replayRes.data;
+
+    resultDiv.innerHTML = `
+      <div style="padding: 0.75rem; background: #ecfdf5; border: 1px solid #10b981; border-radius: 4px; color: #065f46;">
+        <strong>✓ Execution & Bit-for-Bit Replay Verified (FR-074):</strong><br>
+        Criterion Score: <strong>${execData.computed_value}</strong> (Normalized [0, 1])<br>
+        Original Execution SHA-256: <code>${r.original_hash}</code><br>
+        Reproduced Replay SHA-256: <code>${r.reproduced_hash}</code><br>
+        Verification Match: <span class="badge badge-pass">${r.is_bit_for_bit_identical ? 'BIT-FOR-BIT IDENTICAL (100% Match)' : 'MISMATCH'}</span>
+      </div>
+    `;
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function testMissingInputUnknownDemo() {
+  const resultDiv = document.getElementById('phase12-replay-result');
+  if (!resultDiv) return;
+  resultDiv.innerHTML = '<span style="color: #6b7280;">Testing missing input non-coercion rule (RUL-063)...</span>';
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/compliance/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        formula_id: "E06",
+        inputs: {
+          weights: { accessibility: 0.5, infrastructure: 0.5 },
+          values: { accessibility: 0.85, infrastructure: null }, // infrastructure missing
+        },
+        reviewer_id: "AUDITOR_MISSING_DEMO",
+      }),
+    });
+
+    const json = await res.json();
+    if (res.ok) {
+      const d = json.data;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #fffbeb; border: 1px solid #f59e0b; border-radius: 4px; color: #92400e;">
+          <strong>Non-Coercion Rule Enforced (RUL-063):</strong><br>
+          Status: <span class="badge badge-warn">${d.status}</span> | Computed Value: <em>${d.computed_value === null ? 'null (UNKNOWN)' : d.computed_value}</em><br>
+          <em>${d.warnings.join(' ')}</em><br>
+          <small>✓ Compliance: Missing criterion was NOT coerced to 0 or PASS.</small>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function evaluateComplianceDemo(isFull) {
+  const resultDiv = document.getElementById('phase12-compliance-result');
+  if (!resultDiv) return;
+  resultDiv.innerHTML = '<span style="color: #6b7280;">Auditing statutory compliance posture against mandates...</span>';
+
+  const controls = isFull ? [
+    "CONTROL_DDMA_APPROVAL_MANDATORY",
+    "CONTROL_BIENNIAL_PLAN_UPDATE_CADENCE",
+    "CONTROL_PROHIBIT_AUTONOMOUS_GAZETTE",
+    "CONTROL_REHABILITATION_SCHEME_PUBLICATION",
+    "CONTROL_INFRASTRUCTURE_AMENITIES_VERIFIED",
+    "CONTROL_PROHIBIT_DISPLACEMENT_WITHOUT_REMEDY",
+    "CONTROL_GRAMA_SABHA_CONSENT_MANDATORY",
+    "CONTROL_PROHIBIT_EVICTION_PENDING_FRA",
+    "CONTROL_COMMUNITY_RIGHTS_PRESERVED",
+    "CONTROL_INDIA_RESIDENT_HOSTING_ONLY",
+    "CONTROL_PURPOSE_SPECIFIC_CONSENT_SEPARATION",
+    "CONTROL_RESTRICTED_FIELD_TOKENIZATION",
+    "CONTROL_K_ANONYMITY_PUBLIC_PROJECTIONS",
+    "CONTROL_NTP_CLOCK_SYNC",
+    "CONTROL_180_DAY_AUDIT_LOG_RETENTION",
+    "CONTROL_TAMPER_EVIDENT_HASH_CHAINING",
+  ] : [
+    "CONTROL_DDMA_APPROVAL_MANDATORY",
+    "CONTROL_NTP_CLOCK_SYNC",
+  ];
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/compliance/evaluate-posture`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        programme_id: isFull ? "PROG-WYD-FULL-AUDIT" : "PROG-WYD-DEFICIT-AUDIT",
+        active_control_ids: controls,
+      }),
+    });
+
+    const json = await res.json();
+    if (res.ok) {
+      const d = json.data;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: ${d.is_fully_compliant ? '#ecfdf5' : '#fef2f2'}; border: 1px solid ${d.is_fully_compliant ? '#10b981' : '#ef4444'}; border-radius: 4px; color: ${d.is_fully_compliant ? '#065f46' : '#991b1b'};">
+          <strong>Statutory Compliance Evaluation (FR-075):</strong><br>
+          Overall Status: <span class="badge ${d.is_fully_compliant ? 'badge-pass' : 'badge-fail'}">${d.is_fully_compliant ? '100% STATUTORILY COMPLIANT' : 'NON-COMPLIANT (BLOCKERS DETECTED)'}</span><br>
+          Statutes Evaluated: <strong>${d.statutes_evaluated}</strong> | Mandatory Controls Checked: <strong>${d.mandatory_controls_checked}</strong><br>
+          Compliant Controls: <strong>${d.compliant_controls_count} / ${d.mandatory_controls_checked}</strong><br>
+          ${d.open_blockers.length > 0 ? `
+            <div style="margin-top: 0.5rem; padding: 0.5rem; background: #fff; border: 1px solid #fecaca; border-radius: 4px;">
+              <strong style="color: #dc2626;">Open Statutory Blockers (${d.open_blockers.length}):</strong>
+              <ul style="margin: 0.25rem 0 0 1.25rem; font-size: 0.88em; color: #b91c1c;">
+                ${d.open_blockers.map(b => `<li><code>${b}</code></li>`).join('')}
+              </ul>
+            </div>
+          ` : `
+            <div style="margin-top: 0.25rem; font-size: 0.85em; color: #065f46;">✓ All mandates under DM Act 2005 (Amended 2025), RFCTLARR 2013, FRA 2006, DPDP 2023/2025, and CERT-In 2022 are active.</div>
           `}
         </div>
       `;
