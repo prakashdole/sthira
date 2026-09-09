@@ -26,6 +26,7 @@ const i18n = {
     tab_phase10: "Delivery & Completion (Phase 10)",
     tab_phase11: "Dossiers & Manifests (Phase 11)",
     tab_phase12: "Formulas & Compliance (Phase 12)",
+    tab_phase13: "Source Readiness & Health (Phase 13)",
     tab_audit: "Audit & Integrity",
     site_card_capacity: "Dwelling Capacity",
     site_card_water: "Lean-Season Water",
@@ -55,6 +56,7 @@ const i18n = {
     tab_phase10: "നിർവ്വഹണവും പൂർത്തീകരണവും (ഘട്ടം 10)",
     tab_phase11: "രേഖകളും മാനിഫെസ്റ്റുകളും (ഘട്ടം 11)",
     tab_phase12: "ഫോർമുലകളും ചട്ടങ്ങളും (ഘട്ടം 12)",
+    tab_phase13: "ഡാറ്റാ ഉറവിടങ്ങളും സന്നദ്ധതയും (ഘട്ടം 13)",
     tab_audit: "ഓഡിറ്റ് പരിശോധന",
     site_card_capacity: "വീടുകളുടെ ശേഷി",
     site_card_water: "വേനൽക്കാല ജലലഭ്യത",
@@ -85,6 +87,7 @@ const i18n = {
     tab_phase10: "वितरण एवं पूर्णता (Phase 10)",
     tab_phase11: "दस्तावेज़ एवं घोषणापत्र (Phase 11)",
     tab_phase12: "सूत्र एवं अनुपालन (Phase 12)",
+    tab_phase13: "स्रोत तत्परता एवं स्वास्थ्य (Phase 13)",
     tab_audit: "ऑडिट एवं अखंडता",
     site_card_capacity: "आवास क्षमता",
     site_card_water: "ग्रीष्मकालीन जल उपलब्धता",
@@ -1038,6 +1041,80 @@ function renderActiveTab() {
             <button class="btn" style="border-color: #d97706; color: #d97706;" onclick="evaluateComplianceDemo(false)">Audit Programme with Missing Controls (Detect Open Blockers)</button>
           </div>
           <div id="phase12-compliance-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+      </div>
+    `;
+  } else if (activeTab === 'phase13') {
+    const container = document.getElementById('tab-content');
+    container.innerHTML = `
+      <div class="phase-container">
+        <div class="card" style="border-left: 4px solid #0284c7; margin-bottom: 1.5rem;">
+          <h3>Phase 13: Source Readiness, Provider Health & Blocker Gating (ARC-C13)</h3>
+          <p>Operational data source inventory (S01–S54), catalog-versus-access separation, Section 6 permitted AOI sample gates, mirror deduplication, zero-secret telemetry, and mandatory S45–S50 blocker enforcement (FR-076–FR-084, RUL-076–RUL-083, DEC-044).</p>
+        </div>
+
+        <div class="card">
+          <h4>1. S01–S54 Operational Source Register & Capability Inspector (FR-076, RUL-076)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">54 registered capabilities with strict classification, custodians, owners, intended uses, and explicit non-uses. Catalog search alone NEVER marks an asset downloaded, licensed, or usable (AT-31).</p>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
+            <button class="btn btn-primary" onclick="loadSourceCapabilitiesDemo()">View All 54 Capabilities</button>
+            <button class="btn" style="border-color: #0284c7; color: #0284c7;" onclick="loadSourceCapabilitiesDemo('AGENCY_BLOCKER')">Filter: Mandatory Agency Blockers (S45, S46, S47, S50)</button>
+            <button class="btn" style="border-color: #d97706; color: #d97706;" onclick="loadSourceCapabilitiesDemo('FIELD_BLOCKER')">Filter: Mandatory Field Blockers (S48, S49)</button>
+            <button class="btn" style="border-color: #4f46e5; color: #4f46e5;" onclick="testCatalogSearchSeparationDemo('S10')">Test Catalog Search: CDSE S10 → CATALOG_VISIBLE (Hold Decision)</button>
+          </div>
+          <div id="phase13-catalog-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+
+        <div class="card">
+          <h4>2. Permitted AOI Sample Acquisition Gate & Quarantine Simulator (FR-078, RUL-077, AT-38)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Before APPROVED_FOR_USE, an AOI sample must pass 12 explicit checks: license/offline rights, Wayanad bounds, CRS, units, format, and SHA-256 checksum. Checksum mismatch or invalid CRS triggers immediate QUARANTINE.</p>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
+            <button class="btn btn-primary" onclick="testAOISampleGateDemo('VALID')">Submit Valid Wayanad DEM Sample (EPSG:32643) → APPROVED_FOR_USE</button>
+            <button class="btn" style="border-color: #dc2626; color: #dc2626;" onclick="testAOISampleGateDemo('CORRUPT_CHECKSUM')">Test Negative Gate: Checksum Mismatch → QUARANTINED (AT-38)</button>
+            <button class="btn" style="border-color: #dc2626; color: #dc2626;" onclick="testAOISampleGateDemo('MISSING_CRS')">Test Negative Gate: Missing CRS → QUARANTINED (AT-38)</button>
+          </div>
+          <div id="phase13-aoi-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+
+        <div class="card">
+          <h4>3. Shared Lineage & Mirror Group Deduplication (FR-079, RUL-078, AT-32)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Prevents counting observations from multiple portals (CDSE, Earth Search, Planetary Computer) or building polygons (Google, Microsoft, OSM) as independent corroboration.</p>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
+            <button class="btn btn-primary" onclick="reconcileMirrorDemo('MIRROR_SENTINEL_2')">Deduplicate Multi-Portal Sentinel-2 Scenes (CDSE + EarthSearch + PlanetaryComputer)</button>
+            <button class="btn" style="border-color: #4f46e5; color: #4f46e5;" onclick="reconcileMirrorDemo('MIRROR_BUILDING_FOOTPRINTS')">Deduplicate Building Footprints (Google + Microsoft + OSM)</button>
+          </div>
+          <div id="phase13-mirror-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+
+        <div class="card">
+          <h4>4. Provider Health & Secret Redaction (FR-081, RUL-081, AT-33, AT-34)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Adapter health monitoring with rate limits, latency, error rates, and strict secret masking. Verifies geography lockouts and paused API status.</p>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
+            <button class="btn btn-primary" onclick="checkProviderHealthDemo()">Inspect Provider Health Telemetry (Verify Zero Secret Leakage)</button>
+            <button class="btn" style="border-color: #d97706; color: #d97706;" onclick="testGovernanceLockoutDemo('S07', 'Wayanad')">Test Geography Lockout: C-FLOOD on Wayanad → UNSUPPORTED (AT-34)</button>
+            <button class="btn" style="border-color: #d97706; color: #d97706;" onclick="testGovernanceLockoutDemo('S31', 'Wayanad')">Test Paused API: SoilGrids REST → PAUSED_API / HOLD (AT-33)</button>
+          </div>
+          <div id="phase13-health-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+
+        <div class="card">
+          <h4>5. Mandatory S45–S50 Production Blocker Gate Evaluator (FR-083, RUL-079, AT-35)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Production site approval and allocation remain hard-blocked until land title (S45), lean-season water (S46), FRA clearance (S47), household consent (S48), geotechnics (S49), and funding (S50) are verified.</p>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
+            <button class="btn" style="border-color: #dc2626; color: #dc2626;" onclick="evaluateBlockerGateDemo('INCOMPLETE')">Evaluate Missing Land & Geotechnics Evidence → BLOCKED / HOLD</button>
+            <button class="btn" style="border-color: #d97706; color: #d97706;" onclick="evaluateBlockerGateDemo('LOW_WATER')">Evaluate Low Water Supply (35 LPCD &lt; 55 LPCD) → BLOCKED</button>
+            <button class="btn btn-primary" onclick="evaluateBlockerGateDemo('COMPLETE')">Evaluate 100% Verified S45–S50 Dossier → PASS (Proceed to Allocation)</button>
+          </div>
+          <div id="phase13-blocker-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
+        </div>
+
+        <div class="card">
+          <h4>6. Basemap Decoupling & Graceful Non-Map Fallback (FR-084, RUL-082, AT-37)</h4>
+          <p style="font-size: 0.9em; color: #6b7280;">Basemaps are display infrastructure, not analytical evidence. Bulk OSM tile download is forbidden. If basemap tiles fail or keys expire, analytical decision lineage is decoupled and intact, rendering tabular vector fallback.</p>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
+            <button class="btn btn-primary" onclick="simulateBasemapFailureDemo()">Simulate Basemap Provider Outage → Trigger Non-Map Tabular Fallback</button>
+          </div>
+          <div id="phase13-basemap-result" style="margin-top: 1rem; font-size: 0.88em;"></div>
         </div>
       </div>
     `;
@@ -2853,6 +2930,469 @@ async function evaluateComplianceDemo(isFull) {
           ` : `
             <div style="margin-top: 0.25rem; font-size: 0.85em; color: #065f46;">✓ All mandates under DM Act 2005 (Amended 2025), RFCTLARR 2013, FRA 2006, DPDP 2023/2025, and CERT-In 2022 are active.</div>
           `}
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+// ==============================================================================
+// Phase 13 Interactive Client Functions (ARC-C13, FR-076–FR-084)
+// ==============================================================================
+
+async function loadSourceCapabilitiesDemo(filterClass = null) {
+  const resultDiv = document.getElementById('phase13-catalog-result');
+  if (!resultDiv) return;
+  resultDiv.innerHTML = '<div style="color: #0284c7;">Querying S01–S54 operational source register...</div>';
+  try {
+    let url = `${API_BASE}/api/v1/sources/capabilities`;
+    if (filterClass) {
+      url += `?priority_class=${filterClass}`;
+    }
+    const res = await fetch(url);
+    const json = await res.json();
+    if (res.ok) {
+      const caps = json.data;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <strong>S01–S54 Operational Capabilities (${caps.length} items loaded):</strong>
+            <span style="font-size: 0.8em; color: #64748b;">Filter: <code>${filterClass || 'ALL'}</code></span>
+          </div>
+          <div style="max-height: 280px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 4px;">
+            <table class="data-table" style="font-size: 0.85em; width: 100%;">
+              <thead>
+                <tr style="background: #e2e8f0;">
+                  <th>ID</th>
+                  <th>Product / Route Title</th>
+                  <th>Type</th>
+                  <th>Priority Class</th>
+                  <th>State</th>
+                  <th>Explicit Non-Uses</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${caps.map(c => `
+                  <tr>
+                    <td><strong>${c.source_id}</strong></td>
+                    <td>${c.name}</td>
+                    <td><code>${c.capability_type}</code></td>
+                    <td><span class="badge ${c.priority_class.includes('BLOCKER') ? 'badge-fail' : (c.priority_class === 'CORE' ? 'badge-pass' : 'badge-neutral')}">${c.priority_class}</span></td>
+                    <td><span class="badge ${c.state === 'APPROVED_FOR_USE' ? 'badge-pass' : (c.state === 'QUARANTINED' ? 'badge-fail' : 'badge-neutral')}">${c.state}</span></td>
+                    <td style="color: #64748b; font-size: 0.82em;">${c.explicit_non_uses ? c.explicit_non_uses.join('; ') : 'None'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function testCatalogSearchSeparationDemo(sourceId = "S10") {
+  const resultDiv = document.getElementById('phase13-catalog-result');
+  if (!resultDiv) return;
+  resultDiv.innerHTML = '<div style="color: #0284c7;">Executing catalog discovery query...</div>';
+  try {
+    const payload = {
+      source_id: sourceId,
+      query_filter: "datetime=2024-08-01/2024-08-10&bbox=75.8,11.5,76.3,11.9",
+      actor_id: "gis-analyst",
+    };
+    const res = await fetch(`${API_BASE}/api/v1/sources/catalog-search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if (res.ok) {
+      const d = json.data;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 4px; color: #1e40af;">
+          <strong>Catalog Discovery Result (FR-077, AT-31):</strong><br>
+          Source ID: <strong>${d.source_id}</strong> (${d.title})<br>
+          Lifecycle State: <span class="badge badge-neutral">${d.current_state}</span><br>
+          Usable for Decisions: <span class="badge badge-fail">${d.is_usable ? 'YES' : 'NO (STRICT INVARIANT)'}</span><br>
+          Downstream Workflow Status: <span class="badge badge-fail">${d.dependent_workflow_status}</span><br>
+          <div style="margin-top: 0.5rem; font-size: 0.85em; background: #fff; padding: 0.5rem; border-radius: 4px; border: 1px solid #dbeafe;">
+            <strong>Statutory Rule (RUL-076):</strong> ${d.statutory_note}
+          </div>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function testAOISampleGateDemo(scenario = "VALID") {
+  const resultDiv = document.getElementById('phase13-aoi-result');
+  if (!resultDiv) return;
+  resultDiv.innerHTML = '<div style="color: #0284c7;">Running Section 6 AOI sample gate evaluation...</div>';
+  try {
+    let payload;
+    const nowIso = new Date().toISOString();
+    if (scenario === "VALID") {
+      const validHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+      payload = {
+        source_id: "S18",
+        sample_id: "SAMPLE-DEM-WAYANAD-01",
+        license_type: "Copernicus Open Access / CC-BY-4.0",
+        has_redistribution_and_offline_rights: true,
+        min_lat: 11.55,
+        max_lat: 11.85,
+        min_lon: 75.95,
+        max_lon: 76.25,
+        observation_timestamp: nowIso,
+        schema_format: "GeoTIFF",
+        crs: "EPSG:32643",
+        vertical_datum: "EGM96",
+        resolution_meters: 30.0,
+        units: "meters",
+        nodata_value: "-9999",
+        raw_payload_checksum: validHash,
+        claimed_checksum: validHash,
+        reviewer_id: "REV-CHIEF-GEOMATICS",
+        reproducibility_notes: "CDSE STAC OData download via GDAL pipeline.",
+        cost_usd: 0.0,
+      };
+    } else if (scenario === "CORRUPT_CHECKSUM") {
+      payload = {
+        source_id: "S08",
+        sample_id: "SAMPLE-S2-CORRUPTED",
+        license_type: "Copernicus Open Access",
+        has_redistribution_and_offline_rights: true,
+        min_lat: 11.60,
+        max_lat: 11.75,
+        min_lon: 76.00,
+        max_lon: 76.20,
+        observation_timestamp: nowIso,
+        schema_format: "COG",
+        crs: "EPSG:32643",
+        resolution_meters: 10.0,
+        units: "reflectance",
+        nodata_value: "0",
+        raw_payload_checksum: "0000000000000000000000000000000000000000000000000000000000000000",
+        claimed_checksum: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        reviewer_id: "REV-RS-LEAD",
+        reproducibility_notes: "Automated ingestion pipeline.",
+      };
+    } else {
+      payload = {
+        source_id: "S22",
+        sample_id: "SAMPLE-BUILDINGS-NO-CRS",
+        license_type: "CC-BY-4.0",
+        has_redistribution_and_offline_rights: true,
+        min_lat: 11.60,
+        max_lat: 11.75,
+        min_lon: 76.00,
+        max_lon: 76.20,
+        observation_timestamp: nowIso,
+        schema_format: "GeoJSON",
+        crs: "",
+        resolution_meters: 0.5,
+        units: "polygon",
+        nodata_value: null,
+        raw_payload_checksum: "abc123hash",
+        claimed_checksum: "abc123hash",
+        reviewer_id: "REV-GIS-LEAD",
+        reproducibility_notes: "Google Open Buildings v3 extract.",
+      };
+    }
+
+    const res = await fetch(`${API_BASE}/api/v1/sources/aoi-sample/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if (res.ok) {
+      const d = json.data;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: ${d.passed ? '#ecfdf5' : '#fef2f2'}; border: 1px solid ${d.passed ? '#10b981' : '#ef4444'}; border-radius: 4px; color: ${d.passed ? '#065f46' : '#991b1b'};">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <strong>AOI Sample Gate Result (FR-078, AT-38):</strong>
+            <span class="badge ${d.passed ? 'badge-pass' : 'badge-fail'}">${d.status}</span>
+          </div>
+          <div style="margin-top: 0.5rem; font-size: 0.9em;">
+            Sample ID: <code>${d.sample_id}</code> | Source: <strong>${d.source_id}</strong><br>
+            Overall Result: <strong>${d.passed ? 'PASSED (ACTIVATED FOR AOI USE)' : 'FAILED (SAMPLE QUARANTINED)'}</strong>
+          </div>
+          ${d.quarantine_reasons.length > 0 ? `
+            <div style="margin-top: 0.5rem; padding: 0.5rem; background: #fff; border: 1px solid #fecaca; border-radius: 4px;">
+              <strong style="color: #dc2626;">Quarantine Reasons (${d.quarantine_reasons.length}):</strong>
+              <ul style="margin: 0.25rem 0 0 1.25rem; font-size: 0.85em; color: #b91c1c;">
+                ${d.quarantine_reasons.map(r => `<li>${r}</li>`).join('')}
+              </ul>
+            </div>
+          ` : `
+            <div style="margin-top: 0.5rem; font-size: 0.85em; color: #065f46;">
+              ✓ All 12 checks passed: License rights, Wayanad bounds, temporal validity, CRS datum, units, and SHA-256 bit-for-bit checksum.
+            </div>
+          `}
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function reconcileMirrorDemo(groupId = "MIRROR_SENTINEL_2") {
+  const resultDiv = document.getElementById('phase13-mirror-result');
+  if (!resultDiv) return;
+  resultDiv.innerHTML = '<div style="color: #0284c7;">Executing mirror group deduplication...</div>';
+  try {
+    let observations;
+    if (groupId === "MIRROR_SENTINEL_2") {
+      const granuleId = "S2A_MSIL2A_20240801T050701_N0511_R019_T43PFR_20240801T084802";
+      observations = [
+        { source_id: "S10", observation_id: granuleId, provider: "CDSE", cloud_cover: 12.5 },
+        { source_id: "S11", observation_id: granuleId, provider: "EarthSearch", cloud_cover: 12.5 },
+        { source_id: "S12", observation_id: granuleId, provider: "PlanetaryComputer", cloud_cover: 12.5 },
+      ];
+    } else {
+      const footprintId = "BLDG-WAYANAD-CHOORALMALA-084";
+      observations = [
+        { source_id: "S22", footprint_id: footprintId, provider: "GoogleOpenBuildings", area_sqm: 95.0 },
+        { source_id: "S23", footprint_id: footprintId, provider: "MicrosoftML", area_sqm: 94.2 },
+        { source_id: "S41", footprint_id: footprintId, provider: "OpenStreetMap", area_sqm: 96.0 },
+      ];
+    }
+
+    const payload = { group_id: groupId, observations: observations };
+    const res = await fetch(`${API_BASE}/api/v1/sources/mirror-groups/reconcile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if (res.ok) {
+      const d = json.data;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #f0fdf4; border: 1px solid #86efac; border-radius: 4px; color: #166534;">
+          <strong>Shared Lineage Deduplication Result (FR-079, RUL-078, AT-32):</strong><br>
+          Mirror Group: <strong>${d.group_id}</strong> | Method: <code>${d.reconciliation_method}</code><br>
+          Raw Portals / Observations Submitted: <strong>${d.total_input_count}</strong><br>
+          Reconciled Unique Observations: <strong>${d.reconciled_count}</strong><br>
+          Redundant Mirrors Suppressed: <strong>${d.duplicate_count}</strong><br>
+          Independent Corroboration Claim: <span class="badge badge-fail">STRICTLY REJECTED</span><br>
+          <div style="margin-top: 0.5rem; font-size: 0.85em; background: #fff; padding: 0.5rem; border-radius: 4px; border: 1px solid #bbf7d0;">
+            ${d.explanation}
+          </div>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function checkProviderHealthDemo() {
+  const resultDiv = document.getElementById('phase13-health-result');
+  if (!resultDiv) return;
+  resultDiv.innerHTML = '<div style="color: #0284c7;">Checking adapter health telemetry...</div>';
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/sources/health`);
+    const json = await res.json();
+    if (res.ok) {
+      const providers = json.data;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <strong>Provider Telemetry & Zero-Secret Verification (FR-081, RUL-081):</strong>
+            <span class="badge badge-pass">SECRETS 100% REDACTED</span>
+          </div>
+          <table class="data-table" style="font-size: 0.85em; width: 100%;">
+            <thead>
+              <tr style="background: #e2e8f0;">
+                <th>Source</th>
+                <th>Provider</th>
+                <th>Token Status</th>
+                <th>Rate Limit</th>
+                <th>Quota Used / Limit</th>
+                <th>Latency</th>
+                <th>Error Rate</th>
+                <th>Credential Preview</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${providers.map(p => `
+                <tr>
+                  <td><strong>${p.source_id}</strong></td>
+                  <td>${p.provider_name}</td>
+                  <td><span class="badge ${p.token_state === 'VALID' ? 'badge-pass' : 'badge-fail'}">${p.token_state}</span></td>
+                  <td>${p.rate_limit_rpm} rpm</td>
+                  <td>${p.quota_used} / ${p.quota_limit}</td>
+                  <td>${p.latency_ms.toFixed(1)} ms</td>
+                  <td>${(p.error_rate_pct * 100).toFixed(1)}%</td>
+                  <td><code style="color: #059669;">${p.redacted_token_preview}</code></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function testGovernanceLockoutDemo(sourceId, targetGeo) {
+  const resultDiv = document.getElementById('phase13-health-result');
+  if (!resultDiv) return;
+  resultDiv.innerHTML = '<div style="color: #0284c7;">Checking governance lockout rules...</div>';
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/sources/check-governance?source_id=${sourceId}&target_geography=${targetGeo}`);
+    const json = await res.json();
+    if (res.ok) {
+      const d = json.data;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: ${d.can_link ? '#ecfdf5' : '#fef2f2'}; border: 1px solid ${d.can_link ? '#10b981' : '#ef4444'}; border-radius: 4px; color: ${d.can_link ? '#065f46' : '#991b1b'};">
+          <strong>Governance Gate Result (FR-080, AT-33, AT-34):</strong><br>
+          Source: <strong>${d.source_id}</strong> | Target Geography: <strong>${targetGeo}</strong><br>
+          Status: <span class="badge ${d.can_link ? 'badge-pass' : 'badge-fail'}">${d.status}</span><br>
+          Decision Linkage Permitted: <strong>${d.can_link ? 'YES' : 'NO (LOCKED OUT / HOLD)'}</strong><br>
+          <div style="margin-top: 0.5rem; font-size: 0.85em; background: #fff; padding: 0.5rem; border-radius: 4px; border: 1px solid #fecaca;">
+            ${d.reason}
+          </div>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function evaluateBlockerGateDemo(scenario = "COMPLETE") {
+  const resultDiv = document.getElementById('phase13-blocker-result');
+  if (!resultDiv) return;
+  resultDiv.innerHTML = '<div style="color: #0284c7;">Evaluating mandatory S45–S50 blocker gates...</div>';
+  try {
+    let evidence;
+    if (scenario === "INCOMPLETE") {
+      evidence = {
+        S45: { status: "VERIFIED", summary: "Tahsildar clear title verified" },
+        S47: { status: "VERIFIED", summary: "Forest Dept NOC verified" },
+        S48: { status: "VERIFIED", consent_percentage: 100 },
+        S50: { status: "VERIFIED", administrative_sanction_number: "GO-452-2024-DMD" },
+        // S46 (water) and S49 (geotechnics) missing!
+      };
+    } else if (scenario === "LOW_WATER") {
+      evidence = {
+        S45: { status: "VERIFIED", summary: "Clear title verified" },
+        S46: { status: "VERIFIED", sustainable_yield_lpcd: 35, potability_certified: true },
+        S47: { status: "VERIFIED", summary: "FRA Gram Sabha resolution on record" },
+        S48: { status: "VERIFIED", consent_percentage: 100 },
+        S49: { status: "VERIFIED", factor_of_safety: 1.4 },
+        S50: { status: "VERIFIED", administrative_sanction_number: "GO-452-2024-DMD" },
+      };
+    } else {
+      evidence = {
+        S45: { status: "VERIFIED", summary: "Resurvey cadastral RoR verified by Revenue Tahsildar" },
+        S46: { status: "VERIFIED", sustainable_yield_lpcd: 70, potability_certified: true },
+        S47: { status: "VERIFIED", summary: "FRA Gram Sabha resolution #14/2024 and Forest NOC" },
+        S48: { status: "VERIFIED", consent_percentage: 100 },
+        S49: { status: "VERIFIED", factor_of_safety: 1.45 },
+        S50: { status: "VERIFIED", administrative_sanction_number: "GO-452-2024-DMD" },
+      };
+    }
+
+    const payload = {
+      site_id: "SITE-WAYANAD-ELSTONE-01",
+      allocation_action: "LIVE_SITE_APPROVAL",
+      evidence_records: evidence,
+    };
+    const res = await fetch(`${API_BASE}/api/v1/sources/blockers/evaluate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if (res.ok) {
+      const d = json.data;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: ${d.can_proceed ? '#ecfdf5' : '#fef2f2'}; border: 1px solid ${d.can_proceed ? '#10b981' : '#ef4444'}; border-radius: 4px; color: ${d.can_proceed ? '#065f46' : '#991b1b'};">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <strong>Production Blocker Gate Report (FR-083, RUL-079, AT-35):</strong>
+            <span class="badge ${d.can_proceed ? 'badge-pass' : 'badge-fail'}">${d.overall_status}</span>
+          </div>
+          <div style="margin-top: 0.5rem; font-size: 0.9em;">
+            Target Site: <strong>${d.site_id}</strong> | Action: <code>${d.action}</code><br>
+            Production Advancement Authorized: <strong>${d.can_proceed ? 'YES (ALL CRITERIA VERIFIED)' : 'NO (HARD GATE BLOCKED)'}</strong><br>
+            Audit Integrity Hash: <code>${d.audit_hash.substring(0, 16)}...</code>
+          </div>
+
+          <div style="margin-top: 0.75rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.5rem;">
+            ${Object.values(d.blockers).map(b => `
+              <div style="padding: 0.5rem; background: #fff; border: 1px solid ${b.status === 'VERIFIED' ? '#bbf7d0' : '#fecaca'}; border-radius: 4px; font-size: 0.85em;">
+                <div style="display: flex; justify-content: space-between;">
+                  <strong>${b.blocker_id}</strong>
+                  <span class="badge ${b.status === 'VERIFIED' ? 'badge-pass' : 'badge-fail'}">${b.status}</span>
+                </div>
+                <div style="font-weight: 500; color: #1e293b; margin: 0.2rem 0;">${b.title}</div>
+                <div style="color: #64748b; font-size: 0.82em;">${b.evidence_summary}</div>
+                ${b.missing_requirements.length > 0 ? `
+                  <div style="color: #b91c1c; font-size: 0.8em; margin-top: 0.2rem;">Missing: ${b.missing_requirements.join(', ')}</div>
+                ` : ''}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    } else {
+      resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${json.detail}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div style="color: #b91c1c;">Error: ${e.message}</div>`;
+  }
+}
+
+async function simulateBasemapFailureDemo() {
+  const resultDiv = document.getElementById('phase13-basemap-result');
+  if (!resultDiv) return;
+  resultDiv.innerHTML = '<div style="color: #0284c7;">Simulating basemap outage...</div>';
+  try {
+    const payload = { provider_id: "S53", actor_id: "ops-manager" };
+    const res = await fetch(`${API_BASE}/api/v1/sources/basemaps/simulate-failure`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if (res.ok) {
+      const d = json.data;
+      resultDiv.innerHTML = `
+        <div style="padding: 0.75rem; background: #fefce8; border: 1px solid #facc15; border-radius: 4px; color: #854d0e;">
+          <strong>Basemap Decoupling & Graceful Fallback (FR-084, RUL-082, AT-37):</strong><br>
+          Provider ID: <strong>${d.provider_id}</strong> | Tile Health: <span class="badge badge-fail">OFFLINE / EXPIRED</span><br>
+          Active View Mode: <span class="badge badge-pass">${d.fallback_mode}</span><br>
+          Lineage Decoupled: <strong>${d.analytical_lineage_decoupled ? 'YES (INDEPENDENT)' : 'NO'}</strong><br>
+          OSM Bulk Download Workaround: <span class="badge badge-fail">STRICTLY PROHIBITED (RUL-082)</span><br>
+          <div style="margin-top: 0.5rem; font-size: 0.85em; background: #fff; padding: 0.5rem; border-radius: 4px; border: 1px solid #fde047;">
+            ${d.message}
+          </div>
         </div>
       `;
     } else {
