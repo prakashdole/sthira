@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from sthira.core.contracts import utc_now
-from sthira.core.enums import SolverStatus, RelocationPathway
+from sthira.core.enums import ConsentPurpose, SolverStatus, RelocationPathway
 from sthira.core.audit import global_audit_ledger
 from sthira.core.errors import ReservationConflictError
 from sthira.modules.household.service import HouseholdCase
@@ -106,6 +106,33 @@ class AllocationService:
         )
 
         for hh in sorted_households:
+            hold_reasons = []
+            if not hh.verified_eligibility:
+                hold_reasons.append("eligibility is not verified")
+            if not hh.consents.get(ConsentPurpose.PROGRAMME_PARTICIPATION, False):
+                hold_reasons.append("programme participation consent is missing")
+            if not hh.consents.get(ConsentPurpose.PATHWAY_CHOICE, False):
+                hold_reasons.append("relocation pathway consent is missing")
+            if (
+                hh.chosen_pathway == RelocationPathway.TOWNSHIP
+                and not hh.consents.get(ConsentPurpose.SITE_PREFERENCE, False)
+            ):
+                hold_reasons.append("site preference consent is missing")
+            if hh.has_pending_objection:
+                hold_reasons.append("a household objection is pending")
+
+            if hold_reasons:
+                unassigned_count += 1
+                assignments.append(
+                    AllocationAssignment(
+                        household_id=hh.household_id,
+                        assigned_site_id=None,
+                        pathway=hh.chosen_pathway,
+                        explanation=f"Unassigned: {'; '.join(hold_reasons)}.",
+                    )
+                )
+                continue
+
             # Check pathway choice
             if hh.chosen_pathway == RelocationPathway.SELF_RELOCATION_ASSISTANCE:
                 assignments.append(

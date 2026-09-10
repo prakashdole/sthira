@@ -24,7 +24,7 @@ Plus:
 
 import pytest
 from sthira.core.contracts import GeoPoint
-from sthira.core.enums import GateState, RelocationPathway, DecisionState, DiscrepancyType
+from sthira.core.enums import ConsentPurpose, GateState, RelocationPathway, DecisionState, DiscrepancyType
 from sthira.core.errors import ReservationConflictError
 
 from sthira.modules.hazard import HazardLayer, hazard_service
@@ -308,6 +308,12 @@ def test_scenario_8_explicit_unassigned_due_to_accessibility():
         disabled_count=1,
         requires_ground_floor=True,
         source_parcel_id="PARCEL-CHOORALMALA-01",
+        verified_eligibility=True,
+        consents={
+            ConsentPurpose.PROGRAMME_PARTICIPATION: True,
+            ConsentPurpose.PATHWAY_CHOICE: True,
+            ConsentPurpose.SITE_PREFERENCE: True,
+        },
         chosen_pathway=RelocationPathway.TOWNSHIP,
         preferred_site_ids=["SITE-ELSTONE-TOWNSHIP"],
     )

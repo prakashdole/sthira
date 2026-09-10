@@ -9,7 +9,7 @@ Covers:
 
 import pytest
 from sthira.core.contracts import GeoPoint
-from sthira.core.enums import DiscrepancyType, RelocationPathway, DecisionState, FundingState
+from sthira.core.enums import ConsentPurpose, DiscrepancyType, RelocationPathway, DecisionState, FundingState
 
 from sthira.modules.land_truth import ParcelRecord, land_truth_service
 from sthira.modules.household import HouseholdCase
@@ -55,6 +55,12 @@ def test_allocation_scenario_and_validator():
             elderly_count=1,
             requires_ground_floor=True,
             source_parcel_id="PARCEL-1",
+            verified_eligibility=True,
+            consents={
+                ConsentPurpose.PROGRAMME_PARTICIPATION: True,
+                ConsentPurpose.PATHWAY_CHOICE: True,
+                ConsentPurpose.SITE_PREFERENCE: True,
+            },
             chosen_pathway=RelocationPathway.TOWNSHIP,
             preferred_site_ids=["SITE-ELSTONE"],
         ),
@@ -63,6 +69,11 @@ def test_allocation_scenario_and_validator():
             head_of_household="Person B",
             member_count=3,
             source_parcel_id="PARCEL-2",
+            verified_eligibility=True,
+            consents={
+                ConsentPurpose.PROGRAMME_PARTICIPATION: True,
+                ConsentPurpose.PATHWAY_CHOICE: True,
+            },
             chosen_pathway=RelocationPathway.SELF_RELOCATION_ASSISTANCE,  # VLRS ₹10L
         ),
         HouseholdCase(
@@ -70,6 +81,12 @@ def test_allocation_scenario_and_validator():
             head_of_household="Person C",
             member_count=2,
             source_parcel_id="PARCEL-3",
+            verified_eligibility=True,
+            consents={
+                ConsentPurpose.PROGRAMME_PARTICIPATION: True,
+                ConsentPurpose.PATHWAY_CHOICE: True,
+                ConsentPurpose.SITE_PREFERENCE: True,
+            },
             chosen_pathway=RelocationPathway.TOWNSHIP,
             preferred_site_ids=["SITE-ELSTONE"],
         ),
@@ -105,6 +122,61 @@ def test_allocation_scenario_and_validator():
     hh_map = {h.household_id: h for h in households}
     violations = AllocationValidator.validate(scenario, site_capacities, hh_map)
     assert len(violations) == 0
+
+
+def test_allocation_holds_households_without_required_readiness():
+    households = [
+        HouseholdCase(
+            household_id="HH-INELIGIBLE",
+            head_of_household="Person Ineligible",
+            member_count=2,
+            source_parcel_id="PARCEL-I",
+            verified_eligibility=False,
+            consents={
+                ConsentPurpose.PROGRAMME_PARTICIPATION: True,
+                ConsentPurpose.PATHWAY_CHOICE: True,
+                ConsentPurpose.SITE_PREFERENCE: True,
+            },
+            preferred_site_ids=["SITE-PASS"],
+        ),
+        HouseholdCase(
+            household_id="HH-NO-CONSENT",
+            head_of_household="Person No Consent",
+            member_count=2,
+            source_parcel_id="PARCEL-C",
+            verified_eligibility=True,
+            preferred_site_ids=["SITE-PASS"],
+        ),
+        HouseholdCase(
+            household_id="HH-OBJECTION",
+            head_of_household="Person Objecting",
+            member_count=2,
+            source_parcel_id="PARCEL-O",
+            verified_eligibility=True,
+            consents={
+                ConsentPurpose.PROGRAMME_PARTICIPATION: True,
+                ConsentPurpose.PATHWAY_CHOICE: True,
+                ConsentPurpose.SITE_PREFERENCE: True,
+            },
+            preferred_site_ids=["SITE-PASS"],
+            has_pending_objection=True,
+        ),
+    ]
+
+    scenario = allocation_service.generate_scenario(
+        scenario_id="SCEN-READINESS-HOLDS",
+        households=households,
+        site_capacities={"SITE-PASS": 10},
+        site_plot_cents={"SITE-PASS": 7.0},
+        actor_id="test_planner",
+    )
+
+    assert scenario.assigned_count == 0
+    assert scenario.unassigned_count == 3
+    explanations = {a.household_id: a.explanation for a in scenario.assignments}
+    assert "eligibility is not verified" in explanations["HH-INELIGIBLE"]
+    assert "programme participation consent is missing" in explanations["HH-NO-CONSENT"]
+    assert "objection is pending" in explanations["HH-OBJECTION"]
 
 
 def test_governance_objections_and_milestone_completion():

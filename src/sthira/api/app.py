@@ -275,12 +275,44 @@ def bootstrap_seed_data():
                 actor_id="system_seed",
                 reason="Startup bootstrap",
             )
-            household_service.record_consent(
-                household_id=hh["household_id"],
-                purpose=ConsentPurpose.PROGRAMME_PARTICIPATION,
-                consented=True,
-                actor_id="system_seed",
-                reason="Signed participation consent",
+            for purpose_name, consent_state in hh.get("consent_status", {}).items():
+                if purpose_name not in ConsentPurpose.__members__:
+                    continue
+                household_service.record_consent(
+                    household_id=hh["household_id"],
+                    purpose=ConsentPurpose[purpose_name],
+                    consented=consent_state == "CONSENTED",
+                    actor_id="system_seed",
+                    reason=f"Synthetic fixture consent state: {consent_state}",
+                )
+
+        # Seed candidate-site assessments from the historical prototype fixture.
+        for site in data["candidate_sites"]:
+            policy_engine.register_site_assessment(
+                SiteCriteriaInput(
+                    site_id=site["site_id"],
+                    hazard_susceptibility_level=(
+                        "LOW" if site["hazard_safety_state"] == "PASS" else "HIGH"
+                    ),
+                    in_debris_flow_runout=False,
+                    title_clearance_status=(
+                        "VERIFIED_CLEAR" if site["legal_readiness_state"] == "PASS" else "UNKNOWN"
+                    ),
+                    forest_clearance_required=False,
+                    lean_season_tested_lpcd=(
+                        site["tested_water_lpcd"]
+                        if site["lean_season_water_state"] != "UNKNOWN"
+                        else None
+                    ),
+                    has_dry_season_yield_test=site["lean_season_water_state"] != "UNKNOWN",
+                    road_access_width_m=site["road_access_width_m"],
+                    distance_to_hospital_km=site["distance_to_hospital_km"],
+                    distance_to_school_km=site["distance_to_school_km"],
+                    dwelling_capacity=site["dwelling_capacity"],
+                    unit_plot_cents=site["unit_plot_cents"],
+                    evidence_freshness="HISTORICAL",
+                    evidence_reference="Synthetic Wayanad fixture; source-specific dates vary",
+                )
             )
     except Exception as e:
         print(f"Startup fixture seed notice: {e}")
@@ -397,7 +429,7 @@ def evaluate_exposure(req: ExposureRequest):
 
 @app.post("/api/v1/site/evaluate-gates", response_model=APIResponseEnvelope)
 def evaluate_site_gates(inp: SiteCriteriaInput):
-    report = policy_engine.evaluate_site(inp)
+    report = policy_engine.register_site_assessment(inp)
     return APIResponseEnvelope(data=report.model_dump())
 
 
@@ -410,14 +442,9 @@ def detect_discrepancies(parcel_id: str):
 @app.post("/api/v1/allocation/simulate-scenario", response_model=APIResponseEnvelope)
 def simulate_allocation():
     households = list(household_service._cases.values())
-    site_capacities = {
-        "SITE-ELSTONE-01": 250,
-        "SITE-NEDUMBALA-02": 140,
-    }
-    site_plot_cents = {
-        "SITE-ELSTONE-01": 7.0,
-        "SITE-NEDUMBALA-02": 6.0,
-    }
+    allocation_ready_sites = policy_engine.list_allocation_ready_sites()
+    site_capacities = {site.site_id: site.dwelling_capacity for site in allocation_ready_sites}
+    site_plot_cents = {site.site_id: site.unit_plot_cents for site in allocation_ready_sites}
     scenario = allocation_service.generate_scenario(
         scenario_id="SCEN-WYD-CURRENT",
         households=households,

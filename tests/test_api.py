@@ -65,6 +65,7 @@ def test_api_evaluate_site_gates():
     res = response.json()["data"]
     assert res["overall_gate_pass"] is True
     assert len(res["gate_results"]) == 4
+    assert res["decision_scope"] == "PROTOTYPE_ADVISORY_ONLY"
 
 
 def test_api_detect_discrepancies():
@@ -82,6 +83,29 @@ def test_api_simulate_allocation():
     assert scen["total_households"] == 4
     assert scen["assigned_count"] >= 3
     assert scen["is_simulation_only"] is True
+
+
+def test_api_allocation_uses_only_passing_sites_and_holds_pending_objections():
+    response = client.post("/api/v1/allocation/simulate-scenario")
+    assert response.status_code == 200
+    scenario = response.json()["data"]
+
+    assigned_site_ids = {
+        assignment["assigned_site_id"]
+        for assignment in scenario["assignments"]
+        if assignment["assigned_site_id"] is not None
+    }
+    assert assigned_site_ids == {"SITE-ELSTONE-01"}
+    assert "SITE-NEDUMBALA-02" not in scenario["site_utilization"]
+    assert "SITE-HIGH-SLOPE-03" not in scenario["site_utilization"]
+
+    held = next(
+        assignment
+        for assignment in scenario["assignments"]
+        if assignment["household_id"] == "HH-WYD-004"
+    )
+    assert held["assigned_site_id"] is None
+    assert "objection is pending" in held["explanation"]
 
 
 def test_api_bilingual_dossier():

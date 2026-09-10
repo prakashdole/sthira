@@ -24,6 +24,9 @@ class SiteCriteriaInput(BaseModel):
     distance_to_hospital_km: float
     distance_to_school_km: float
     dwelling_capacity: int
+    unit_plot_cents: float = 7.0
+    evidence_freshness: str = "UNSPECIFIED"
+    evidence_reference: Optional[str] = None
 
 
 class SiteEvaluationReport(BaseModel):
@@ -32,6 +35,9 @@ class SiteEvaluationReport(BaseModel):
     gate_results: List[HardGateResult]
     dimension_scores: List[DimensionScore]
     summary_advisory: str
+    evidence_freshness: str = "UNSPECIFIED"
+    evidence_reference: Optional[str] = None
+    decision_scope: str = "PROTOTYPE_ADVISORY_ONLY"
 
 
 class PolicyEngine:
@@ -42,6 +48,28 @@ class PolicyEngine:
 
     JJ_WATER_BASELINE_LPCD = 55.0  # Jal Jeevan Mission standard (RUL-030)
     MIN_ROAD_ACCESS_WIDTH_M = 3.66  # Standard single-lane emergency road width
+
+    def __init__(self):
+        self._registered_site_inputs: Dict[str, SiteCriteriaInput] = {}
+        self._registered_site_reports: Dict[str, SiteEvaluationReport] = {}
+
+    def register_site_assessment(self, inp: SiteCriteriaInput) -> SiteEvaluationReport:
+        """Evaluate and retain a candidate site for later advisory allocation."""
+        report = self.evaluate_site(inp)
+        self._registered_site_inputs[inp.site_id] = inp
+        self._registered_site_reports[inp.site_id] = report
+        return report
+
+    def get_site_assessment(self, site_id: str) -> Optional[SiteEvaluationReport]:
+        return self._registered_site_reports.get(site_id)
+
+    def list_allocation_ready_sites(self) -> List[SiteCriteriaInput]:
+        """Return only sites whose complete mandatory gate set currently passes."""
+        return [
+            self._registered_site_inputs[site_id]
+            for site_id, report in self._registered_site_reports.items()
+            if report.overall_gate_pass
+        ]
 
     def evaluate_omega_score(self, *args, **kwargs):
         """Strict enforcement of RUL-035."""
@@ -229,6 +257,8 @@ class PolicyEngine:
             gate_results=gate_results,
             dimension_scores=dimensions,
             summary_advisory=summary,
+            evidence_freshness=inp.evidence_freshness,
+            evidence_reference=inp.evidence_reference,
         )
 
 
