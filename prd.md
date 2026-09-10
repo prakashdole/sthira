@@ -1,5 +1,5 @@
 ---
-title: PUNARVAS-AI Product Requirements Document
+title: Sthira Product Requirements Document
 document_id: PUN-PRD
 version: 1.2
 status: Baseline for implementation
@@ -9,17 +9,17 @@ owner: Product owner with State/District programme authority
 normative_scope: Product purpose, users, outcomes, scope, workflows, and product acceptance
 ---
 
-# PUNARVAS-AI Product Requirements Document
+# Sthira Product Requirements Document
 
 ## 1. Document boundary
 
 This document defines **why the product exists, who it serves, what outcomes it must enable, and what is in or out of scope**. Measurable technical requirements are in [trd.md](./trd.md), system composition is in [architecture.md](./architecture.md), binding domain constraints are in [rules.md](./rules.md), feature-level acceptance is in [feature.md](./feature.md), and mathematical methods are classified in [equations.md](./equations.md). Parameters, evidence gaps, and unresolved policy choices are controlled in [parameters.md](./parameters.md), [source-register.md](./source-register.md), and [open-decisions.md](./open-decisions.md).
 
-PUNARVAS-AI is advisory decision-support software. It is not a legal title system, hazard-certification authority, allocation authority, or substitute for field, legal, hydrological, social, or geotechnical review.
+Sthira is advisory decision-support software. It is not a legal title system, hazard-certification authority, allocation authority, or substitute for field, legal, hydrological, social, or geotechnical review.
 
 ## 2. Product summary
 
-PUNARVAS-AI helps Indian public authorities plan **proactive and permanent relocation from disaster-prone areas**. It brings hazard evidence, settlement exposure, land records, observed occupation, legal interests, field verification, water and infrastructure feasibility, household needs, livelihood fit, preferences, approvals, objections, and audit history into one governed workflow.
+Sthira helps Indian public authorities plan **proactive and permanent relocation from disaster-prone areas**. It brings hazard evidence, settlement exposure, land records, observed occupation, legal interests, field verification, water and infrastructure feasibility, household needs, livelihood fit, preferences, approvals, objections, and audit history into one governed workflow.
 
 The product addresses the gap between an available hazard map and an implementable, fair, reviewable relocation programme. It does not attempt to predict every disaster or run real-time response operations.
 
@@ -200,7 +200,7 @@ The pilot must use Wayanad as a **reference and validation case**, not as a sour
 
 ## 11. Explicit exclusions
 
-PUNARVAS-AI will not include:
+Sthira will not include:
 
 - live emergency command, seismic/rainfall command HUDs, evacuation routing, convoy routing, airdrop, ration, shelter, or helicopter logistics;
 - a civilian self-evacuation navigator;
@@ -243,4 +243,4 @@ The user approved Wayanad and the production-oriented documentation baseline on 
 10. [UNDRR disaster-risk terminology](https://www.undrr.org/terminology/disaster-risk)
 11. [Jal Jeevan Mission service level](https://jaljeevanmission.gov.in/about_jjm)
 12. [Digital Personal Data Protection Rules, 2025](https://www.meity.gov.in/documents/act-and-policies/digital-personal-data-protection-rules-2025-gDOxUjMtQWa)
-13. [PUNARVAS-AI Evidence and Source Register](./source-register.md)
+13. [Sthira Evidence and Source Register](./source-register.md)

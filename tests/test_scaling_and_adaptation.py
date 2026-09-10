@@ -4,16 +4,16 @@ Normative Reference: phases.md §7 & §8, DEC-036, DEC-037, rules.md (RUL-017, R
 """
 
 import pytest
-from punarvas.core.contracts import GeographyScope, UserContext
-from punarvas.core.enums import RoleType
-from punarvas.core.errors import UnauthorizedGeographyAccessError
+from sthira.core.contracts import GeographyScope, UserContext
+from sthira.core.enums import RoleType
+from sthira.core.errors import UnauthorizedGeographyAccessError
 
-from punarvas.modules.scaling import (
+from sthira.modules.scaling import (
     DistrictProfile,
     district_onboarding_service,
     statewide_oversight_service,
 )
-from punarvas.modules.adaptation import (
+from sthira.modules.adaptation import (
     StateTenantPackage,
     multi_state_adapter_service,
 )

@@ -1,5 +1,5 @@
 ---
-title: PUNARVAS-AI Durable Project Memory
+title: Sthira Durable Project Memory
 document_id: PUN-MEMORY
 version: 1.2
 status: Current context summary
@@ -9,11 +9,11 @@ owner: Product owner
 normative_scope: Compact orientation and update protocol; links to normative source documents
 ---
 
-# PUNARVAS-AI Durable Project Memory
+# Sthira Durable Project Memory
 
 ## 1. Read this first
 
-PUNARVAS-AI is a **production-oriented, government decision-support system for proactive permanent relocation from disaster-prone areas**. The reference pilot is Wayanad, Kerala.
+Sthira is a **production-oriented, government decision-support system for proactive permanent relocation from disaster-prone areas**. The reference pilot is Wayanad, Kerala.
 
 It is not a live emergency-command platform and cannot itself establish title, declare an official hazard zone, select final beneficiaries, acquire land, force relocation, approve public funds, or bypass government authority.
 
@@ -123,7 +123,7 @@ Do not split business modules into microservices without meeting a review trigge
 - Prefer CHIRPS v3 for a new integration. SoilGrids REST is not a dependency while paused; use reviewed WCS/files only for optional soil context. CARTO/MapTiler/public OSM tiles require explicit key/license/offline review.
 - NISAR is a specialist optional input; its availability does not restore raw InSAR to baseline scope. GRD/RTC, DEM/DSM, SoilGrids, footprints, and indices cannot supply the field/legal facts they do not measure.
 - Kerala's Vulnerability Linked Relocation Scheme provides an important voluntary/self-relocation pathway precedent; current scheme amounts and applicability must come from the effective order/page, not code.
-- Kerala has an approved participatory Local Self Government Disaster Management Plan template. PUNARVAS-AI populates evidence/annexes but does not replace Gram/Ward Sabha, working-group, technical, DPC, or DDMA steps.
+- Kerala has an approved participatory Local Self Government Disaster Management Plan template. Sthira populates evidence/annexes but does not replace Gram/Ward Sabha, working-group, technical, DPC, or DDMA steps.
 - The Wayanad pilot begins in shadow mode and may use official outputs only after PH-3 authority gates.
 
 ## 8. Legal and evidence corrections
@@ -139,7 +139,7 @@ Do not split business modules into microservices without meeting a review trigge
 - UNDRR's hazard/exposure/vulnerability/capacity language is conceptual, not approval of one exact formula.
 - JJM's 55 LPCD is a service baseline, not sustainable-source proof.
 - Scheme eligibility/funding and relocation need are independent; an owner-only or otherwise inapplicable scheme cannot erase assessed need.
-- GIGW 3.0 references WCAG 2.1 AA; PUNARVAS-AI deliberately targets the higher WCAG 2.2 AA baseline.
+- GIGW 3.0 references WCAG 2.1 AA; Sthira deliberately targets the higher WCAG 2.2 AA baseline.
 
 ## 9. Data and privacy posture
 

@@ -10,21 +10,21 @@ Covers:
 """
 
 import pytest
-from punarvas.core.contracts import GeographyScope, UserContext, SourceMetadata, GeoPoint
-from punarvas.core.enums import RoleType, GateState, ConsentPurpose, RelocationPathway, SourceActivationState
-from punarvas.core.errors import (
+from sthira.core.contracts import GeographyScope, UserContext, SourceMetadata, GeoPoint
+from sthira.core.enums import RoleType, GateState, ConsentPurpose, RelocationPathway, SourceActivationState
+from sthira.core.errors import (
     AuthorityBypassError,
     UnauthorizedGeographyAccessError,
     OutOfCoverageError,
     MasterScoreProhibitedError,
 )
 
-from punarvas.modules.programme import ProgrammeRecord, programme_service
-from punarvas.modules.catalog import catalog_service
-from punarvas.modules.hazard import HazardLayer, hazard_service
-from punarvas.modules.household import HouseholdCase, household_service
-from punarvas.modules.policy import SiteCriteriaInput, policy_engine
-from punarvas.modules.security import DataMinimizationValidator, security_service
+from sthira.modules.programme import ProgrammeRecord, programme_service
+from sthira.modules.catalog import catalog_service
+from sthira.modules.hazard import HazardLayer, hazard_service
+from sthira.modules.household import HouseholdCase, household_service
+from sthira.modules.policy import SiteCriteriaInput, policy_engine
+from sthira.modules.security import DataMinimizationValidator, security_service
 
 
 def test_programme_registration_and_jurisdiction():

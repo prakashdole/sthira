@@ -2,10 +2,10 @@
 
 from fastapi.testclient import TestClient
 
-from punarvas.api.app import app
-from punarvas.core.identity import PROTOTYPE_PASSWORD, get_prototype_user, issue_access_token
-from punarvas.core.outbox import OutboxStatus, TransactionalOutbox
-from punarvas.modules.live_ops.service import degraded_mode_controller, step_up_auth_manager
+from sthira.api.app import app
+from sthira.core.identity import PROTOTYPE_PASSWORD, get_prototype_user, issue_access_token
+from sthira.core.outbox import OutboxStatus, TransactionalOutbox
+from sthira.modules.live_ops.service import degraded_mode_controller, step_up_auth_manager
 from tests.authutil import authed_client, issue_step_up
 
 

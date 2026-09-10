@@ -1,5 +1,5 @@
 /**
- * PUNARVAS-AI Accessible Bilingual Frontend Engine.
+ * Sthira Accessible Bilingual Frontend Engine.
  * Conforms to WCAG 2.2 AA / GIGW 3.0 with full English / Malayalam parity.
  */
 
@@ -8,7 +8,7 @@ const API_BASE = window.location.origin;
 const _nativeFetch = window.fetch.bind(window);
 window.fetch = function(url, opts) {
   opts = opts || {};
-  const token = sessionStorage.getItem('punarvas_token');
+  const token = sessionStorage.getItem('sthira_token');
   if (token && String(url).startsWith(API_BASE)) {
     if (opts.headers instanceof Headers) {
       opts.headers.set('Authorization', 'Bearer ' + token);
@@ -21,7 +21,7 @@ window.fetch = function(url, opts) {
 
 function currentSessionUser() {
   try {
-    return JSON.parse(sessionStorage.getItem('punarvas_user') || 'null');
+    return JSON.parse(sessionStorage.getItem('sthira_user') || 'null');
   } catch (e) {
     return null;
   }
@@ -46,14 +46,14 @@ async function loginPrototype() {
     });
     const json = await res.json();
     if (!res.ok) {
-      sessionStorage.removeItem('punarvas_token');
-      sessionStorage.removeItem('punarvas_user');
+      sessionStorage.removeItem('sthira_token');
+      sessionStorage.removeItem('sthira_user');
       if (status) status.textContent = json.detail || 'Login failed';
       renderSessionStatus();
       return;
     }
-    sessionStorage.setItem('punarvas_token', json.data.access_token);
-    sessionStorage.setItem('punarvas_user', JSON.stringify(json.data.user));
+    sessionStorage.setItem('sthira_token', json.data.access_token);
+    sessionStorage.setItem('sthira_user', JSON.stringify(json.data.user));
     const pwd = document.getElementById('login-password');
     if (pwd) pwd.value = '';
     if (status) status.textContent = '';
@@ -64,8 +64,8 @@ async function loginPrototype() {
 }
 
 function logoutPrototype() {
-  sessionStorage.removeItem('punarvas_token');
-  sessionStorage.removeItem('punarvas_user');
+  sessionStorage.removeItem('sthira_token');
+  sessionStorage.removeItem('sthira_user');
   renderSessionStatus();
 }
 
@@ -73,7 +73,7 @@ let currentLang = 'en';
 
 const i18n = {
   en: {
-    brand_title: "PUNARVAS-AI (പുനർവാസ്-എഐ)",
+    brand_title: "Sthira (പുനർവാസ്-എഐ)",
     brand_subtitle: "Proactive Permanent Relocation Decision Support — Wayanad Pilot",
     advisory_banner: "ADVISORY DECISION SUPPORT ONLY — All outputs require DDMA review and authorized human approval.",
     advisory_banner_ml: "ഉപദേശക സ്വഭാവമുള്ളത് മാത്രം. ഔദ്യോഗിക അംഗീകാരത്തിന് വിധേയം.",
@@ -104,7 +104,7 @@ const i18n = {
     loading: "Loading verified records...",
   },
   ml: {
-    brand_title: "പുനർവാസ്-എഐ (PUNARVAS-AI)",
+    brand_title: "പുനർവാസ്-എഐ (Sthira)",
     brand_subtitle: "ശാശ്വത പുനരധിവാസ ഉപദേശക സംവിധാനം — വയനാട് പൈലറ്റ്",
     advisory_banner: "ഉപദേശക സ്വഭാവമുള്ളത് മാത്രം. ഔദ്യോഗിക ഗസറ്റ് വിജ്ഞാപനമോ ഉത്തരവോ അല്ല.",
     advisory_banner_ml: "അന്തിമ തീരുമാനങ്ങൾ ഡി.ഡി.എം.എ / സർക്കാരിൽ നിക്ഷിപ്തം.",
@@ -135,7 +135,7 @@ const i18n = {
     loading: "വിവരങ്ങൾ ശേഖരിക്കുന്നു...",
   },
   hi: {
-    brand_title: "पुनर्वास-एआई (PUNARVAS-AI)",
+    brand_title: "पुनर्वास-एआई (Sthira)",
     brand_subtitle: "सक्रिय स्थायी पुनर्वास निर्णय सहायता प्रणाली",
     advisory_banner: "केवल सलाहकारी निर्णय सहायता — सभी परिणामों के लिए डीडीएमए समीक्षा और अधिकृत मानवीय अनुमोदन अनिवार्य है।",
     advisory_banner_ml: "राजपत्रित अधिसूचना या अंतिम सरकारी आदेश नहीं।",
@@ -2542,7 +2542,7 @@ async function generateDecisionSummaryDemo() {
         solver_tolerances: { "mip_gap": 0.01, "time_limit_sec": 60.0 },
         approval_order_id: "GO(MS)-DMD-2025-04",
         statutory_gazette_id: "GAZ-KL-WYD-2025-102",
-        objection_token_refs: ["RCPT-PUNARVAS-OBJ-001"]
+        objection_token_refs: ["RCPT-Sthira-OBJ-001"]
       })
     });
     const json = await res.json();
@@ -3785,10 +3785,10 @@ async function testCoordinatedRestoreDemo(scenario) {
         backup_id: "BK-PROD-2026-09-09-001",
         snapshot_timestamp: new Date().toISOString(),
         database_records: [
-          { record_id: "REC-1", scan_blob_uri: "s3://punarvas-vault/scans/p1.pdf" }
+          { record_id: "REC-1", scan_blob_uri: "s3://sthira-vault/scans/p1.pdf" }
         ],
         object_blobs: {
-          "s3://punarvas-vault/scans/p1.pdf": "sha256-4a9b2c8f1029384756"
+          "s3://sthira-vault/scans/p1.pdf": "sha256-4a9b2c8f1029384756"
         },
         audit_checkpoints: [
           { checkpoint_id: "CP-ROOT-001", checkpoint_hash: "sha256-root-genesis-verified" }
@@ -3801,7 +3801,7 @@ async function testCoordinatedRestoreDemo(scenario) {
         backup_id: "BK-CORRUPT-BLOB-002",
         snapshot_timestamp: new Date().toISOString(),
         database_records: [
-          { record_id: "REC-1", scan_blob_uri: "s3://punarvas-vault/scans/missing.pdf" }
+          { record_id: "REC-1", scan_blob_uri: "s3://sthira-vault/scans/missing.pdf" }
         ],
         object_blobs: {},
         audit_checkpoints: [
@@ -3888,7 +3888,7 @@ async function generateCertInIncidentDemo() {
       severity: "HIGH",
       impacted_assets: ["API Gateway Route /api/v1/parcels", "Vector Tile Cache"],
       remedial_measures: ["Automated IP quarantine", "Connection pool context reset", "Rate limits tightened"],
-      reporting_poc: "ciso@punarvas.kerala.gov.in"
+      reporting_poc: "ciso@sthira.kerala.gov.in"
     };
     const res = await fetch(`${API_BASE}/api/v1/resilience/cert-in/incident`, {
       method: 'POST',
@@ -3932,7 +3932,7 @@ async function loadReleaseAssuranceReportDemo() {
       resultDiv.innerHTML = `
         <div style="padding: 1rem; background: #f0fdf4; border: 1px solid #86efac; border-radius: 6px;">
           <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h4 style="margin: 0; color: #166534;">PUNARVAS-AI Release Assurance Evidence Matrix (NFR-035, trd.md §9)</h4>
+            <h4 style="margin: 0; color: #166534;">Sthira Release Assurance Evidence Matrix (NFR-035, trd.md §9)</h4>
             <span class="badge badge-pass" style="font-size: 0.9em; padding: 0.35rem 0.75rem;">${d.release_status}</span>
           </div>
           <div style="margin-top: 0.75rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; font-size: 0.9em;">

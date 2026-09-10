@@ -7,9 +7,9 @@ import time
 import pytest
 from datetime import datetime, timezone
 from tests.authutil import authed_client
-from punarvas.core.contracts import UserContext
-from punarvas.core.enums import AuthorityState, RoleType
-from punarvas.modules.live_ops import (
+from sthira.core.contracts import UserContext
+from sthira.core.enums import AuthorityState, RoleType
+from sthira.modules.live_ops import (
     StepUpAuthManager,
     BreakGlassManager,
     DisasterRecoveryHarness,
@@ -23,7 +23,7 @@ from punarvas.modules.live_ops import (
     manual_continuity_reconciler,
     rollback_controller,
 )
-from punarvas.modules.reconstruction import (
+from sthira.modules.reconstruction import (
     CompletionMilestoneType,
     DeliveryCompletionTracker,
     DecisionReconstructionEngine,
@@ -97,8 +97,8 @@ def test_dr_restore_consistency_checks():
 
     expected_db_hash = "a" * 64
     obj_inv = {
-        "s3://punarvas-vault/gsi_lsm_2022.tif": "b" * 64,
-        "s3://punarvas-vault/signed_order_001.pdf": "c" * 64,
+        "s3://sthira-vault/gsi_lsm_2022.tif": "b" * 64,
+        "s3://sthira-vault/signed_order_001.pdf": "c" * 64,
     }
 
     # 1. Matching hashes and complete inventory -> PASS
@@ -114,7 +114,7 @@ def test_dr_restore_consistency_checks():
     assert len(res.failure_reasons) == 0
 
     # 2. Missing object store file -> FAIL (authoritative restart blocked per AT-27)
-    corrupted_objects = {"s3://punarvas-vault/gsi_lsm_2022.tif": "b" * 64}  # pdf missing
+    corrupted_objects = {"s3://sthira-vault/gsi_lsm_2022.tif": "b" * 64}  # pdf missing
     res_fail = harness.verify_restore_consistency(
         db_snapshot_hash=expected_db_hash,
         actual_db_hash=expected_db_hash,

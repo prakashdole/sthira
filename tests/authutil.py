@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
-from punarvas.api.app import app
-from punarvas.core.identity import get_prototype_user, issue_access_token
-from punarvas.core.contracts import UserContext
-from punarvas.modules.live_ops.service import step_up_auth_manager
+from sthira.api.app import app
+from sthira.core.identity import get_prototype_user, issue_access_token
+from sthira.core.contracts import UserContext
+from sthira.modules.live_ops.service import step_up_auth_manager
 
 
 def authed_client(username: str = "collector.wayanad") -> TestClient:

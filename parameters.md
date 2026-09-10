@@ -1,5 +1,5 @@
 ---
-title: PUNARVAS-AI Parameter and Policy Registry
+title: Sthira Parameter and Policy Registry
 document_id: PUN-PARAMETERS
 version: 1.2
 status: Controlled baseline; programme values require approval
@@ -9,7 +9,7 @@ owner: Policy owner with relevant domain steward
 normative_scope: Parameter provenance, units, validity, approval, and change control
 ---
 
-# PUNARVAS-AI Parameter and Policy Registry
+# Sthira Parameter and Policy Registry
 
 ## 1. Purpose
 

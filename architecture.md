@@ -1,5 +1,5 @@
 ---
-title: PUNARVAS-AI System Architecture
+title: Sthira System Architecture
 document_id: PUN-ARCH
 version: 1.2
 status: Production blueprint baseline
@@ -9,7 +9,7 @@ owner: Solution architect and technical product owner
 normative_scope: System decomposition, technology choices, data/runtime flows, trust boundaries, deployment, scaling, and failure design
 ---
 
-# PUNARVAS-AI System Architecture
+# Sthira System Architecture
 
 ## 1. Document boundary
 
@@ -42,7 +42,7 @@ flowchart LR
     IDP[Government identity provider]
     SIGN[Approved e-sign/signature service]
 
-    SYS[PUNARVAS-AI]
+    SYS[Sthira]
 
     HH -->|preferences, corrections, objections| SYS
     FIELD -->|offline observations and evidence| SYS
@@ -190,7 +190,7 @@ The database owns a transactional outbox. Any committed business change requirin
 Business facts use bitemporal semantics:
 
 - `valid_time` expresses when the fact applies in the real/programme world.
-- `system_time` expresses when PUNARVAS-AI stored or superseded it.
+- `system_time` expresses when Sthira stored or superseded it.
 - `version_id` pins the exact record used by an analysis or export.
 
 Source geometry and normalized/corrected geometry are distinct versions. Storage/display may use EPSG:4326 where suitable; metric operations use a reviewed projected CRS through explicit transformation. Derived geometry stores processing CRS and transformation lineage.

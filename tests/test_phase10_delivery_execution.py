@@ -4,9 +4,9 @@ Normative Reference: plan.md (#10), trd.md (§3.11, FR-063-FR-070), rules.md (RU
 """
 
 import pytest
-from punarvas.core.enums import FundingState, RelocationPathway
-from punarvas.core.errors import DefectsBlockCompletionError, UnservicedUnitHandoverError
-from punarvas.modules.reconstruction.delivery_tracker import (
+from sthira.core.enums import FundingState, RelocationPathway
+from sthira.core.errors import DefectsBlockCompletionError, UnservicedUnitHandoverError
+from sthira.modules.reconstruction.delivery_tracker import (
     DefectCategory,
     DefectSeverity,
     CaseDeliveryTracker,

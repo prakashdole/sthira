@@ -1,5 +1,5 @@
 ---
-title: PUNARVAS-AI Equation Registry
+title: Sthira Equation Registry
 document_id: PUN-EQUATIONS
 version: 1.1
 status: Controlled mathematical reference
@@ -9,7 +9,7 @@ owner: Policy owner and quantitative assurance lead
 normative_scope: Formula classification, mathematical contracts, limitations, provenance, and validation fixtures
 ---
 
-# PUNARVAS-AI Equation Registry
+# Sthira Equation Registry
 
 Prepared 8 September 2026 from the supplied mathematical handoff and source extract. This controlled project document is linked to [trd.md](./trd.md), [parameters.md](./parameters.md), [rules.md](./rules.md), and [changes.md](./changes.md).
 

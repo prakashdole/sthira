@@ -1,5 +1,5 @@
 ---
-title: PUNARVAS-AI Documentation and Assurance Plan
+title: Sthira Documentation and Assurance Plan
 document_id: PUN-PLAN
 version: 1.2
 status: Approved documentation baseline; implementation validation pending
@@ -9,7 +9,7 @@ owner: Product owner
 normative_scope: Documentation ownership, approved baseline, revision controls, and acceptance plan
 ---
 
-# PUNARVAS-AI Documentation and Assurance Plan
+# Sthira Documentation and Assurance Plan
 
 ## Summary
 
@@ -124,7 +124,7 @@ Corrections to preserve explicitly:
 
 ## Assumptions
 
-- Product name remains **PUNARVAS-AI**.
+- Product name remains **Sthira**.
 - Wayanad is the reference pilot; architecture remains configurable for other states.
 - Documentation is in English; the planned product is bilingual for the pilot.
 - The blueprint supports official decision-making but is not itself legal, cadastral, hydrological, or geotechnical certification.

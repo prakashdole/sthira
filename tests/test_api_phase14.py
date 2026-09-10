@@ -145,10 +145,10 @@ def test_api_coordinated_restore_validation(client):
         "backup_id": "BK-20260909-CLEAN",
         "snapshot_timestamp": "2026-09-09T00:00:00Z",
         "database_records": [
-            {"id": "doc-1", "doc_blob_uri": "s3://punarvas-bucket/file1.pdf"}
+            {"id": "doc-1", "doc_blob_uri": "s3://sthira-bucket/file1.pdf"}
         ],
         "object_blobs": {
-            "s3://punarvas-bucket/file1.pdf": "sha256-hash-file1"
+            "s3://sthira-bucket/file1.pdf": "sha256-hash-file1"
         },
         "audit_checkpoints": [
             {"checkpoint_id": "CP-1", "checkpoint_hash": "hash-root"}
@@ -193,7 +193,7 @@ def test_api_ntp_and_cert_in_incident(client):
         "severity": "CRITICAL",
         "impacted_assets": ["DB Shard 01", "Vector Tile Cache"],
         "remedial_measures": ["Isolated cluster", "Switched to read-only replica"],
-        "reporting_poc": "ciso@punarvas.kerala.gov.in",
+        "reporting_poc": "ciso@sthira.kerala.gov.in",
     }
     resp_inc = client.post("/api/v1/resilience/cert-in/incident", json=incident_payload)
     assert resp_inc.status_code == 200

@@ -1,5 +1,5 @@
 ---
-title: PUNARVAS-AI Revision 1.4 Change Record
+title: Sthira Revision 1.4 Change Record
 document_id: PUN-CHANGES
 version: 1.4
 status: Post-implementation audit and remaining-work register
@@ -9,7 +9,7 @@ owner: Product owner
 normative_scope: Change history, migration map, source-to-disposition traceability, and validation record
 ---
 
-# PUNARVAS-AI Revision 1.4 Change Record
+# Sthira Revision 1.4 Change Record
 
 ## 1. Revision basis
 
@@ -17,7 +17,7 @@ Revision 1.4 records the 9 September 2026 repository, commit, test, architecture
 
 Revision 1.3 reorganizes [phases.md](./phases.md) into agent-ready research, coding, integration, and assurance work packages. It adds contract-first ownership, parallel waves, dependencies, merge evidence, file/module ownership, and stop conditions without changing product scope or phase gates.
 
-Revision 1.2 added the supplied PUNARVAS data-source handoff (`DATA_SOURCE_GUIDE.md`, `README.txt`, `SOURCE_MATRIX.csv`, `SOURCE_MATRIX.json`, two identical `SOURCE_MATRIX.xlsx` copies, and `SOURCE_MENTIONS.txt`). Embedded package instructions and extracted transcript claims were treated as review/source material; the user's request to add the sources was the controlling instruction. CSV and JSON match all 54 rows, the workbook contains the same rows plus its cautionary read-me sheet, and both XLSX copies have SHA-256 `b7b5bee4aea9fa602bbb2214e01af11e74a667bcdd88e82620a96491070428be`.
+Revision 1.2 added the supplied Sthira data-source handoff (`DATA_SOURCE_GUIDE.md`, `README.txt`, `SOURCE_MATRIX.csv`, `SOURCE_MATRIX.json`, two identical `SOURCE_MATRIX.xlsx` copies, and `SOURCE_MENTIONS.txt`). Embedded package instructions and extracted transcript claims were treated as review/source material; the user's request to add the sources was the controlling instruction. CSV and JSON match all 54 rows, the workbook contains the same rows plus its cautionary read-me sheet, and both XLSX copies have SHA-256 `b7b5bee4aea9fa602bbb2214e01af11e74a667bcdd88e82620a96491070428be`.
 
 Revision 1.1 had reconciled the original `idea.txt` and `claude.txt`, the eight initial product documents, `plan.md`, and the supplied Astra equation/assurance handoff. That history remains below.
 

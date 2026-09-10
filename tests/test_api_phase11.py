@@ -133,7 +133,7 @@ def test_api_field_checklist_and_decision_summary(client):
         "solver_tolerances": {"mip_gap": 0.01, "time_limit_sec": 60.0},
         "approval_order_id": "ORD-GOV-2025-001",
         "statutory_gazette_id": "GAZ-KL-2025-01",
-        "objection_token_refs": ["RCPT-PUNARVAS-OBJ-010"],
+        "objection_token_refs": ["RCPT-Sthira-OBJ-010"],
     }
     res_dec = client.post("/api/v1/reporting/dossiers/decision-summary", json=dec_payload)
     assert res_dec.status_code == 200

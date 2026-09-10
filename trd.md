@@ -1,5 +1,5 @@
 ---
-title: PUNARVAS-AI Technical Requirements Document
+title: Sthira Technical Requirements Document
 document_id: PUN-TRD
 version: 1.2
 status: Baseline for implementation and verification
@@ -9,7 +9,7 @@ owner: Technical product owner and system assurance lead
 normative_scope: Functional requirements, interfaces, data contracts, non-functional requirements, and acceptance
 ---
 
-# PUNARVAS-AI Technical Requirements Document
+# Sthira Technical Requirements Document
 
 ## 1. Document boundary
 
@@ -152,7 +152,7 @@ No production personal or restricted geospatial data may be copied to a lower en
 | FR-066 | Funding records shall distinguish identified, applied, sanctioned, committed, released, received, spent, reconciled, and withdrawn amounts; prevent duplicate funding; and link sanctions, receipts, cost heads and milestone evidence. | Funding-state and duplicate test |
 | FR-067 | The system shall compute a versioned funding gap from eligible required cost and confirmed non-duplicate funding using E17, without treating announced budgets or applications as received funds. | Funding-gap fixture |
 | FR-068 | Delivery tracking shall separately record site/unit readiness, required functioning services, defects, household offer and acceptance, possession/handover, occupation, transition support and livelihood follow-up. | Incomplete-unit scenario |
-| FR-069 | If another system owns delivery or payment, PUNARVAS-AI shall record the accountable owner, external reference, last verified state/time, reconciliation method and unresolved discrepancy; handoff shall not be reported as completion. | External-handoff test |
+| FR-069 | If another system owns delivery or payment, Sthira shall record the accountable owner, external reference, last verified state/time, reconciliation method and unresolved discrepancy; handoff shall not be reported as completion. | External-handoff test |
 | FR-070 | Allocation approval, notification, funding sanction, handover and verified completion shall remain distinct states and dates unless a configured legal workflow explicitly combines specified acts. | Independent-state test |
 
 ### 3.12 Formula, parameter, and compliance control

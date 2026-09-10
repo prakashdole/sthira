@@ -1,5 +1,5 @@
 """
-Tests for PUNARVAS-AI FastAPI REST Endpoints.
+Tests for Sthira FastAPI REST Endpoints.
 """
 
 from tests.authutil import authed_client
@@ -135,7 +135,7 @@ def test_api_agency_import_e_rekha():
 
 def test_api_capacity_reserve_and_conflict():
     # Configure initial limits
-    from punarvas.modules.allocation import capacity_reservation_ledger
+    from sthira.modules.allocation import capacity_reservation_ledger
     capacity_reservation_ledger.configure_capacities(
         site_dwellings={"SITE-API-01": 50},
         site_land_cents={"SITE-API-01": 350.0},

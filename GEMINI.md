@@ -1,4 +1,4 @@
-# PUNARVAS-AI Agent Standing Instructions & Memory (GEMINI.md)
+# Sthira Agent Standing Instructions & Memory (GEMINI.md)
 
 This file contains persistent standing instructions for the coding agent. It must be respected across all turns and tasks.
 

@@ -6,26 +6,26 @@ Normative Reference: plan.md (#9), trd.md (§3.8, §3.11, §5.6, FR-047-FR-052, 
 from datetime import datetime, timezone, timedelta
 import pytest
 
-from punarvas.core.contracts import GeographyScope, UserContext
-from punarvas.core.enums import AuthorityState, DecisionState, RoleType
-from punarvas.core.errors import (
+from sthira.core.contracts import GeographyScope, UserContext
+from sthira.core.enums import AuthorityState, DecisionState, RoleType
+from sthira.core.errors import (
     ApprovalConditionUnmetError,
     EntityFrozenByObjectionError,
     ReservationConflictError,
     UnauthorizedActionError,
 )
-from punarvas.modules.governance.objections_service import (
+from sthira.modules.governance.objections_service import (
     ObjectionCategory,
     ObjectionFilingChannel,
     ObjectionAdmissibility,
     objections_service,
 )
-from punarvas.modules.governance.approval_service import (
+from sthira.modules.governance.approval_service import (
     ApprovalCondition,
     ApprovalConditionType,
     approval_service,
 )
-from punarvas.modules.allocation.reservation_ledger import (
+from sthira.modules.allocation.reservation_ledger import (
     ReservationStatus,
     capacity_ledger,
 )
@@ -69,7 +69,7 @@ def test_objection_filing_and_receipt_token():
     )
 
     assert case.objection_id.startswith("OBJ-")
-    assert case.receipt_token.startswith("RCPT-PUNARVAS-OBJ-")
+    assert case.receipt_token.startswith("RCPT-Sthira-OBJ-")
     assert case.state == DecisionState.OBJECTION_FILED
     assert case.admissibility == ObjectionAdmissibility.PENDING_REVIEW
     # Verify entity is recorded as frozen

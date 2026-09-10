@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "punarvas"
+name = "sthira"
 version = "1.0.0"
-description = "PUNARVAS-AI: Proactive Permanent Relocation Decision Support System"
+description = "Sthira: Proactive Permanent Relocation Decision Support System"
 readme = "prd.md"
 requires-python = ">=3.10"
 dependencies = [

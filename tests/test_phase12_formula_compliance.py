@@ -5,7 +5,7 @@ equations.md, parameters.md, DEC-043.
 """
 
 import pytest
-from punarvas.modules.policy import (
+from sthira.modules.policy import (
     FormulaClassification,
     RegistryState,
     StatuteApplicabilityState,

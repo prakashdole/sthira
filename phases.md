@@ -1,5 +1,5 @@
 ---
-title: PUNARVAS-AI Delivery and Rollout Phases
+title: Sthira Delivery and Rollout Phases
 document_id: PUN-PHASES
 version: 1.3
 status: Baseline delivery plan
@@ -9,7 +9,7 @@ owner: Programme director and product owner
 normative_scope: Delivery sequence, entry/exit gates, evidence, rollout, and stop conditions
 ---
 
-# PUNARVAS-AI Delivery and Rollout Phases
+# Sthira Delivery and Rollout Phases
 
 ## 1. Rollout principles
 
@@ -156,7 +156,7 @@ FEAT-006–025 in shadow/rehearsal mode, including a mock or de-identified FEAT-
 
 ### Objectives
 
-- Use PUNARVAS-AI for a bounded authorized workflow while retaining human decision authority and parallel contingency procedures.
+- Use Sthira for a bounded authorized workflow while retaining human decision authority and parallel contingency procedures.
 - Prove operational reliability, remedy, audit, public disclosure, and organizational adoption over at least six months.
 
 ### Controls
@@ -174,7 +174,7 @@ FEAT-006–025 in shadow/rehearsal mode, including a mock or de-identified FEAT-
 - Affected households successfully use assisted correction/objection pathways; notices and remedies are evidenced.
 - No material decision was presented as official before authorization; no unresolved unauthorized disclosure occurred.
 - Programme owners approve quantified outcomes, limitations, staffing model, support cost, and Kerala expansion proposal.
-- Required delivery/completion data are either verified in PUNARVAS-AI or reconciled from a named accountable external system; approval is not counted as completed relocation.
+- Required delivery/completion data are either verified in Sthira or reconciled from a named accountable external system; approval is not counted as completed relocation.
 
 ### Rollback
 
@@ -398,10 +398,10 @@ For every agent prompt, include:
 
 ## 13. References
 
-1. [PUNARVAS-AI PRD](./prd.md)
-2. [PUNARVAS-AI TRD](./trd.md)
-3. [PUNARVAS-AI Rules](./rules.md)
-4. [PUNARVAS-AI Feature Catalog](./feature.md)
+1. [Sthira PRD](./prd.md)
+2. [Sthira TRD](./trd.md)
+3. [Sthira Rules](./rules.md)
+4. [Sthira Feature Catalog](./feature.md)
 5. [Kerala Local Self Government DM Plans](https://sdma.kerala.gov.in/local-self-government-dm-plans/)
 6. [KSDMA Wayanad reports](https://sdma.kerala.gov.in/reports-landslides-2024/)
 7. [Open Decisions](./open-decisions.md)

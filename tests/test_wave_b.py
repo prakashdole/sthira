@@ -8,14 +8,14 @@ Covers:
 """
 
 import pytest
-from punarvas.core.contracts import GeoPoint
-from punarvas.core.enums import DiscrepancyType, RelocationPathway, DecisionState, FundingState
+from sthira.core.contracts import GeoPoint
+from sthira.core.enums import DiscrepancyType, RelocationPathway, DecisionState, FundingState
 
-from punarvas.modules.land_truth import ParcelRecord, land_truth_service
-from punarvas.modules.household import HouseholdCase
-from punarvas.modules.allocation import AllocationService, AllocationValidator, allocation_service
-from punarvas.modules.governance import SchemeMilestoneTracker, governance_service
-from punarvas.modules.reporting import reporting_service
+from sthira.modules.land_truth import ParcelRecord, land_truth_service
+from sthira.modules.household import HouseholdCase
+from sthira.modules.allocation import AllocationService, AllocationValidator, allocation_service
+from sthira.modules.governance import SchemeMilestoneTracker, governance_service
+from sthira.modules.reporting import reporting_service
 
 
 def test_land_truth_discrepancy_detection():
@@ -166,7 +166,7 @@ def test_reporting_bilingual_dossier_and_public_projection():
     )
     html = report["html"]
     # Check English and Malayalam parallel content (RUL-055)
-    assert "PUNARVAS-AI Permanent Relocation Advisory Dossier" in html
+    assert "Sthira Permanent Relocation Advisory Dossier" in html
     assert "പുനർവാസ്-എഐ ശാശ്വത പുനരധിവാസ ഉപദേശക രേഖ" in html
     assert "ശ്രദ്ധിക്കുക" in html
     assert len(report["checksum"]) == 64

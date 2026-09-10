@@ -23,41 +23,41 @@ Plus:
 """
 
 import pytest
-from punarvas.core.contracts import GeoPoint
-from punarvas.core.enums import GateState, RelocationPathway, DecisionState, DiscrepancyType
-from punarvas.core.errors import ReservationConflictError
+from sthira.core.contracts import GeoPoint
+from sthira.core.enums import GateState, RelocationPathway, DecisionState, DiscrepancyType
+from sthira.core.errors import ReservationConflictError
 
-from punarvas.modules.hazard import HazardLayer, hazard_service
-from punarvas.modules.policy import (
+from sthira.modules.hazard import HazardLayer, hazard_service
+from sthira.modules.policy import (
     SiteCriteriaInput,
     policy_engine,
     sensitivity_analysis_engine,
 )
-from punarvas.modules.land_truth import (
+from sthira.modules.land_truth import (
     ParcelRecord,
     land_truth_service,
     agency_import_adapter,
 )
-from punarvas.modules.household import HouseholdCase
-from punarvas.modules.allocation import (
+from sthira.modules.household import HouseholdCase
+from sthira.modules.allocation import (
     allocation_service,
     capacity_reservation_ledger,
 )
-from punarvas.modules.field import (
+from sthira.modules.field import (
     field_sync_service,
     FieldSurveySubmission,
     WaterFieldMeasurement,
     GeotechnicalMeasurement,
     DeviceStatus,
 )
-from punarvas.modules.governance import (
+from sthira.modules.governance import (
     governance_service,
     SchemeMilestoneTracker,
 )
-from punarvas.modules.reporting import (
+from sthira.modules.reporting import (
     reporting_service,
 )
-from punarvas.modules.evaluation import (
+from sthira.modules.evaluation import (
     evaluation_harness_service,
     CaseShadowEvaluation,
     EvaluationTargetStatus,
@@ -334,7 +334,7 @@ def test_scenario_9_overdue_workflow_recommends_escalation():
     Scenario 9: SLA breached on administrative casework.
     System logs advisory recommendation, but does NOT bypass DDMA statutory jurisdiction (RUL-006 / DEC-016).
     """
-    from punarvas.core.audit import global_audit_ledger
+    from sthira.core.audit import global_audit_ledger
 
     # Log an overdue task recommendation event
     event = global_audit_ledger.log(

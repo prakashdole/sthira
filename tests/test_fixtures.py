@@ -2,7 +2,7 @@
 Tests for Synthetic Wayanad Fixtures & Spikes (C0-01).
 """
 
-from punarvas.spikes import (
+from sthira.spikes import (
     load_wayanad_fixture,
     load_idukki_fixture,
     load_alappuzha_fixture,

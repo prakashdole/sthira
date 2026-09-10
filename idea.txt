@@ -1,4 +1,4 @@
-# System Architecture & Technical Specification: PUNARVAS-AI
+# System Architecture & Technical Specification: Sthira
 
 *(Proactive Uninhabitable-Zone Network Assessment & Relocation Viability Analysis System)*
 
@@ -296,7 +296,7 @@ import httpx
 from datetime import datetime, timezone
 import asyncpg
 
-DATABASE_URL = "postgresql://punarvas_admin:secure_pass@localhost:5432/punarvas_db"
+DATABASE_URL = "postgresql://sthira_admin:secure_pass@localhost:5432/sthira_db"
 USGS_SEISMIC_FEED = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson"
 
 async def process_incoming_seismic_telemetry():
@@ -604,7 +604,7 @@ async def process_voice_command(audio_file_path: str) -> dict:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│ PUNARVAS-AI | High-Command Disaster Decision Support System               [MODE: STRATEGIC / TACTICAL]│
+│ Sthira | High-Command Disaster Decision Support System               [MODE: STRATEGIC / TACTICAL]│
 ├─────────────────────────┬────────────────────────────────────────────────────┬───────────────────┤
 │ LEFT PANEL: CONTROLS    │ CENTER VIEWPORT: 3D MAP LIBRE / CESIUM GLOBE       │ RIGHT PANEL: HUD  │
 │                         │                                                    │                   │
@@ -700,7 +700,7 @@ State Disaster Management Authorities require auditable reports to release alloc
 Use this file and folder structure when deploying your coding agent:
 
 ```text
-punarvas-ai/
+sthira-ai/
 ├── backend/
 │   ├── app/
 │   │   ├── __init__.py
@@ -1206,7 +1206,7 @@ During an active disaster, an Emergency Operations Center is deafeningly loud.
 When presenting to the jury, do not wait for them to raise these flaws. **Address them upfront**:
 
 > *"Most disaster systems fail because they treat flat land as safe land, and static maps as real-time truth. In the 2024 Wayanad tragedy, hundreds died on flat terrain because standard models ignored upstream channelized debris runouts. In Joshimath, relocations failed because candidate land sat on unstable debris fans and severed economic lifelines.*
-> *PUNARVAS-AI was built specifically to solve these blind spots: we integrate two-phase debris-flow runout modeling, hydro-mechanical rainfall triggers that bypass radar cloud cover, subsurface bedrock validation, and livelihood-distance constraints."*
+> *Sthira was built specifically to solve these blind spots: we integrate two-phase debris-flow runout modeling, hydro-mechanical rainfall triggers that bypass radar cloud cover, subsurface bedrock validation, and livelihood-distance constraints."*
 
 Addressing these failure modes preemptively signals to evaluators that you have conducted thorough domain research and built a system designed for genuine field survival.
 
@@ -1420,7 +1420,7 @@ $$\Delta \tau = \text{Added Civil Surcharge Load} - \text{Loss of Root Cohesion 
                                                        ▼
                                             [ ENTIRE CONVOY TRAPPED ]
                                                        │
-    [ PUNARVAS Geometric Filter ] ─────────────────────┴──────────────────────────────────────┐
+    [ Sthira Geometric Filter ] ─────────────────────┴──────────────────────────────────────┐
     • Carriageway Width: FAIL (< 3.5m)                                                        │
     • Axle Load Capacity: FAIL (< 10 Tons)                                                    ▼
     • RESULT: DIVERTS TO LIGHT 4WD TRAIL / FLAGS ROTARY-WING AIR EXTRACTION ONLY ◄────────────┘
@@ -1493,7 +1493,7 @@ $$\text{Emergency Supply Pack} = \text{High-Calorie Nut-Paste/MREs} + \text{Chlo
 
 When presenting to evaluators, do not wait for them to poke holes in your platform. Openly present this **System Vulnerability & Mitigation Matrix** to demonstrate that you have thoroughly engineered past standard theoretical assumptions:
 
-| Theoretical Vulnerability | Real-World Failure Scenario | PUNARVAS-AI Engineering Solution |
+| Theoretical Vulnerability | Real-World Failure Scenario | Sthira Engineering Solution |
 | --- | --- | --- |
 | **Valley-Bottom Bias** | Flat river terraces wiped out by upstream slides (Wayanad 2024). | **2-Phase Kinematic Runout Buffer:** Traces debris-flow corridors from steep upstream release zones down to flat valley bottoms. |
 | **Clear-Sky Flash Floods** | Glacial Lake Outbursts (GLOF) Detachments under zero rain (Chamoli 2021). | **CWC / ISRO Glacial Lake Monitoring Layer:** Permanent inundation vectors mapped independent of local weather radar. |
@@ -1849,7 +1849,7 @@ async def activate_micro_zone_engine(center_lon: float, center_lat: float, radiu
 
 When judges ask: *"How will your system scale without running out of memory or cloud credits on all-India data?"*, respond with this architecture:
 
-> *"PUNARVAS-AI does not waste computing power running 10-meter geotechnical models over the flat plains of Punjab or Madhya Pradesh. We use a two-tiered hierarchical engine:*
+> *"Sthira does not waste computing power running 10-meter geotechnical models over the flat plains of Punjab or Madhya Pradesh. We use a two-tiered hierarchical engine:*
 > *Tier 1 runs continuous, lightweight macro-polling on IMD 0.25-degree rainfall grids, Antecedent Precipitation Indices (API), and National Center for Seismology earthquake feeds filtered against static GSI susceptibility masks.*
 > *The moment a hydro-meteorological or seismic tripwire is breached in a vulnerable district, our backend dynamically isolates a 25-kilometer processing bounding box. Only within that bounded box does the system spin up high-resolution building-footprint disaggregation, geotechnical slope calculations, and candidate relocation matching. This makes our platform deployable on modest district-level servers while maintaining second-level responsiveness."*
 
@@ -1921,7 +1921,7 @@ TOOL_SCHEMA = {
 Provide 3 to 5 realistic input-output examples directly inside the system prompt:
 
 ```text
-System: You are PUNARVAS-AI Spatial Dispatcher. Convert user intent to spatial parameters.
+System: You are Sthira Spatial Dispatcher. Convert user intent to spatial parameters.
 
 Example 1:
 Input: "जोशीमठ सेक्टर 4 में कितना खतरा है?"
@@ -2082,7 +2082,7 @@ This narrative directly addresses the failure modes of existing government workf
 
 
 4. **Institutional Climax (Minute 5):**
-"Finally, we account for institutional inertia. A CAG audit revealed Karnataka's State Disaster Authority met only three times in five years, and DDMAs across India face severe vacancy rates. PUNARVAS-AI does two things: it auto-populates the official NDMA Village Disaster Management Plan (VDMP) so the local Gram Panchayat owns the plan (the Odisha model), and if local DDMA audits show zero meetings, it auto-escalates the relocation dossier directly to the state level."
+"Finally, we account for institutional inertia. A CAG audit revealed Karnataka's State Disaster Authority met only three times in five years, and DDMAs across India face severe vacancy rates. Sthira does two things: it auto-populates the official NDMA Village Disaster Management Plan (VDMP) so the local Gram Panchayat owns the plan (the Odisha model), and if local DDMA audits show zero meetings, it auto-escalates the relocation dossier directly to the state level."
 
 
 

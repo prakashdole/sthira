@@ -7,7 +7,7 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 import pytest
 
-from punarvas.modules.source_access.contracts import (
+from sthira.modules.source_access.contracts import (
     AOISampleGateInput,
     ActivationState,
     CapabilityType,
@@ -16,7 +16,7 @@ from punarvas.modules.source_access.contracts import (
     PriorityClass,
     ReconciliationMethod,
 )
-from punarvas.modules.source_access.service import SourceAccessService
+from sthira.modules.source_access.service import SourceAccessService
 
 
 @pytest.fixture

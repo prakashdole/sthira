@@ -1,5 +1,5 @@
 ---
-title: PUNARVAS-AI Open Decisions and Validation Gaps
+title: Sthira Open Decisions and Validation Gaps
 document_id: PUN-OPEN
 version: 1.2
 status: Active decision backlog
@@ -9,11 +9,11 @@ owner: Product and architecture decision forum
 normative_scope: Unresolved choices that block activation, pilot progression, or production claims
 ---
 
-# PUNARVAS-AI Open Decisions and Validation Gaps
+# Sthira Open Decisions and Validation Gaps
 
 ## 1. Confirmed baseline versus open implementation choices
 
-The user approved the 8 September 2026 plan to use PUNARVAS-AI, Wayanad as the reference pilot, a production-oriented blueprint, the documented technology baseline, and the separation between permanent-relocation planning and emergency command. Those are not open merely because earlier transcripts discussed alternatives.
+The user approved the 8 September 2026 plan to use Sthira, Wayanad as the reference pilot, a production-oriented blueprint, the documented technology baseline, and the separation between permanent-relocation planning and emergency command. Those are not open merely because earlier transcripts discussed alternatives.
 
 The items below remain open because the approved plan deliberately requires programme, legal, scientific, community, procurement, or operational evidence that has not yet been supplied. `OPEN` blocks the affected activation; `PH-0` means it must be closed before controlled pilot use; `BEFORE-PRODUCTION` allows sandbox work but not production reliance.
 

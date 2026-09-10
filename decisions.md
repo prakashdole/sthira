@@ -1,5 +1,5 @@
 ---
-title: PUNARVAS-AI Decision Record
+title: Sthira Decision Record
 document_id: PUN-DECISIONS
 version: 1.2
 status: Controlled decision record with accepted and proposed entries
@@ -9,7 +9,7 @@ owner: Product and architecture decision forum
 normative_scope: Material decisions, rationale, rejected alternatives, consequences, evidence, and review triggers
 ---
 
-# PUNARVAS-AI Decision Record
+# Sthira Decision Record
 
 ## 1. How to use this log
 
@@ -72,7 +72,7 @@ A material change must add or supersede a decision rather than rewrite the old r
 
 ### 2.1 Approval provenance
 
-The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 September 2026. That instruction approves DEC-001–023 and DEC-025–029 as the documentation baseline, including PUNARVAS-AI, Wayanad as reference pilot, production-oriented documentation, and the named technology direction. The user's later request to add the supplied data-source package approves DEC-031–032 as documentation and delivery policy. DEC-033 and DEC-034 record research closures and implementation contracts executed per user directive. DEC-024 and DEC-030 remain proposed until specifically configured.
+The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 September 2026. That instruction approves DEC-001–023 and DEC-025–029 as the documentation baseline, including Sthira, Wayanad as reference pilot, production-oriented documentation, and the named technology direction. The user's later request to add the supplied data-source package approves DEC-031–032 as documentation and delivery policy. DEC-033 and DEC-034 record research closures and implementation contracts executed per user directive. DEC-024 and DEC-030 remain proposed until specifically configured.
 
 | Decisions | Proposed by | Approved by/date | Approval evidence |
 | --- | --- | --- | --- |
@@ -88,7 +88,7 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 ### DEC-001 — Permanent-relocation decision support, not tactical response
 
 - **Context:** Early transcript sections combined long-term relocation planning with real-time emergency command, logistics, evacuation, voice, and live telemetry. Later discussion recognized these as different missions, users, data latencies, liabilities, and operating conditions.
-- **Decision:** PUNARVAS-AI is scoped to proactive/permanent relocation planning and programme governance. Tactical command, civilian evacuation routing, convoy/airdrop logistics, live sensor command, and ration calculations are excluded.
+- **Decision:** Sthira is scoped to proactive/permanent relocation planning and programme governance. Tactical command, civilian evacuation routing, convoy/airdrop logistics, live sensor command, and ration calculations are excluded.
 - **Why:** A focused system can be validated against land, rights, water, livelihood, participation, and approval outcomes. Combining emergency command would expand safety-critical liability and prevent either product from being credible.
 - **Rejected:** A dual-horizon platform; a “future-ready” tactical module hidden behind a toggle.
 - **Consequences:** No sub-second live incident feeds are required. A separate future product/decision would be needed for emergency operations.
@@ -429,7 +429,7 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Decision:** Implement PKG-0C and Phase 1 platform using Python FastAPI modular monolith with Pydantic v2 domain schemas, enforcing the Ponytail ladder (`YAGNI -> stdlib -> native -> one line -> minimum`). Dual-target storage architecture uses PostgreSQL/PostGIS for production and an in-memory/SQLite GeoJSON spatial engine for zero-dependency local testing. Audit events use append-only SHA-256 hash chaining.
 - **Why:** Guarantees absolute contract consistency across domain modules, eliminates bloat, and allows fully deterministic automated verification without external database infrastructure.
 - **Rejected:** Premature microservices; raw untyped dictionaries; third-party blockchain audit systems; mutable state rewrites.
-- **Consequences:** All domain packages import from `punarvas.core`. Database changes must preserve bitemporal valid/system times and hash audit continuity.
+- **Consequences:** All domain packages import from `sthira.core`. Database changes must preserve bitemporal valid/system times and hash audit continuity.
 - **Evidence:** `architecture.md` §5 & §6; `trd.md` §3; `rules.md` RUL-001–083.
 - **Review trigger:** Introduction of external distributed event brokers or multi-region database replication.
 
@@ -456,7 +456,7 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Status:** ACCEPTED.
 - **Context:** `phases.md` §7 & §12.7 mandate scaling across Kerala districts (e.g., Idukki, Alappuzha, Malappuram) through repeatable configuration rather than shared unrestricted access. Cross-district data or policy assumptions (e.g., applying Wayanad steep debris flow parameters to Alappuzha coastal backwaters, or treating estate worker housing in Devikulam like agricultural homesteads in Meppadi) must never leak.
 - **Decision:**
-  1. *Config-Driven District Profiles (`DistrictProfile`, `DistrictConfig`):* Implement dynamic district registration in `punarvas.modules.programme.district_service` and `punarvas.modules.scaling.service`. Each district declares its lead authority (e.g., DDMA Idukki), primary hazard profile, minimum road width, JJM LPCD threshold, and active resettlement schemes.
+  1. *Config-Driven District Profiles (`DistrictProfile`, `DistrictConfig`):* Implement dynamic district registration in `sthira.modules.programme.district_service` and `sthira.modules.scaling.service`. Each district declares its lead authority (e.g., DDMA Idukki), primary hazard profile, minimum road width, JJM LPCD threshold, and active resettlement schemes.
   2. *Policy Inheritance with Isolated Local Overrides:* The state base policy establishes invariant hard gates (e.g., 55 LPCD lean-season water, verified title clearance, FRA Grama Sabha consent). Districts inherit the base policy and apply explicit local overrides without polluting sibling district profiles or the global base.
   3. *Row-Level and Geography Isolation (`RUL-054`):* Enforce isolation at the core contract layer via `verify_district_tenant_access(user, district_id)`. DDMA caseworkers in Wayanad (`Kerala/Wayanad`) are rejected with `UnauthorizedGeographyAccessError` (HTTP 403) if querying or modifying casework in Idukki (`Kerala/Idukki`).
   4. *Privacy-Safe Statewide SDMA Dashboard (`RUL-050`, `RUL-052`):* Implement `KSDMA` macro oversight providing state-level aggregate counts (total eligible, township allocations, self-relocation assistance, sanctioned budget). To protect citizen anonymity and prevent re-identification, cell suppression is strictly applied: any aggregate count $< 5$ is suppressed to `"<5"` (`STATEWIDE_PUBLIC_AGGREGATE`).
@@ -475,7 +475,7 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Status:** ACCEPTED.
 - **Context:** `phases.md` §8 & §12.8 mandate platform portability across Indian states (pilot reference: Uttarakhand) while keeping state-specific legal frameworks, land tenure terminology, languages, and authority explicit. Land revenue and disaster management administration differ radically across states; treating Kerala-specific government orders or land systems as national standards would invalidate the system in other jurisdictions.
 - **Decision:**
-  1. *Pluggable State Tenant Package Architecture (`StateTenantPackage`):* Implement `state_package_loader` and `MultiStateAdapter` in `punarvas.modules.programme.state_package` and `punarvas.modules.adaptation.service`. This decouples the core decision engine (gates, bitemporal audit, outbox, solvers) from state-specific implementations.
+  1. *Pluggable State Tenant Package Architecture (`StateTenantPackage`):* Implement `state_package_loader` and `MultiStateAdapter` in `sthira.modules.programme.state_package` and `sthira.modules.adaptation.service`. This decouples the core decision engine (gates, bitemporal audit, outbox, solvers) from state-specific implementations.
   2. *Uttarakhand Reference Adaptation:* Bind the Uttarakhand tenant (`UK`) to USDMA and DDMA Chamoli, Devbhoomi Bhulekh land tenure (Khasra/Khatauni vs Kerala Thandaper), GLOF / flash-flood / land subsidence hazard classifications (Joshimath), Pipalkoti resettlement candidate enclaves, and Hindi localization.
   3. *Zero Cross-State Leakage Invariant (`test_zero_cross_state_leakage`):* Dossier headers and reports generated for Uttarakhand must contain strictly 0% Kerala terms (no e-Rekha, no Thandaper, no VLRS ₹10L cap, no Meppadi references, no Malayalam strings). Conversely, Kerala dossiers must contain 0% Uttarakhand terms (no Devbhoomi, no Khasra/Khatauni, no USDMA, no Hindi strings).
   4. *Pluggable Projected Coordinate Systems (CRS):* Support local projected coordinate systems per state (e.g., `EPSG:32644` WGS 84 / UTM Zone 44N for Uttarakhand vs `EPSG:32643` WGS 84 / UTM Zone 43N for Kerala) to eliminate spatial distortion during area and slope calculations.
@@ -494,7 +494,7 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Status:** ACCEPTED.
 - **Context:** While Kerala (Wayanad/Idukki) and Uttarakhand (Joshimath/Chamoli) operate under their respective SDMAs, severe disaster events frequently traverse state boundaries (e.g., Western Ghats debris corridors across Kerala/Tamil Nadu/Karnataka, or Upper Ganga/Himalayan glacial lake outburst corridors across Uttarakhand/Himachal Pradesh). The National Disaster Management Authority (NDMA) requires nationwide situational awareness, inter-state mutual-aid coordination, and NDRF allocation tracking under Disaster Management Act 2005 §3 & §6 without usurping state constitutional data sovereignty.
 - **Decision:**
-  1. *National Clearinghouse Service (`NationalClearinghouseService`):* Implement federated clearinghouse service in `punarvas.modules.governance.national_clearinghouse` establishing an advisory hub between SDMAs and NDMA.
+  1. *National Clearinghouse Service (`NationalClearinghouseService`):* Implement federated clearinghouse service in `sthira.modules.governance.national_clearinghouse` establishing an advisory hub between SDMAs and NDMA.
   2. *Cross-Border Hazard Corridors:* Model multi-state hazard corridors (`CORR-WG-01` for Western Ghats Nilgiri-Wayanad high-hazard corridor across Kerala, Tamil Nadu, and Karnataka; `CORR-HIM-02` for Upper Ganga Glacial & Subsidence Corridor across Uttarakhand and Himachal Pradesh).
   3. *Inter-State Mutual-Aid Requests (`InterStateRelocationRequest`):* Provide formal digital request submission for inter-state assistance (e.g. cross-border plantation worker resettlement, NDRF special packages) with strict statutory role verification (`RoleType.GOVERNMENT_APPROVER`). Non-approver attempts fail closed with `AuthorityBypassError` (`RUL-002`).
   4. *State Sovereign Data Custody Invariant:* SDMAs retain 100% exclusive custody of all identifiable citizen, household casework, and parcel data. NDMA never holds individual household PII! Only de-identified macro counts and cryptographically signed audit manifests (`NationalRegistryManifest`) carrying the state's append-only SHA-256 audit ledger head hash are federated to NDMA (`RUL-050`, `RUL-054`).
@@ -550,7 +550,7 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Context:** `plan.md` (#9), `trd.md` (§3.8, §3.11, §5.6, FR-047–FR-052, FR-070), and `rules.md` (RUL-003, RUL-004, RUL-005, RUL-006, RUL-040, RUL-046–RUL-049, RUL-070, RUL-071) define Phase 9 as the governance, objection remedy, statutory authorization, and capacity reservation engine. Algorithmic outputs are strictly advisory proposals; statutory power belongs solely to competent human authorities.
 - **Decision:**
   1. *Decoupling of Administrative Approval and Statutory Notification (RUL-003, AT-21):* Official administrative approval by DDMA/State Authority (`OfficialApprovalRecord`) and formal gazette publication (`StatutoryNotificationRecord`) are separate legal acts with independent digital signatures, bilingual texts (English & Malayalam), and audit hashes. Approval does not automatically publish, and publication requires a prior valid approval.
-  2. *Citizen Objections & Mandatory Freeze (RUL-046–RUL-049, FR-047–FR-051, AT-09):* Any affected citizen or community representative can file objections against draft eligibility lists, site selections, or allocation proposals across 8 categories (Inclusion, Exclusion, Pathway Preference, FRA Rights, Safety, Water Inadequacy, Tenancy, General). Filing issues an immutable receipt token (`RCPT-PUNARVAS-OBJ-*`) with SLA deadline. Active objections freeze the disputed entity, raising `EntityFrozenByObjectionError` upon attempts to issue approval, gazette notification, or commit capacity. Adverse action without a formal hearing is strictly prohibited (`RUL-049`).
+  2. *Citizen Objections & Mandatory Freeze (RUL-046–RUL-049, FR-047–FR-051, AT-09):* Any affected citizen or community representative can file objections against draft eligibility lists, site selections, or allocation proposals across 8 categories (Inclusion, Exclusion, Pathway Preference, FRA Rights, Safety, Water Inadequacy, Tenancy, General). Filing issues an immutable receipt token (`RCPT-Sthira-OBJ-*`) with SLA deadline. Active objections freeze the disputed entity, raising `EntityFrozenByObjectionError` upon attempts to issue approval, gazette notification, or commit capacity. Adverse action without a formal hearing is strictly prohibited (`RUL-049`).
   3. *Advisory SLA Escalation Recommendations (RUL-006, FR-050):* Overdue objections (default 21 days) generate automated advisory escalation recommendations to superior authorities, strictly avoiding autonomous bypass or forced resolution.
   4. *Step-Up MFA & Role Verification for Official Approvals (RUL-002, RUL-054):* Issuing official approval requires `RoleType.GOVERNMENT_APPROVER` or `RoleType.STATE_PROGRAMME_ADMIN` and verified step-up MFA token (`MFA-STEPUP-*`).
   5. *Conditional Approvals & Blocking Clearance Gates (RUL-004, AT-06, AT-20):* Approvals record explicit conditions (water yield tests, FRA clearances, geotechnical stability). Blocking conditions strictly prevent capacity commitment and downstream household assignment until verified and satisfied.
@@ -660,7 +660,7 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Context:** Revision 1.4 audit (REM-001, REM-002, REM-005, REM-007) found every API unauthenticated, prefix-matching MFA (`MFA-STEPUP-anything` produced `OFFICIALLY_APPROVED`), core outbox items stuck in `FAILED` without retry/dead-letter, and degraded mode reported but not enforced on mutations. Architecture still names Keycloak, PostgreSQL/PostGIS, and Celery as production targets.
 - **Decision:**
   1. Protect every non-public HTTP route with a verified HMAC session. Identity, roles and geography come from the token, never from request body fields.
-  2. Use a local prototype identity directory as the OIDC adapter stand-in. Production remains Keycloak/OIDC (DEC-008/017). `PUNARVAS_AUTH_SECRET` and `PUNARVAS_PROTOTYPE_PASSWORD` override defaults; defaults are prototype-only.
+  2. Use a local prototype identity directory as the OIDC adapter stand-in. Production remains Keycloak/OIDC (DEC-008/017). `Sthira_AUTH_SECRET` and `Sthira_PROTOTYPE_PASSWORD` override defaults; defaults are prototype-only.
   3. Step-up MFA is issued for the authenticated principal, exact privileged action, nonce and short expiry, and is consumed on successful use. Prefix strings are rejected.
   4. Core `TransactionalOutbox` retries `FAILED` items until `DEAD_LETTER`, then `reconcile_dead_letters()` re-queues without duplicating idempotency keys. The resilience service uses that outbox.
   5. Degraded mode fails closed at the HTTP mutation boundary and at approval/reservation/notification command methods.

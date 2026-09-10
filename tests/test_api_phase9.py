@@ -4,7 +4,7 @@ Phase 9 REST API Integration Tests (ARC-C08, ARC-C09 / FEAT-015, FEAT-016, FEAT-
 
 from datetime import datetime, timezone, timedelta
 from tests.authutil import authed_client, issue_step_up
-from punarvas.core.identity import get_prototype_user
+from sthira.core.identity import get_prototype_user
 
 client = authed_client()
 
@@ -122,7 +122,7 @@ def test_api_phase9_citizen_objection_freezing_and_remedy_flow():
     assert resp.status_code == 200, resp.text
     case_data = resp.json()["data"]
     objection_id = case_data["objection_id"]
-    assert case_data["receipt_token"].startswith("RCPT-PUNARVAS-")
+    assert case_data["receipt_token"].startswith("RCPT-Sthira-")
 
     # 2. Check target entity frozen status
     resp_frozen = client.get(f"/api/v1/governance/objections/entities/{target_entity}/frozen")

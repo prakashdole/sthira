@@ -1,5 +1,5 @@
 ---
-title: PUNARVAS-AI Domain, Safety, and Governance Rules
+title: Sthira Domain, Safety, and Governance Rules
 document_id: PUN-RULES
 version: 1.2
 status: Normative baseline
@@ -9,7 +9,7 @@ owner: Programme authority with legal and domain stewards
 normative_scope: Binding product and operational constraints
 ---
 
-# PUNARVAS-AI Domain, Safety, and Governance Rules
+# Sthira Domain, Safety, and Governance Rules
 
 ## 1. Document boundary
 

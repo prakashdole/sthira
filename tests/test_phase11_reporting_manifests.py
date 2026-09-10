@@ -7,7 +7,7 @@ rules.md (RUL-052-RUL-060, RUL-075), DEC-012, DEC-013, DEC-042.
 
 import json
 import pytest
-from punarvas.modules.reporting import (
+from sthira.modules.reporting import (
     ReportingService,
     EvidenceReference,
     ExportClassification,
@@ -164,7 +164,7 @@ def test_decision_summary_dossier_provenance(service):
         solver_tolerances={"mip_gap": 0.005, "time_limit_sec": 120.0},
         approval_order_id="GO(P)-REV-2025-09",
         statutory_gazette_id="GAZ-KL-WYD-2025-88",
-        objection_token_refs=["RCPT-PUNARVAS-OBJ-001"],
+        objection_token_refs=["RCPT-Sthira-OBJ-001"],
         evidence_chain_hash="chain_head_hash_9827361",
         generating_user_id="appellate_clerk",
     )

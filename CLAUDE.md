@@ -1,4 +1,4 @@
-# PUNARVAS-AI Agent Standing Instructions (CLAUDE.md)
+# Sthira Agent Standing Instructions (CLAUDE.md)
 
 See `GEMINI.md` for the complete specification.
 

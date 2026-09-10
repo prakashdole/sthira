@@ -6,21 +6,21 @@ Normative Reference: Disaster Management Act 2005 §3/§6, rules.md (RUL-001, RU
 
 import pytest
 from tests.authutil import authed_client
-from punarvas.core.contracts import GeographyScope, UserContext
-from punarvas.core.enums import RoleType
-from punarvas.core.errors import AuthorityBypassError
-from punarvas.core.localization import (
+from sthira.core.contracts import GeographyScope, UserContext
+from sthira.core.enums import RoleType
+from sthira.core.errors import AuthorityBypassError
+from sthira.core.localization import (
     LOCALIZATION_REGISTRY,
     get_supported_languages,
     translate_text,
 )
-from punarvas.modules.governance.national_clearinghouse import (
+from sthira.modules.governance.national_clearinghouse import (
     InterStateRelocationRequest,
     NationalRegistryManifest,
     national_clearinghouse_service,
 )
-from punarvas.modules.programme.state_package import state_package_loader
-from punarvas.spikes.fixture_loader import load_uttarakhand_fixture
+from sthira.modules.programme.state_package import state_package_loader
+from sthira.spikes.fixture_loader import load_uttarakhand_fixture
 
 
 client = authed_client()
@@ -142,13 +142,13 @@ def test_state_package_loader_and_legal_isolation():
     kl_schemes = state_package_loader.get_state_schemes("Kerala")
     kl_names = [s.name for s in kl_schemes]
     assert any("Vulnerability Linked Relocation Scheme" in n for n in kl_names)
-    assert not any("Mukhya Mantri Punarvas" in n for n in kl_names)
+    assert not any("Mukhya Mantri Sthira" in n for n in kl_names)
     assert not any("Joshimath" in n for n in kl_names)
 
-    # Uttarakhand schemes must contain Mukhya Mantri Punarvas and Joshimath, but NO Kerala schemes
+    # Uttarakhand schemes must contain Mukhya Mantri Sthira and Joshimath, but NO Kerala schemes
     uk_schemes = state_package_loader.get_state_schemes("Uttarakhand")
     uk_names = [s.name for s in uk_schemes]
-    assert any("Mukhya Mantri Punarvas" in n for n in uk_names)
+    assert any("Mukhya Mantri Sthira" in n for n in uk_names)
     assert any("Joshimath" in n for n in uk_names)
     assert not any("VLRS" in n for n in uk_names)
 

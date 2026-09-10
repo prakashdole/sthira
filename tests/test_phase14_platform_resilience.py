@@ -6,14 +6,14 @@ Normative Reference: NFR-028 to NFR-035, AT-24 to AT-30, ARC-C01, ARC-C11, DEC-0
 from datetime import datetime, timezone
 import pytest
 
-from punarvas.modules.resilience.contracts import (
+from sthira.modules.resilience.contracts import (
     ChannelType,
     CoordinatedRestorePackage,
     CrossChannelAccessRequest,
     DataClassification,
     OfflineDeviceRecord,
 )
-from punarvas.modules.resilience.service import ResilienceService
+from sthira.modules.resilience.service import ResilienceService
 
 
 @pytest.fixture
@@ -220,12 +220,12 @@ def test_coordinated_restore_pass(service):
         backup_id="BK-2026-09-09-FULL",
         snapshot_timestamp=datetime(2026, 9, 9, 0, 0, tzinfo=timezone.utc),
         database_records=[
-            {"id": "doc-1", "scan_blob_uri": "s3://punarvas-data/scans/p1.pdf"},
-            {"id": "doc-2", "photo_blob_uri": "blob://punarvas-photos/site1.jpg"},
+            {"id": "doc-1", "scan_blob_uri": "s3://sthira-data/scans/p1.pdf"},
+            {"id": "doc-2", "photo_blob_uri": "blob://sthira-photos/site1.jpg"},
         ],
         object_blobs={
-            "s3://punarvas-data/scans/p1.pdf": "sha256-abc111",
-            "blob://punarvas-photos/site1.jpg": "sha256-def222",
+            "s3://sthira-data/scans/p1.pdf": "sha256-abc111",
+            "blob://sthira-photos/site1.jpg": "sha256-def222",
         },
         audit_checkpoints=[
             {"checkpoint_id": "CP-ROOT-01", "checkpoint_hash": "sha256-chain-genesis"}
@@ -248,7 +248,7 @@ def test_coordinated_restore_fail_missing_blob(service):
         backup_id="BK-CORRUPT-BLOB",
         snapshot_timestamp=datetime(2026, 9, 9, 0, 0, tzinfo=timezone.utc),
         database_records=[
-            {"id": "doc-1", "scan_blob_uri": "s3://punarvas-data/scans/missing.pdf"},
+            {"id": "doc-1", "scan_blob_uri": "s3://sthira-data/scans/missing.pdf"},
         ],
         object_blobs={},  # Missing!
         audit_checkpoints=[{"checkpoint_id": "CP-1", "checkpoint_hash": "hash-1"}],
@@ -260,7 +260,7 @@ def test_coordinated_restore_fail_missing_blob(service):
     assert eval_result.restore_permitted is False
     assert eval_result.status == "RESTORE_FAILED_INCONSISTENCY_SET"
     assert eval_result.authoritative_writes_enabled is False
-    assert "s3://punarvas-data/scans/missing.pdf" in eval_result.missing_objects
+    assert "s3://sthira-data/scans/missing.pdf" in eval_result.missing_objects
 
 
 def test_coordinated_restore_fail_missing_keys_or_checkpoints(service):

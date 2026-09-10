@@ -1,6 +1,6 @@
 import pytest
 
-from punarvas.modules.live_ops.service import degraded_mode_controller
+from sthira.modules.live_ops.service import degraded_mode_controller
 
 
 @pytest.fixture(autouse=True)

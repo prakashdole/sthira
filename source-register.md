@@ -1,5 +1,5 @@
 ---
-title: PUNARVAS-AI Evidence and Source Register
+title: Sthira Evidence and Source Register
 document_id: PUN-SOURCES
 version: 1.2
 status: Dated baseline; operational use requires source-version review
@@ -9,7 +9,7 @@ owner: Evidence governance lead
 normative_scope: Evidence provenance, verified use, coverage, limitations, and unresolved verification
 ---
 
-# PUNARVAS-AI Evidence and Source Register
+# Sthira Evidence and Source Register
 
 ## 1. Reading rule
 

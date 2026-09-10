@@ -1,5 +1,5 @@
 ---
-title: PUNARVAS-AI Feature Catalog
+title: Sthira Feature Catalog
 document_id: PUN-FEATURES
 version: 1.2
 status: Baseline backlog
@@ -9,7 +9,7 @@ owner: Product owner
 normative_scope: User-visible capabilities, dependencies, phase allocation, and feature acceptance
 ---
 
-# PUNARVAS-AI Feature Catalog
+# Sthira Feature Catalog
 
 ## 1. Document boundary
 

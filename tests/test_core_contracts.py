@@ -4,7 +4,7 @@ Unit tests for PKG-0C Shared Domain Contracts, Enums, Audit, and Outbox.
 
 import pytest
 from datetime import datetime, timezone
-from punarvas.core import (
+from sthira.core import (
     GateState,
     AuthorityState,
     RelocationPathway,

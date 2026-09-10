@@ -5,9 +5,9 @@ Normative Reference: phases.md §7 & §12.7, rules.md (RUL-017, RUL-018, RUL-054
 
 import pytest
 from tests.authutil import authed_client
-from punarvas.core.contracts import GeographyScope, UserContext
-from punarvas.core.enums import RoleType
-from punarvas.modules.district_scale import (
+from sthira.core.contracts import GeographyScope, UserContext
+from sthira.core.enums import RoleType
+from sthira.modules.district_scale import (
     DistrictProfile,
     DistrictPolicyOverride,
     district_onboarding_engine,
@@ -16,7 +16,7 @@ from punarvas.modules.district_scale import (
     statewide_aggregate_dashboard,
     scale_quota_limiter,
 )
-from punarvas.spikes import load_district_fixture, load_idukki_fixture, load_alappuzha_fixture
+from sthira.spikes import load_district_fixture, load_idukki_fixture, load_alappuzha_fixture
 
 client = authed_client()
 
