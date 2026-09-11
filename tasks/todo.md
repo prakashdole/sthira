@@ -37,6 +37,7 @@
 - [x] Add Codex-like Voice Map Control launcher and model-ready voice-to-text panel with explicit demo state.
 - [x] Add satellite-ready map surface with explicit government-basemap authorization guard; no unapproved provider connected.
 - [x] Apply government-style red-alert hierarchy, severity words/icons, large emergency actions, multilingual controls, and bundled Noto fonts.
+- [x] Add explicit connection/offline state and keyboard-accessible alert details with synthetic source, issue, and expiry metadata.
 - [ ] Add database/migrations in Phase 2.
 
 ### Phase 2 — persistence, audit, and operational states

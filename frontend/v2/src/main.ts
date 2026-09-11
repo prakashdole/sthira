@@ -22,6 +22,8 @@ const translations = {
     demo: 'SYNTHETIC DEMO · NOT LIVE EMERGENCY GUIDANCE', voiceLabel: 'Voice Map Control', voiceOpen: 'Open voice guide', voiceTitle: 'Voice-to-text guide',
     voiceBody: 'Use an approved short voice command to move the map or repeat an instruction.', voiceStart: 'START LISTENING', voiceStop: 'STOP LISTENING',
     voiceStatus: 'IndicConformer model not connected', transcript: 'Transcript will appear here', privacy: 'No microphone recording is active in this demo.', close: 'Close voice guide',
+    connection: 'DEMO DATA · CONNECTION READY', offline: 'OFFLINE · LAST VALID DEMO DATA', detailsTitle: 'Alert details', detailsClose: 'Close alert details',
+    detailsBody: 'This screen uses locally bundled synthetic data. It is not an active government alert.', detailsIssued: 'Issued: 11 Sep 2026 · 4:00 PM', detailsExpires: 'Expires: 11 Sep 2026 · 6:00 PM', detailsSource: 'Source class: SYNTHETIC_DEMO',
   },
   ML: {
     language: 'മലയാളം', alert: 'ചുവപ്പ്', action: 'ഇപ്പോൾ പ്രവർത്തിക്കുക', hazard: 'വെള്ളപ്പൊക്കം',
@@ -33,6 +35,8 @@ const translations = {
     demo: 'സിന്തറ്റിക് ഡെമോ · തത്സമയ അടിയന്തര മാർഗ്ഗനിർദ്ദേശമല്ല', voiceLabel: 'വോയ്സ് മാപ്പ് നിയന്ത്രണം', voiceOpen: 'വോയ്സ് ഗൈഡ് തുറക്കുക', voiceTitle: 'വോയ്സ്-ടു-ടെക്സ്റ്റ് ഗൈഡ്',
     voiceBody: 'മാപ്പ് നീക്കാനോ നിർദ്ദേശം ആവർത്തിക്കാനോ അംഗീകൃത ഹ്രസ്വ വോയ്സ് കമാൻഡ് ഉപയോഗിക്കുക.', voiceStart: 'കേൾക്കാൻ തുടങ്ങുക', voiceStop: 'കേൾക്കുന്നത് നിർത്തുക',
     voiceStatus: 'IndicConformer മോഡൽ ബന്ധിപ്പിച്ചിട്ടില്ല', transcript: 'ട്രാൻസ്‌ക്രിപ്റ്റ് ഇവിടെ കാണിക്കും', privacy: 'ഈ ഡെമോയിൽ മൈക്രോഫോൺ റെക്കോർഡിംഗ് സജീവമല്ല.', close: 'വോയ്സ് ഗൈഡ് അടയ്ക്കുക',
+    connection: 'ഡെമോ ഡാറ്റ · കണക്ഷൻ ലഭ്യമാണ്', offline: 'ഓഫ്‌ലൈൻ · അവസാനത്തെ സാധുവായ ഡെമോ ഡാറ്റ', detailsTitle: 'മുന്നറിയിപ്പ് വിവരങ്ങൾ', detailsClose: 'മുന്നറിയിപ്പ് അടയ്ക്കുക',
+    detailsBody: 'ഈ സ്ക്രീൻ പ്രാദേശിക സിന്തറ്റിക് ഡാറ്റ ഉപയോഗിക്കുന്നു. ഇത് സജീവ സർക്കാർ മുന്നറിയിപ്പല്ല.', detailsIssued: 'നൽകിയത്: 11 സെപ്റ്റംബർ 2026 · വൈകിട്ട് 4:00', detailsExpires: 'കാലാവധി: 11 സെപ്റ്റംബർ 2026 · വൈകിട്ട് 6:00', detailsSource: 'ഉറവിട വിഭാഗം: SYNTHETIC_DEMO',
   },
   HI: {
     language: 'हिन्दी', alert: 'लाल', action: 'अभी कार्रवाई करें', hazard: 'बाढ़',
@@ -44,12 +48,16 @@ const translations = {
     demo: 'सिंथेटिक डेमो · लाइव आपातकालीन मार्गदर्शन नहीं', voiceLabel: 'वॉयस मैप कंट्रोल', voiceOpen: 'वॉयस गाइड खोलें', voiceTitle: 'वॉयस-टू-टेक्स्ट गाइड',
     voiceBody: 'मानचित्र को स्थानांतरित करने या निर्देश दोहराने के लिए स्वीकृत छोटा वॉयस कमांड इस्तेमाल करें।', voiceStart: 'सुनना शुरू करें', voiceStop: 'सुनना बंद करें',
     voiceStatus: 'IndicConformer मॉडल जुड़ा नहीं है', transcript: 'ट्रांसक्रिप्ट यहां दिखाई देगा', privacy: 'इस डेमो में माइक्रोफोन रिकॉर्डिंग सक्रिय नहीं है।', close: 'वॉयस गाइड बंद करें',
+    connection: 'डेमो डेटा · कनेक्शन उपलब्ध', offline: 'ऑफलाइन · अंतिम मान्य डेमो डेटा', detailsTitle: 'अलर्ट विवरण', detailsClose: 'अलर्ट विवरण बंद करें',
+    detailsBody: 'यह स्क्रीन स्थानीय सिंथेटिक डेटा का उपयोग करती है। यह सक्रिय सरकारी अलर्ट नहीं है।', detailsIssued: 'जारी: 11 सितम्बर 2026 · शाम 4:00', detailsExpires: 'समाप्ति: 11 सितम्बर 2026 · शाम 6:00', detailsSource: 'स्रोत श्रेणी: SYNTHETIC_DEMO',
   },
 } as const;
 
 let language: Language = 'EN';
 let voiceOpen = false;
 let voiceListening = false;
+let detailsOpen = false;
+let isOffline = !navigator.onLine;
 
 function render() {
   const copy = translations[language];
@@ -58,7 +66,7 @@ function render() {
       <header class="topbar">
         <a class="wordmark" href="/" aria-label="Sthira home"><span class="wordmark-mark">S</span><span>Sthira</span></a>
         <div class="topbar-actions">
-          <span class="demo-pill"><span class="status-dot"></span>${copy.demo}</span>
+          <span class="demo-pill"><span class="status-dot"></span>${copy.demo}</span><span class="connection-pill ${isOffline ? 'is-offline' : ''}"><span aria-hidden="true">${isOffline ? '!' : '✓'}</span>${isOffline ? copy.offline : copy.connection}</span>
           <button class="voice-pet-button" type="button" aria-label="${copy.voiceOpen}" aria-expanded="${voiceOpen}" data-action="voice"><span class="voice-pet" aria-hidden="true"><i></i><b></b></span><span class="voice-pet-label">${copy.voiceLabel}</span></button>
           <div class="language-switcher" role="group" aria-label="Language"><button class="language-choice ${language === 'EN' ? 'is-selected' : ''}" data-language="EN" type="button">English</button><button class="language-choice ${language === 'ML' ? 'is-selected' : ''}" data-language="ML" type="button">മലയാളം</button><button class="language-choice ${language === 'HI' ? 'is-selected' : ''}" data-language="HI" type="button">हिन्दी</button></div>
         </div>
@@ -67,7 +75,7 @@ function render() {
         <section class="alert-screen" aria-labelledby="alert-title">
           <div class="severity-banner severity-red"><span aria-hidden="true">!</span><strong>${copy.alert}</strong><span aria-hidden="true">•</span><strong>${copy.action}</strong><span aria-hidden="true">•</span><strong>${copy.hazard}</strong></div>
           <div class="alert-content">
-            <p class="demo-kicker">${copy.refresh}</p>
+            <p class="demo-kicker"><span class="freshness-icon" aria-hidden="true">✓</span>${copy.refresh}</p>
             <h1 id="alert-title">${copy.instruction}</h1><p class="hazard-detail">${copy.detail}</p>
             <ol class="emergency-steps">${copy.steps.map((step, index) => `<li><span>${index + 1}</span><p>${step}</p></li>`).join('')}</ol>
             <div class="destination"><span class="destination-icon" aria-hidden="true">⌖</span><div><strong>${copy.shelter}</strong><span>${copy.leave}</span></div></div>
@@ -80,6 +88,7 @@ function render() {
       </main>
       <footer class="footer"><span>Sthira v2 · ${copy.demo}</span><span>${copy.source}</span></footer>
       <div class="toast" role="status" aria-live="polite" hidden></div>
+      <dialog class="details-dialog" aria-labelledby="details-title" ${detailsOpen ? 'open' : ''}><div class="dialog-heading"><h2 id="details-title">${copy.detailsTitle}</h2><button class="voice-close" type="button" aria-label="${copy.detailsClose}" data-action="details-close">×</button></div><p>${copy.detailsBody}</p><dl><div><dt>${copy.detailsIssued}</dt><dd>${copy.detailsSource}</dd></div><div><dt>${copy.detailsExpires}</dt><dd>${copy.detailsExpires}</dd></div></dl><button class="large-button route-button" type="button" data-action="details-close">${copy.detailsClose}</button></dialog>
       <aside class="voice-panel ${voiceOpen ? 'is-open' : ''}" aria-labelledby="voice-title" ${voiceOpen ? '' : 'hidden'}><div class="voice-panel-head"><div><p class="eyebrow">${copy.voiceLabel}</p><h2 id="voice-title">${copy.voiceTitle}</h2></div><button class="voice-close" type="button" aria-label="${copy.close}" data-action="voice-close">×</button></div><p class="voice-body">${copy.voiceBody}</p><div class="voice-status"><span class="status-dot"></span><span>${copy.voiceStatus}</span></div><div class="voice-transcript" aria-live="polite"><span>${copy.transcript}</span><strong>${voiceListening ? 'Listening preview...' : 'SHOW MY LOCATION'}</strong></div><button class="voice-listen-button ${voiceListening ? 'is-listening' : ''}" type="button" aria-pressed="${voiceListening}" data-action="voice-listen"><span class="voice-mic" aria-hidden="true">${voiceListening ? '■' : '●'}</span>${voiceListening ? copy.voiceStop : copy.voiceStart}</button><p class="voice-privacy">${copy.privacy}</p></aside>
     </div>`;
   bindInteractions();
@@ -90,8 +99,9 @@ function bindInteractions() {
   document.querySelector<HTMLButtonElement>('[data-action="voice"]')?.addEventListener('click', () => { voiceOpen = true; render(); document.querySelector<HTMLButtonElement>('[data-action="voice-listen"]')?.focus(); });
   document.querySelector<HTMLButtonElement>('[data-action="voice-close"]')?.addEventListener('click', () => { voiceOpen = false; voiceListening = false; render(); document.querySelector<HTMLButtonElement>('[data-action="voice"]')?.focus(); });
   document.querySelector<HTMLButtonElement>('[data-action="voice-listen"]')?.addEventListener('click', () => { voiceListening = !voiceListening; render(); });
+  document.querySelectorAll<HTMLButtonElement>('[data-action="details-close"]').forEach((button) => button.addEventListener('click', () => { detailsOpen = false; render(); document.querySelector<HTMLButtonElement>('[data-action="instructions"]')?.focus(); }));
+  document.querySelector<HTMLButtonElement>('[data-action="instructions"]')?.addEventListener('click', () => { detailsOpen = true; render(); document.querySelector<HTMLButtonElement>('[data-action="details-close"]')?.focus(); });
   document.querySelector<HTMLButtonElement>('[data-action="route"]')?.addEventListener('click', () => showToast('Approved route selection will connect to the operational package.'));
-  document.querySelector<HTMLButtonElement>('[data-action="instructions"]')?.addEventListener('click', () => showToast('Instructions are sourced from the authorized alert package.'));
   document.querySelector<HTMLButtonElement>('[data-action="listen"]')?.addEventListener('click', () => showToast('Audio is not connected in this demo. Text remains available.'));
   document.querySelector<HTMLButtonElement>('[data-action="isl"]')?.addEventListener('click', () => showToast('Approved ISL media is pending review.'));
 }
@@ -103,3 +113,6 @@ function showToast(message: string) {
 }
 
 render();
+
+window.addEventListener('online', () => { isOffline = false; render(); });
+window.addEventListener('offline', () => { isOffline = true; render(); });
