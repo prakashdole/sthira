@@ -1,0 +1,77 @@
+{
+  "phase": 0,
+  "status": "DONE",
+  "evidence": {
+    "baseline_tests": {
+      "command": ".venv/bin/python -m pytest -q",
+      "result": "186 passed, 2 warnings"
+    },
+    "frontend_syntax": {
+      "command": "node --check frontend/app.js",
+      "result": "exit 0"
+    },
+    "python_compile": {
+      "command": ".venv/bin/python -m compileall -q src tests",
+      "result": "exit 0"
+    },
+    "text_files_changed": {
+      "command": "git diff --name-only -- '*.txt'",
+      "result": "empty"
+    }
+  },
+  "categories": {
+    "REUSE": [
+      "src/sthira/spikes/fixture_loader.py checksum/path utilities",
+      "src/sthira/core/audit.py compute_event_hash concept only",
+      "src/sthira/core/contracts.py utc_now and narrow geometry primitives"
+    ],
+    "ADAPT": [
+      "src/sthira/core/audit.py append-only audit concept",
+      "src/sthira/core/outbox.py idempotency/retry concept",
+      "src/sthira/core/contracts.py provenance/envelope ideas",
+      "src/sthira/core/identity.py and src/sthira/api/middleware.py demo auth boundary",
+      "src/sthira/core/localization.py registry/fallback pattern",
+      "src/sthira/modules/source_access source lifecycle/readiness concepts",
+      "src/sthira/modules/live_ops and resilience degraded-mode concepts",
+      "src/sthira/modules/security data-minimization concepts",
+      "frontend/tokens.css and generic accessibility primitives"
+    ],
+    "ISOLATE": [
+      "src/sthira/api/app.py and all /api/v1 routes",
+      "src/sthira/modules/adaptation",
+      "src/sthira/modules/allocation",
+      "src/sthira/modules/district_scale",
+      "src/sthira/modules/evaluation",
+      "src/sthira/modules/field",
+      "src/sthira/modules/governance",
+      "src/sthira/modules/household",
+      "src/sthira/modules/land_truth",
+      "src/sthira/modules/policy",
+      "src/sthira/modules/programme",
+      "src/sthira/modules/reconstruction",
+      "src/sthira/modules/reporting",
+      "fixtures/*.json legacy relocation fixtures",
+      "tests/* legacy /api/v1 regression suite",
+      "frontend/index.html and frontend/app.js legacy site-screening UI"
+    ],
+    "REMOVE_LATER": [
+      "duplicate capacity implementation after v2 replacement",
+      "duplicate scaling implementations after v1 ownership review",
+      "legacy relocation UI and modules after v2 replacement verification",
+      "legacy relocation fixtures/tests after v1 retirement approval"
+    ]
+  },
+  "known_risks": [
+    "No database or migrations yet",
+    "Legacy process-global mutable stores",
+    "Prototype authentication defaults",
+    "Legacy app starts with relocation fixtures",
+    "No live government connector or v2 operational package",
+    "No frontend package/test toolchain yet"
+  ],
+  "external_blockers": [
+    "Government source access and reuse authorization",
+    "DDMA/KSDMA operational safe-zone, route, capacity, and allocation package",
+    "Production identity/database/operations configuration"
+  ]
+}

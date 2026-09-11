@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sthira"
-version = "1.0.0"
-description = "Sthira: Proactive Permanent Relocation Decision Support System"
+version = "2.0.0.dev0"
+description = "Sthira: Citizen emergency guidance over authorized government disaster data"
 readme = "prd.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -14,7 +14,11 @@ dependencies = [
     "pydantic>=2.6.0",
     "shapely>=2.0.0",
     "pyyaml>=6.0.1",
-    "httpx>=0.27.0"
+    "httpx>=0.27.0",
+    "SQLAlchemy>=2.0.40,<2.1",
+    "alembic>=1.15,<2",
+    "geoalchemy2>=0.17,<0.21",
+    "psycopg[binary]>=3.2,<4"
 ]
 
 [project.optional-dependencies]

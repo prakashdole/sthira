@@ -1,0 +1,89 @@
+{
+  "schema_version": "2.0",
+  "provenance": {
+    "evidence_class": "SYNTHETIC_DEMO",
+    "dataset_id": "STHIRA-V2-WAYANAD-DEMO-001",
+    "description": "Fictional data for demonstrating Sthira v2 workflows.",
+    "disclaimer": "Not an official warning, evacuation order, shelter listing, or government route approval. Do not use for real-world decisions."
+  },
+  "alert": {
+    "identifier": "DEMO-WYD-LANDSLIDE-001",
+    "sender": "demo@sthira.invalid",
+    "sent": "2026-09-11T09:00:00+05:30",
+    "status": "Exercise",
+    "msgType": "Alert",
+    "scope": "Restricted",
+    "restriction": "SYNTHETIC_DEMO users only",
+    "active": true,
+    "info": {
+      "language": "en-IN",
+      "category": ["Geo"],
+      "event": "Synthetic landslide evacuation exercise",
+      "urgency": "Immediate",
+      "severity": "Severe",
+      "certainty": "Likely",
+      "headline": "DEMO: Move from the marked red zone to a listed safe zone",
+      "description": "Exercise scenario only; no real incident or official alert is represented.",
+      "instruction": "Follow a listed demo route and check the destination capacity before departure.",
+      "area": {
+        "areaDesc": "Synthetic Wayanad exercise area",
+        "polygon": "11.548,76.118 11.548,76.128 11.558,76.128 11.558,76.118 11.548,76.118"
+      }
+    }
+  },
+  "red_zones": [
+    {
+      "id": "RZ-DEMO-01",
+      "name": "Demo hillside exclusion zone",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[76.118, 11.548], [76.128, 11.548], [76.128, 11.558], [76.118, 11.558], [76.118, 11.548]]]
+      }
+    }
+  ],
+  "safe_zones": [
+    {"id": "SZ-DEMO-01", "name": "Demo Community Hall", "location": [76.105, 11.570], "capacity": 120},
+    {"id": "SZ-DEMO-02", "name": "Demo School Shelter", "location": [76.096, 11.578], "capacity": 80},
+    {"id": "SZ-DEMO-03", "name": "Demo Sports Centre", "location": [76.088, 11.584], "capacity": 160}
+  ],
+  "approved_routes": [
+    {
+      "id": "ROUTE-DEMO-01",
+      "from_zone_id": "RZ-DEMO-01",
+      "to_safe_zone_id": "SZ-DEMO-01",
+      "approval": "SYNTHETIC_DEMO",
+      "distance_km": 3.4,
+      "geometry": {"type": "LineString", "coordinates": [[76.123, 11.553], [76.114, 11.561], [76.105, 11.570]]}
+    },
+    {
+      "id": "ROUTE-DEMO-02",
+      "from_zone_id": "RZ-DEMO-01",
+      "to_safe_zone_id": "SZ-DEMO-02",
+      "approval": "SYNTHETIC_DEMO",
+      "distance_km": 4.8,
+      "geometry": {"type": "LineString", "coordinates": [[76.123, 11.553], [76.109, 11.566], [76.096, 11.578]]}
+    },
+    {
+      "id": "ROUTE-DEMO-03",
+      "from_zone_id": "RZ-DEMO-01",
+      "to_safe_zone_id": "SZ-DEMO-03",
+      "approval": "SYNTHETIC_DEMO",
+      "distance_km": 6.1,
+      "geometry": {"type": "LineString", "coordinates": [[76.123, 11.553], [76.104, 11.570], [76.088, 11.584]]}
+    }
+  ],
+  "instruction_assets": [
+    {
+      "id": "INSTR-DEMO-EN",
+      "language": "en-IN",
+      "title": "Synthetic evacuation exercise instructions",
+      "text": "This is a demo. Move calmly by a listed route, assist people who need help, and do not treat this exercise as official advice."
+    },
+    {
+      "id": "INSTR-DEMO-ML",
+      "language": "ml-IN",
+      "title": "സാങ്കൽപ്പിക ഒഴിപ്പിക്കൽ പരിശീലന നിർദ്ദേശങ്ങൾ",
+      "text": "ഇത് ഒരു ഡെമോ മാത്രമാണ്. പട്ടികപ്പെടുത്തിയ വഴിയിലൂടെ ശാന്തമായി നീങ്ങുക, സഹായം ആവശ്യമുള്ളവരെ സഹായിക്കുക, ഇത് ഔദ്യോഗിക നിർദ്ദേശമായി കണക്കാക്കരുത്."
+    }
+  ]
+}

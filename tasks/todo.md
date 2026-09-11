@@ -1,105 +1,74 @@
-# UI contrast refinement
+# Sthira v2 Migration Checklist
 
-- [x] Inspect current localhost rendering and identify contrast/hierarchy problems.
-- [x] Refine the imagery viewer palette, spacing, and responsive behavior without changing the demo flow.
-- [x] Verify JavaScript, backend tests, and desktop/mobile rendering.
+## Documentation pivot
+
+- [x] Replace permanent-relocation product scope with citizen emergency guidance.
+- [x] Define government-data-only authority boundary.
+- [x] Research and register official government sources.
+- [x] Define Voice Map Control and AI4Bharat model boundaries.
+- [x] Define explicit arrival and capacity semantics.
+- [x] Mark geofence arrival as future-only.
+- [x] Rewrite every Markdown file and leave text files untouched.
+- [x] Add the end-to-end autonomous phase prompts in `prompt.md`.
+
+## Code migration — not started
+
+### Phase 0 — repository pivot and safety baseline
+
+- [x] Inspect legacy backend, frontend, fixtures, tests, dependencies, and startup path.
+- [x] Record REUSE/ADAPT/ISOLATE/REMOVE_LATER inventory from three independent audits.
+- [x] Add isolated sthira_v2 namespace and /api/v2/status boundary.
+- [x] Add DEMO/SHADOW/PILOT/PRODUCTION runtime profiles with fail-closed pilot/production guard.
+- [x] Label legacy /ui/ as V1 synthetic demo and not emergency guidance.
+- [x] Update package metadata to citizen emergency guidance.
+- [x] Preserve all legacy tests and .txt files.
+- [ ] Add repeatable CI workflow and full v2 application shell in Phase 1.
+
+### Phase 1 — v2 foundation and contracts
+
+- [x] Add strict Pydantic v2 contracts and legal state transitions.
+- [x] Add CAP alert, provenance, freshness, geometry, zone, route, instruction, session, assignment, arrival, and capacity models.
+- [x] Add SYNTHETIC_DEMO Wayanad fixture with one alert, one red zone, three safe zones, routes, capacities, and English/Malayalam instructions.
+- [x] Add fixture integrity validation and focused tests.
+- [x] Expose v2 OpenAPI status smoke coverage.
+- [x] Add Makefile checks for Python compile, frontend syntax, full tests, and v2 tests.
+- [x] Verify full suite: 203 passed, 2 existing dependency deprecation warnings.
+- [ ] Add database/migrations in Phase 2.
+
+### Phase 2 — persistence, audit, and operational states
+
+- [x] Add SQLAlchemy 2 typed models and repositories for official fact versions, source artifacts/states, assignments, capacity events, and audit events.
+- [x] Add PostgreSQL/PostGIS-shaped Alembic migration scaffolding without embedded credentials.
+- [x] Add effective-time/system-time supersession and historical reconstruction.
+- [x] Add append-only audit hash chaining with tamper verification.
+- [x] Add database constraints for provenance, versions, capacity, party size, and legal stored states.
+- [x] Add focused server-free metadata, bitemporal, and audit tests.
+- [ ] Exercise upgrade/downgrade and spatial SRID checks on a real PostgreSQL 16/PostGIS service (external database unavailable in this environment).
+- [ ] Add operational readiness endpoints after the real database/artifact-store configuration exists.
+
+- [ ] Inventory reusable infrastructure and isolate legacy v1 modules.
+- [ ] Create v2 domain contracts and synthetic government-format fixtures.
+- [ ] Implement SACHET-compatible CAP ingestion and lifecycle.
+- [ ] Implement operational package validation for zones, routes, facilities, capacities, and policy.
+- [ ] Build citizen alert/map/non-map experience.
+- [ ] Implement assignment and capacity ledger with race/idempotency tests.
+- [ ] Implement arrival Yes/No flow.
+- [ ] Implement 112/local official dialler confirmation.
+- [ ] Implement deterministic text command grammar and map controller.
+- [ ] Deploy and benchmark IndicConformer for pilot languages.
+- [ ] Verify and integrate exact Indic Parler-TTS model.
+- [ ] Produce/review Malayalam, English, and ISL emergency content.
+- [ ] Add offline, stale, conflict, closed/full, and service-failure states.
+- [ ] Run accessibility, security, load, disaster-recovery, and live-browser verification.
+
+## Live pilot blockers
+
+- [ ] Close applicable items in `open-decisions.md`.
+- [ ] Obtain government permissions and operational samples.
+- [ ] Obtain DDMA/KSDMA safe-zone, route, capacity, allocation, and update SOP.
+- [ ] Establish 24×7 government operational ownership and manual fallback.
+- [ ] Complete privacy, legal, security, language, accessibility, and incident-response approvals.
 
 ## Review
 
-Replaced the competing cream/yellow/green treatments with a restrained slate-teal
-operations palette, improved semantic status contrast, simplified borders and
-shadows, and restored a single-column viewer below 980px. Visual QA passed in
-the localhost browser. `node --check frontend/app.js` passed and the full backend
-suite passed: 183 tests, 2 existing deprecation warnings.
-
-## Pastel palette pass
-
-- [x] Tokenize a pastel-blue and pastel-green palette.
-- [x] Apply it without weakening semantic status contrast.
-- [x] Verify localhost rendering and focused checks.
-
-Pastel blue now carries the page chrome and informational surfaces; pastel green
-carries prototype and evidence surfaces. Dark blue-green ink and a deeper green
-CTA preserve readable contrast. Browser visual QA passed, `tokens.css` returned
-HTTP 200, JavaScript syntax passed, and all 183 backend tests passed.
-
-## Teal shell refinement
-
-- [x] Restore the deep teal application shell.
-- [x] Shift the calm workspace and evidence surfaces toward pastel blue.
-- [x] Keep pastel green for secondary status cues and verify the result.
-
-Visual QA confirmed the teal shell, pastel-blue workspace, and restrained green
-status accent work together at the localhost viewport. The token stylesheet
-returned HTTP 200, JavaScript syntax passed, and `git diff --check` found no
-whitespace errors.
-
-## Triple verification demo
-
-- [x] Add satellite, ground, and radar/elevation stage data to the demo API.
-- [x] Show the three-stage method and per-site stage outcomes in the viewer.
-- [x] Verify API behavior, frontend syntax, and localhost rendering.
-
-The API now returns a transparent three-stage verification trail for every site.
-The frontend shows the method before execution and the three outcomes per site,
-with underlying criteria available on demand. Radar/elevation values are labelled
-as synthetic demo fixtures. Visual QA passed and all 183 tests passed.
-
-## Animated map screening
-
-- [x] Pulse the historical high-hazard area on initial page load.
-- [x] Hide candidate markers until screening begins.
-- [x] Reveal each site sequentially with checking and final-result callouts.
-- [x] Verify reduced-motion behavior, JavaScript, tests, and localhost rendering.
-
-The map now starts with only the pulsing red historical hazard zone. Running the
-screening reveals Elstone, Nedumbala and Kottapadi sequentially, shows a temporary
-three-source checking callout, and resolves each to Pass, Verify or Fail. Reduced
-motion falls back to immediate static visibility. Browser QA and all 183 tests passed.
-
-## Voice-guide interface
-
-- [x] Add an original animated Sthira companion as the voice-chat entry point.
-- [x] Add a compact multilingual Sarvam-ready voice panel.
-- [x] Add an honest listening-state preview without requesting microphone access.
-- [x] Verify keyboard behavior, reduced motion, syntax, and localhost rendering.
-
-The original Sthira Guide companion opens a floating English/Malayalam/Hindi
-voice panel. Its listening preview animates without requesting microphone access
-or claiming a Sarvam connection, and the selected language persists across states.
-Browser QA passed, JavaScript syntax passed, and all 183 tests passed.
-
-## Full-page language and UI polish
-
-- [x] Create a feature branch before committing.
-- [x] Extend language selection to every visible interface string.
-- [x] Recompose the map and evidence areas with better spacing and hierarchy.
-- [x] Refine the white/green palette while retaining teal and pastel blue.
-- [x] Verify syntax, tests, responsive rendering, and commit the intended diff.
-
-The page now uses one language selector for the shell, map, workflow, screening
-results, loading states, warnings and voice guide. The layout is map-first, with
-the verification method below the imagery and result cards using the full page
-width. Visual browser checks passed in English and Malayalam; JavaScript syntax
-passed, `git diff --check` passed, and the configured virtual environment passed
-all 183 tests with 2 existing deprecation warnings.
-
-## ASL access option
-
-- [x] Add ASL as the fourth interface option.
-- [x] Keep readable English copy in ASL mode.
-- [x] Show an honest signed-video placeholder instead of claiming text translation.
-- [x] Verify the interaction and focused checks.
-
-ASL now appears as the fourth selector. It activates a prominent interpretation
-panel before the satellite scene, retains readable English text, and states that
-interpreter-recorded clips are not connected yet. Browser interaction, visual
-layout, JavaScript syntax, and whitespace checks passed.
-
-## Candidate marker visibility
-
-- [x] Restore all three site markers on initial map load.
-- [x] Verify Nedumbala and Kottapadi visually before screening.
-
-The three marker anchors now remain visible within the center-cropped map at
-initial load. Browser QA confirmed Elstone, Nedumbala and Kottapadi together.
+The Markdown baseline is ready for code planning. The current application is not yet migrated and must not be represented as a live emergency system.

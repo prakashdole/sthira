@@ -137,6 +137,8 @@ from sthira.modules.resilience import (
     OfflineDeviceRecord,
     CoordinatedRestorePackage,
 )
+from sthira_v2.app import router as v2_router
+from sthira_v2.config import validate_startup
 from sthira.core.localization import (
     LOCALIZATION_REGISTRY,
     get_supported_languages,
@@ -321,6 +323,7 @@ def bootstrap_seed_data():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     bootstrap_seed_data()
+    validate_startup()
     yield
 
 
@@ -330,6 +333,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.include_router(v2_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -2901,7 +2905,6 @@ def get_release_assurance_report(
         automated_tests_passed=tests_passed,
     )
     return APIResponseEnvelope(data=report.model_dump())
-
 
 
 

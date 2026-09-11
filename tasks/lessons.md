@@ -1,9 +1,12 @@
 # Lessons
 
-- Raw satellite imagery is not self-explanatory. A demo map needs a tight study-area crop plus hazard overlays, candidate-site markers, labels, dates, sources, and limitations.
-- When the requested brand palette is pastel blue and green, use those colours on broad surfaces and retain dark ink plus deeper action colours for accessibility; do not let a dark operations palette dominate the product chrome.
-- A calm interface does not require removing its strong shell: retain deep teal for operational framing, then use pastel blue across the workspace and reserve pastel green for positive or prototype status cues.
-- A language selector must control the complete visible experience, including map labels, result states, loading text, warnings, and voice-assistant copy, not only the page introduction.
-- A large evidence image and a dense explanation should not compete in a narrow split view. Lead with the full-width image, then place the method and results in a spacious reading flow.
-- Sign languages are visual languages, not written-text locales. An ASL mode must provide signed media or clearly label its absence instead of presenting English text as an ASL translation.
-- Candidate-site markers must remain visible on the initial map; screening animation should add status feedback without hiding geographic context.
+- A disaster interface must distinguish government authority from software presentation at every screen and API boundary.
+- “God's view” should be implemented and named as Voice Map Control; avoid language suggesting omniscience or predictive certainty.
+- Voice transcription is probabilistic. Deterministic intent parsing and confirmation boundaries keep it from becoming an authority path.
+- Route safety cannot be inferred from ordinary road geometry; use incident-approved government routes.
+- Capacity needs party size, reservation semantics, idempotency, concurrency control, expiry, and correction—not a simple mutable counter.
+- A citizen reaching a map point is not proof of safe arrival. Baseline uses explicit confirmation; geofencing remains future work.
+- Maps, speech, and animation can all fail during an emergency. Text-first and non-map paths are product requirements.
+- ASL and ISL are different languages. For an Indian pilot, provide reviewed ISL media and never call translated text “sign language.”
+- Official catalog discovery is not operational API readiness; prove access, coverage, freshness, permission, and failure behavior.
+- Open-source models can satisfy a government-data-only policy when self-hosted, but their outputs are still AI-generated interface artifacts.
