@@ -265,14 +265,22 @@ Object.assign(i18n.hi, {
   voice_open: 'स्थिर वॉयस गाइड खोलें', voice_close: 'वॉयस गाइड बंद करें', voice_ask: 'स्थिर से पूछें', voice_guide_label: 'वॉयस गाइड', voice_title: 'स्थिर वॉयस गाइड', voice_interface: 'सर्वम एआई इंटरफेस', voice_description: 'उम्मीदवार स्थलों, सत्यापन चरणों या पास-विफल कारणों के बारे में पूछें।', voice_transcript_label: 'स्थिर गाइड', voice_idle: 'उम्मीदवार स्थलों, सत्यापन चरणों या परिणामों के बारे में पूछें।', voice_listening: 'आपका प्रश्न सुना जा रहा है... यह प्रीव्यू ऑडियो रिकॉर्ड या भेजता नहीं है।', voice_preview: 'सुनने की स्थिति देखें', voice_stop: 'सुनने का प्रीव्यू रोकें', voice_not_connected: 'केवल इंटरफेस प्रीव्यू। सर्वम एआई अभी जुड़ा नहीं है।', voice_capture_off: 'सुनने की स्थिति का प्रीव्यू। माइक्रोफोन बंद है।'
 });
 
+i18n.asl = {
+  ...i18n.en,
+  prototype_chip: 'Open prototype | ASL access mode',
+  asl_title: 'ASL interpretation',
+  asl_body: 'The screen remains in English while signed interpretation is shown visually.',
+  asl_placeholder: 'Interpreter-recorded ASL clips will appear here when video assets are connected.',
+  asl_status: 'Prototype placeholder | no signed video connected'
+};
+
 function t(key) {
   return i18n[currentLang]?.[key] || i18n.en[key] || key;
 }
 
 function switchLanguage(lang) {
   currentLang = lang;
-  voiceLanguage = lang === 'ml' ? 'Malayalam' : lang === 'hi' ? 'Hindi' : 'English';
-  document.documentElement.lang = lang;
+  document.documentElement.lang = lang === 'asl' ? 'ase' : lang;
   document.querySelectorAll('[data-ui-language]').forEach(button => {
     button.classList.toggle('active', button.dataset.uiLanguage === lang);
     button.setAttribute('aria-pressed', String(button.dataset.uiLanguage === lang));
@@ -320,20 +328,33 @@ function renderActiveTab() {
   if (activeTab === 'screening') {
     content.innerHTML = `
       <section class="viewer-shell">
+        ${currentLang === 'asl' ? `
+          <section class="asl-access-panel" aria-labelledby="asl-access-title">
+            <div class="asl-access-copy">
+              <span>${t('asl_status')}</span>
+              <h2 id="asl-access-title">${t('asl_title')}</h2>
+              <p>${t('asl_body')}</p>
+            </div>
+            <div class="asl-video-placeholder" role="img" aria-label="${t('asl_placeholder')}">
+              <strong>ASL</strong>
+              <span>${t('asl_placeholder')}</span>
+            </div>
+          </section>
+        ` : ''}
         <figure class="viewer-map" aria-labelledby="imagery-heading">
           <img src="${HISTORICAL_IMAGERY_URL}" alt="${t('historical_scene')}: ${t('area_title')}" loading="eager">
           <svg class="viewer-overlay" viewBox="0 0 1400 900" preserveAspectRatio="xMidYMid slice" aria-label="${t('hazard_area')}">
             <polygon class="hazard-area" points="754,600 1131,600 1131,825 754,825"></polygon>
             <text class="hazard-label" x="770" y="635">${t('hazard_area')}</text>
-            <g class="site-marker marker-pass" data-screening-site="SITE-ELSTONE-01" transform="translate(377 225)">
+            <g class="site-marker marker-pass" data-screening-site="SITE-ELSTONE-01" transform="translate(500 225)" style="opacity: 1">
               <circle r="12"></circle><circle r="4"></circle>
               <text x="18" y="5">Elstone | ${t('state_PASS')}</text>
             </g>
-            <g class="site-marker marker-verify" data-screening-site="SITE-NEDUMBALA-02" transform="translate(700 562)">
+            <g class="site-marker marker-verify" data-screening-site="SITE-NEDUMBALA-02" transform="translate(700 420)" style="opacity: 1">
               <circle r="12"></circle><circle r="4"></circle>
               <text x="18" y="5">Nedumbala | ${t('state_VERIFY')}</text>
             </g>
-            <g class="site-marker marker-fail" data-screening-site="SITE-HIGH-SLOPE-03" transform="translate(1185 450)">
+            <g class="site-marker marker-fail" data-screening-site="SITE-HIGH-SLOPE-03" transform="translate(910 330)" style="opacity: 1">
               <circle r="12"></circle><circle r="4"></circle>
               <text x="-190" y="5">Kottapadi | ${t('state_FAIL')}</text>
             </g>

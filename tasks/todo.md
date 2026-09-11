@@ -83,3 +83,23 @@ the verification method below the imagery and result cards using the full page
 width. Visual browser checks passed in English and Malayalam; JavaScript syntax
 passed, `git diff --check` passed, and the configured virtual environment passed
 all 183 tests with 2 existing deprecation warnings.
+
+## ASL access option
+
+- [x] Add ASL as the fourth interface option.
+- [x] Keep readable English copy in ASL mode.
+- [x] Show an honest signed-video placeholder instead of claiming text translation.
+- [x] Verify the interaction and focused checks.
+
+ASL now appears as the fourth selector. It activates a prominent interpretation
+panel before the satellite scene, retains readable English text, and states that
+interpreter-recorded clips are not connected yet. Browser interaction, visual
+layout, JavaScript syntax, and whitespace checks passed.
+
+## Candidate marker visibility
+
+- [x] Restore all three site markers on initial map load.
+- [x] Verify Nedumbala and Kottapadi visually before screening.
+
+The three marker anchors now remain visible within the center-cropped map at
+initial load. Browser QA confirmed Elstone, Nedumbala and Kottapadi together.

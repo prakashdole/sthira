@@ -1062,7 +1062,7 @@ nav.tabs {
   header { align-items: flex-start; }
   .brand h1 { font-size: 1.2rem; }
   .brand p { max-width: 30ch; }
-  .lang-toggle { max-width: 250px; }
+  .lang-toggle { max-width: 360px; }
   .demo-mode-chip { width: 100%; text-align: center; }
   .viewer-shell { border-radius: 10px; }
 }
@@ -1262,7 +1262,7 @@ header { border-bottom-color: var(--color-blue-border); }
 }
 
 .site-marker {
-  opacity: 0;
+  opacity: 1;
   transition: opacity var(--dur-short) var(--ease-out);
 }
 
@@ -1656,6 +1656,50 @@ body {
   border-color: var(--color-shell-teal);
 }
 
+.asl-access-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.7fr);
+  gap: clamp(1.5rem, 4vw, 4rem);
+  align-items: center;
+  padding: clamp(1.5rem, 3vw, 2.5rem) clamp(2rem, 4vw, 4rem);
+  color: var(--color-on-shell);
+  background: var(--color-shell-teal);
+}
+
+.asl-access-copy > span {
+  color: var(--color-pastel-blue);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.asl-access-copy h2 {
+  max-width: none;
+  margin: 0.35rem 0 0.55rem;
+  color: var(--color-on-shell);
+  font-size: clamp(1.5rem, 3vw, 2.2rem);
+}
+
+.asl-access-copy p {
+  max-width: 58ch;
+  color: var(--color-pastel-blue);
+  line-height: 1.55;
+}
+
+.asl-video-placeholder {
+  display: grid;
+  min-height: 150px;
+  place-content: center;
+  gap: 0.5rem;
+  padding: 1.25rem;
+  text-align: center;
+  background: var(--color-shell-teal-soft);
+  border: 1px solid var(--color-blue-border);
+  border-radius: var(--radius-control);
+}
+
+.asl-video-placeholder strong { font-size: 2rem; letter-spacing: 0.08em; }
+.asl-video-placeholder span { max-width: 38ch; color: var(--color-pastel-blue); font-size: var(--text-xs); line-height: 1.45; }
+
 .viewer-shell {
   display: block;
   min-height: 0;
@@ -1757,6 +1801,7 @@ body {
   .verification-method { grid-column: 1; grid-row: auto; }
   .viewer-panel .screening-results-grid { grid-template-columns: 1fr; padding-inline: 2rem; }
   .viewer-results-empty, .viewer-panel .screening-loading, .viewer-panel .screening-error, .viewer-caution { margin-inline: 2rem; }
+  .asl-access-panel { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 540px) {
