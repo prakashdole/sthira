@@ -67,6 +67,8 @@ A material change must add or supersede a decision rather than rewrite the old r
 | DEC-044 | Source Capability Classification, Permitted AOI Sample Gates, Provider Health Monitoring, and Dependency Blocker Governance | ACCEPTED |
 | DEC-045 | Platform Reliability, Transactional Outbox Resilience, Cross-Channel Leakage Prevention, and CERT-In Compliance Operations | ACCEPTED |
 | DEC-046 | Prototype P0 security boundary: HMAC sessions, bound step-up MFA, outbox retry, degraded writes | ACCEPTED |
+| DEC-047 | Public Multilingual Screening Demo & Readiness Gate Enforcements | ACCEPTED |
+
 
 
 
@@ -668,9 +670,21 @@ The user explicitly instructed **“PLEASE IMPLEMENT THIS PLAN”** on 8 Septemb
 - **Rejected:** Shipping the prefix MFA check; treating client-supplied `user_id` as identity; adding Keycloak/PostgreSQL in this change (those remain REM-001 production and REM-003/004); rewriting the static UI into Next.js here (REM-012).
 - **Consequences:** Unauthenticated calls return 401. Forged `MFA-STEPUP-*` tokens return 403. Outbox failures progress to dead-letter and can be reconciled. Mutations during degraded mode return 503. PostgreSQL, RLS, object storage, MILP, Next.js PWA, CI and live connectors remain open (REM-003–022, REM-R01–R10).
 - **Evidence:** `changes.md` §13 REM-001/002/005/007; `rules.md` RUL-002, RUL-054; `trd.md` NFR-012, NFR-028; `architecture.md` §4–5 identity and outbox.
-- **Review trigger:** Keycloak/OIDC broker integration, PostgreSQL outbox table, or any claim of PH-1/PH-2 exit.
+### DEC-047 — Public Multilingual Screening Demo & Readiness Gate Enforcements
+
+- **Status:** ACCEPTED.
+- **Context:** Merged feature branch `feature/polished-multilingual-demo`. Required a public unauthenticated screening endpoint for public/hackathon demonstrations, multilingual accessibility (English/Malayalam + ASL visual guidance) per WCAG 2.2 AA / GIGW 3.0, and strict household readiness holds (verification, statutory consents, pending objections) prior to candidate allocation simulations.
+- **Decision:**
+  1. Add unauthenticated public GET route `/api/v1/demo/site-screening` under `PUBLIC_GET_PREFIXES` to showcase predetermined synthetic site screening and NASA GIBS satellite context without exposing private casework or allocating land.
+  2. Implement strict consent and verification holds in `AllocationService.generate_scenario()`: unassigned holds are generated if household eligibility is unverified, consent (programme, pathway, site preference) is missing, or an objection is pending.
+  3. Ensure allocation scenarios only draw candidate sites that pass all mandatory hard gates in `PolicyEngine`.
+  4. Expand frontend accessibility with full Malayalam translation, high-contrast token system, and ASL video guidance mode.
+- **Why:** Satisfies RUL-001, RUL-014, RUL-028, RUL-040–048, and RUL-072 by ensuring simulations never assign ineligible or non-consenting households, never allocate failing sites, and provide public demonstration capabilities safely.
+- **Consequences:** All 183 automated tests pass. Unauthenticated users can inspect the public demo endpoint, while all mutations and private casework remain protected under HMAC auth sessions.
+- **Review trigger:** Transition from synthetic screening demo data to live field survey connectors.
 
 ## 4. Explicit research corrections adopted
+
 
 
 
