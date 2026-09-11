@@ -86,7 +86,7 @@ function render() {
           </div>
         </section>
       </main>
-      <div class="map-legend-floating"><span><i class="legend-crimson"></i>${t.hazard}</span><span><i class="legend-cobalt"></i>${t.routeValue}</span><span><i class="legend-mint"></i>${t.shelter}</span></div>
+      <div class="map-legend-floating context-widget"><span>LAT 11.685° N, LON 76.132° E</span><span>PRECIPITATION: 64mm/h (HEAVY)</span><span><i class="legend-mint"></i>${t.source}</span></div>
       <footer class="tactical-footer"><span>${t.mapNote}</span><button type="button" data-action="details">${t.details}</button></footer>
       <div class="toast" role="status" aria-live="polite" hidden></div>
       <dialog class="tactical-dialog" aria-labelledby="details-title" ${detailsOpen ? 'open' : ''}><div class="dialog-top"><h2 id="details-title">${t.detailsTitle}</h2><button type="button" aria-label="${t.detailsClose}" data-action="details-close">×</button></div><p>${t.detailsBody}</p><dl><div><dt>${t.issued}</dt><dd>${t.source}</dd></div><div><dt>${t.expires}</dt></div></dl><button class="start-button" type="button" data-action="details-close">${t.detailsClose}</button></dialog>
