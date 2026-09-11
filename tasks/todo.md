@@ -33,6 +33,7 @@
 - [x] Expose v2 OpenAPI status smoke coverage.
 - [x] Add Makefile checks for Python compile, frontend syntax, full tests, and v2 tests.
 - [x] Verify full suite: 203 passed, 2 existing dependency deprecation warnings.
+- [x] Add isolated Vite v2 frontend foundation with responsive synthetic emergency guidance shell and localhost dev command.
 - [ ] Add database/migrations in Phase 2.
 
 ### Phase 2 — persistence, audit, and operational states
