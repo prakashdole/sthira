@@ -11,5 +11,10 @@
   "devDependencies": {
     "typescript": "^5.6.3",
     "vite": "^6.0.0"
+  },
+  "dependencies": {
+    "@fontsource/noto-sans": "^5.3.0",
+    "@fontsource/noto-sans-devanagari": "^5.3.0",
+    "@fontsource/noto-sans-malayalam": "^5.3.0"
   }
 }
