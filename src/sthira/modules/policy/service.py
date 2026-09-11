@@ -71,6 +71,16 @@ class PolicyEngine:
             if report.overall_gate_pass
         ]
 
+    def list_registered_site_assessments(self) -> List[Dict[str, Any]]:
+        """Return retained prototype inputs and reports for the public screening demo."""
+        return [
+            {
+                "site": self._registered_site_inputs[site_id].model_dump(),
+                "report": report.model_dump(),
+            }
+            for site_id, report in self._registered_site_reports.items()
+        ]
+
     def evaluate_omega_score(self, *args, **kwargs):
         """Strict enforcement of RUL-035."""
         raise MasterScoreProhibitedError()

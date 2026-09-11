@@ -4,6 +4,55 @@
  */
 
 const API_BASE = window.location.origin;
+let voiceGuideOpen = false;
+let voicePreviewActive = false;
+
+function toggleVoiceGuide(forceOpen) {
+  const launcher = document.getElementById('voice-guide-launcher');
+  const panel = document.getElementById('voice-guide-panel');
+  if (!launcher || !panel) return;
+
+  voiceGuideOpen = typeof forceOpen === 'boolean' ? forceOpen : !voiceGuideOpen;
+  launcher.setAttribute('aria-expanded', String(voiceGuideOpen));
+  if (voiceGuideOpen) {
+    panel.hidden = false;
+    window.requestAnimationFrame(() => panel.classList.add('is-open'));
+    panel.querySelector('.voice-guide-close')?.focus();
+    return;
+  }
+
+  voicePreviewActive = false;
+  panel.classList.remove('is-open', 'is-listening');
+  const finishClose = () => {
+    panel.hidden = true;
+    launcher.focus();
+  };
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) finishClose();
+  else window.setTimeout(finishClose, 180);
+}
+
+function updateVoiceGuideCopy() {
+  const label = document.getElementById('voice-preview-label');
+  const note = document.getElementById('voice-connection-note');
+  const transcript = document.getElementById('voice-transcript-text');
+  if (label) label.textContent = voicePreviewActive ? t('voice_stop') : t('voice_preview');
+  if (note) note.textContent = voicePreviewActive ? t('voice_capture_off') : t('voice_not_connected');
+  if (transcript) transcript.textContent = voicePreviewActive ? t('voice_listening') : t('voice_idle');
+}
+
+function toggleVoicePreview() {
+  const panel = document.getElementById('voice-guide-panel');
+  const button = document.getElementById('voice-preview-button');
+  const label = document.getElementById('voice-preview-label');
+  const note = document.getElementById('voice-connection-note');
+  const transcript = document.getElementById('voice-transcript-text');
+  if (!panel || !button || !label || !note || !transcript) return;
+
+  voicePreviewActive = !voicePreviewActive;
+  panel.classList.toggle('is-listening', voicePreviewActive);
+  button.setAttribute('aria-pressed', String(voicePreviewActive));
+  updateVoiceGuideCopy();
+}
 
 const _nativeFetch = window.fetch.bind(window);
 window.fetch = function(url, opts) {
@@ -168,27 +217,91 @@ const i18n = {
   }
 };
 
-function switchLanguage(lang) {
-  currentLang = lang;
-  document.documentElement.lang = lang;
-  document.querySelectorAll('[data-i18n]').forEach(el => {
-    const key = el.getAttribute('data-i18n');
-    if (i18n[lang][key]) {
-      el.textContent = i18n[lang][key];
-    }
-  });
-  renderActiveTab();
+Object.assign(i18n.en, {
+  brand_subtitle: 'Proactive permanent relocation decision support | Wayanad pilot',
+  advisory_banner: 'ADVISORY DECISION SUPPORT ONLY. All outputs require DDMA review and authorized human approval.', advisory_banner_ml: 'Prototype output only. Not a gazette notice or government order.',
+  audit_checking: 'Verifying audit trail...', prototype_chip: 'Open prototype | no sign-in', screening_tab: 'Satellite site-screening demo',
+  historical_scene: 'Historical satellite scene', area_title: 'Wayanad candidate-site area', hazard_area: 'Historical high-hazard area', candidate_site: 'Candidate site', study_extent: 'Approx. study extent',
+  historical_not_live: 'Historical | not live', site_count: '3 candidate sites', prototype_kicker: 'Predetermined prototype',
+  main_question: 'Which sites should move to field verification?', main_description: 'Three evidence stages screen each candidate. No land is allocated and no official safety approval is issued.',
+  triple_verification: 'Triple verification', satellite: 'Satellite screening', satellite_detail: 'Historical imagery and hazard overlay', ground: 'On-ground verification', ground_detail: 'Legal, water and access evidence', radar: 'Radar and elevation', radar_detail: 'Terrain, elevation and slope model',
+  synthetic_note: 'Ground and terrain stages use predetermined synthetic evidence in this hackathon prototype.', observation: 'Observation', observation_date: '31 March 2024', evidence_stages: 'Evidence stages', possible_result: 'Possible result', evidence_value: 'Satellite | ground | terrain radar', result_value: 'Pass | verify | fail',
+  run_screening: 'Run predetermined screening', rerun_screening: 'Run screening again', retry_screening: 'Retry screening', running_screening: 'Running three verification stages...', run_note: 'No form entry. Fixed evidence produces a repeatable result.',
+  ready_title: 'Ready to screen', ready_body: 'Run the model to compare the three predetermined sites.', caution: 'Imagery cannot prove present-day title, water, occupancy or safety. Current field verification is mandatory.',
+  checking: 'Checking satellite, ground and radar evidence...', stages_complete: 'Three verification stages complete', criteria: 'View underlying criteria', potential_capacity: 'potential dwelling capacity', historical_evidence: 'historical evidence', screening_unavailable: 'Screening unavailable', integrity_alert: 'Integrity alert', events: 'events',
+  verdict_PROVISIONAL_PASS: 'Passed prototype screening', verdict_VERIFY: 'More evidence required', verdict_FAIL: 'Not suitable in this screening', state_PASS: 'Pass', state_VERIFY: 'Verify', state_UNKNOWN: 'Unknown', state_FAIL: 'Fail',
+  voice_open: 'Open Sthira voice guide', voice_close: 'Close voice guide', voice_ask: 'Ask Sthira', voice_guide_label: 'Voice guide', voice_title: 'Sthira voice guide', voice_interface: 'Sarvam AI interface', voice_description: 'Ask about candidate sites, verification stages, or why a site passed or failed.', voice_transcript_label: 'Sthira Guide', voice_idle: 'Ask about candidate sites, verification stages, or screening results.', voice_listening: 'Listening for your question... This preview does not record or send audio.', voice_preview: 'Preview listening state', voice_stop: 'Stop listening preview', voice_not_connected: 'Interface preview only. Sarvam AI is not connected yet.', voice_capture_off: 'Listening-state preview. Microphone capture is off.'
+});
+
+Object.assign(i18n.ml, {
+  brand_subtitle: 'സ്ഥിര പുനരധിവാസ തീരുമാന സഹായ സംവിധാനം | വയനാട് പൈലറ്റ്',
+  advisory_banner: 'ഇത് ഉപദേശക തീരുമാന സഹായം മാത്രം. എല്ലാ ഫലങ്ങൾക്കും ഡി.ഡി.എം.എ പരിശോധനയും അംഗീകൃത മനുഷ്യാനുമതിയും ആവശ്യമാണ്.',
+  audit_checking: 'ഓഡിറ്റ് രേഖ പരിശോധിക്കുന്നു...', prototype_chip: 'തുറന്ന പ്രോട്ടോടൈപ്പ് | സൈൻ ഇൻ വേണ്ട', screening_tab: 'ഉപഗ്രഹ സ്ഥല പരിശോധന ഡെമോ',
+  historical_scene: 'ചരിത്ര ഉപഗ്രഹ ദൃശ്യം', area_title: 'വയനാട് സ്ഥാനപരിശോധന മേഖല', hazard_area: 'ചരിത്രപരമായ ഉയർന്ന അപകട മേഖല', candidate_site: 'പരിഗണനാ സ്ഥലം', study_extent: 'ഏകദേശ പഠന പരിധി',
+  historical_not_live: 'ചരിത്ര ഡാറ്റ | തത്സമയം അല്ല', site_count: '3 പരിഗണനാ സ്ഥലങ്ങൾ', prototype_kicker: 'മുൻകൂട്ടി നിശ്ചയിച്ച പ്രോട്ടോടൈപ്പ്',
+  main_question: 'ഏത് സ്ഥലങ്ങൾ ഫീൽഡ് പരിശോധനയിലേക്ക് കടക്കണം?', main_description: 'മൂന്ന് തെളിവ് ഘട്ടങ്ങൾ ഓരോ സ്ഥലവും പരിശോധിക്കുന്നു. ഭൂമി അനുവദിക്കുകയോ ഔദ്യോഗിക സുരക്ഷാനുമതി നൽകുകയോ ചെയ്യുന്നില്ല.',
+  triple_verification: 'മൂന്നുതല പരിശോധന', satellite: 'ഉപഗ്രഹ പരിശോധന', satellite_detail: 'ചരിത്ര ചിത്രങ്ങളും അപകട മേഖലയും', ground: 'ഭൂതല പരിശോധന', ground_detail: 'നിയമം, ജലം, പ്രവേശനം', radar: 'റഡാറും ഉയരവും', radar_detail: 'ഭൂപ്രകൃതി, ഉയരം, ചരിവ് മാതൃക',
+  synthetic_note: 'ഭൂതലവും ഭൂപ്രകൃതിയും ഈ ഹാക്കത്തോൺ പ്രോട്ടോടൈപ്പിലെ മുൻനിശ്ചിത സിന്തറ്റിക് തെളിവുകളാണ്.', observation: 'നിരീക്ഷണം', observation_date: '31 മാർച്ച് 2024', evidence_stages: 'തെളിവ് ഘട്ടങ്ങൾ', possible_result: 'സാധ്യമായ ഫലം', evidence_value: 'ഉപഗ്രഹം | ഭൂതലം | റഡാർ', result_value: 'പാസ് | പരിശോധിക്കുക | പരാജയം',
+  run_screening: 'മുൻനിശ്ചിത പരിശോധന നടത്തുക', rerun_screening: 'വീണ്ടും പരിശോധിക്കുക', retry_screening: 'വീണ്ടും ശ്രമിക്കുക', running_screening: 'മൂന്ന് പരിശോധനാ ഘട്ടങ്ങൾ പ്രവർത്തിക്കുന്നു...', run_note: 'ഫോം പൂരിപ്പിക്കേണ്ടതില്ല. സ്ഥിര തെളിവുകൾ ആവർത്തിക്കാവുന്ന ഫലം നൽകുന്നു.',
+  ready_title: 'പരിശോധനയ്ക്ക് തയ്യാർ', ready_body: 'മുൻനിശ്ചിത മൂന്ന് സ്ഥലങ്ങൾ താരതമ്യം ചെയ്യാൻ മോഡൽ പ്രവർത്തിപ്പിക്കുക.', caution: 'ഉപഗ്രഹ ചിത്രം ഇന്നത്തെ ഉടമസ്ഥാവകാശം, ജലം, താമസം, സുരക്ഷ എന്നിവ തെളിയിക്കില്ല. നിലവിലെ ഫീൽഡ് പരിശോധന നിർബന്ധമാണ്.',
+  checking: 'ഉപഗ്രഹം, ഭൂതലം, റഡാർ തെളിവുകൾ പരിശോധിക്കുന്നു...', stages_complete: 'മൂന്ന് പരിശോധനാ ഘട്ടങ്ങളും പൂർത്തിയായി', criteria: 'അടിസ്ഥാന മാനദണ്ഡങ്ങൾ കാണുക', potential_capacity: 'സാധ്യമായ വീടുകളുടെ ശേഷി', historical_evidence: 'ചരിത്ര തെളിവ്', screening_unavailable: 'പരിശോധന ലഭ്യമല്ല', integrity_alert: 'അഖണ്ഡത മുന്നറിയിപ്പ്', events: 'സംഭവങ്ങൾ',
+  verdict_PROVISIONAL_PASS: 'പ്രോട്ടോടൈപ്പ് പരിശോധന പാസായി', verdict_VERIFY: 'കൂടുതൽ തെളിവ് ആവശ്യമാണ്', verdict_FAIL: 'ഈ പരിശോധനയിൽ അനുയോജ്യമല്ല', state_PASS: 'പാസ്', state_VERIFY: 'പരിശോധിക്കുക', state_UNKNOWN: 'അജ്ഞാതം', state_FAIL: 'പരാജയം',
+  voice_open: 'സ്ഥിര വോയ്സ് ഗൈഡ് തുറക്കുക', voice_close: 'വോയ്സ് ഗൈഡ് അടയ്ക്കുക', voice_ask: 'സ്ഥിരയോട് ചോദിക്കുക', voice_guide_label: 'വോയ്സ് ഗൈഡ്', voice_title: 'സ്ഥിര വോയ്സ് ഗൈഡ്', voice_interface: 'സർവം എ.ഐ ഇന്റർഫേസ്', voice_description: 'സ്ഥലങ്ങൾ, പരിശോധനാ ഘട്ടങ്ങൾ, പാസ് അല്ലെങ്കിൽ പരാജയ കാരണം എന്നിവ ചോദിക്കാം.', voice_transcript_label: 'സ്ഥിര ഗൈഡ്', voice_idle: 'സ്ഥലങ്ങൾ, പരിശോധനാ ഘട്ടങ്ങൾ, ഫലങ്ങൾ എന്നിവയെക്കുറിച്ച് ചോദിക്കാം.', voice_listening: 'നിങ്ങളുടെ ചോദ്യം കേൾക്കുന്നു... ഈ പ്രിവ്യൂ ശബ്ദം റെക്കോർഡ് ചെയ്യുകയോ അയയ്ക്കുകയോ ചെയ്യുന്നില്ല.', voice_preview: 'കേൾക്കുന്ന അവസ്ഥ കാണുക', voice_stop: 'കേൾക്കുന്ന പ്രിവ്യൂ നിർത്തുക', voice_not_connected: 'ഇന്റർഫേസ് പ്രിവ്യൂ മാത്രം. സർവം എ.ഐ ഇതുവരെ ബന്ധിപ്പിച്ചിട്ടില്ല.', voice_capture_off: 'കേൾക്കുന്ന അവസ്ഥയുടെ പ്രിവ്യൂ. മൈക്രോഫോൺ ഓഫാണ്.'
+});
+
+Object.assign(i18n.hi, {
+  brand_subtitle: 'स्थायी पुनर्वास निर्णय सहायता | वायनाड पायलट',
+  advisory_banner: 'केवल सलाहकारी निर्णय सहायता। सभी परिणामों के लिए डीडीएमए समीक्षा और अधिकृत मानवीय अनुमोदन आवश्यक है।', advisory_banner_ml: 'केवल प्रोटोटाइप परिणाम। यह राजपत्र सूचना या सरकारी आदेश नहीं है।',
+  audit_checking: 'ऑडिट रिकॉर्ड की जांच हो रही है...', prototype_chip: 'खुला प्रोटोटाइप | साइन-इन नहीं', screening_tab: 'उपग्रह स्थल-जांच डेमो',
+  historical_scene: 'ऐतिहासिक उपग्रह दृश्य', area_title: 'वायनाड उम्मीदवार-स्थल क्षेत्र', hazard_area: 'ऐतिहासिक उच्च-जोखिम क्षेत्र', candidate_site: 'उम्मीदवार स्थल', study_extent: 'अनुमानित अध्ययन क्षेत्र',
+  historical_not_live: 'ऐतिहासिक | लाइव नहीं', site_count: '3 उम्मीदवार स्थल', prototype_kicker: 'पूर्वनिर्धारित प्रोटोटाइप',
+  main_question: 'कौन से स्थल मैदानी सत्यापन तक जाने चाहिए?', main_description: 'तीन स्वतंत्र प्रमाण चरण हर स्थल की जांच करते हैं। भूमि आवंटन या आधिकारिक सुरक्षा स्वीकृति जारी नहीं होती।',
+  triple_verification: 'तीन-स्तरीय सत्यापन', satellite: 'उपग्रह जांच', satellite_detail: 'ऐतिहासिक चित्र और जोखिम ओवरले', ground: 'मैदानी सत्यापन', ground_detail: 'कानूनी, जल और पहुंच प्रमाण', radar: 'रडार और ऊंचाई', radar_detail: 'भूभाग, ऊंचाई और ढलान मॉडल',
+  synthetic_note: 'मैदानी और भूभाग चरण इस हैकाथॉन प्रोटोटाइप में पूर्वनिर्धारित कृत्रिम प्रमाण का उपयोग करते हैं।', observation: 'अवलोकन', observation_date: '31 मार्च 2024', evidence_stages: 'प्रमाण चरण', possible_result: 'संभावित परिणाम', evidence_value: 'उपग्रह | मैदान | भूभाग रडार', result_value: 'पास | सत्यापित करें | विफल',
+  run_screening: 'पूर्वनिर्धारित जांच चलाएं', rerun_screening: 'जांच फिर चलाएं', retry_screening: 'फिर प्रयास करें', running_screening: 'तीन सत्यापन चरण चल रहे हैं...', run_note: 'कोई फॉर्म नहीं। निश्चित प्रमाण दोहराया जा सकने वाला परिणाम देते हैं।',
+  ready_title: 'जांच के लिए तैयार', ready_body: 'तीन पूर्वनिर्धारित स्थलों की तुलना के लिए मॉडल चलाएं।', caution: 'उपग्रह चित्र वर्तमान स्वामित्व, जल, निवास या सुरक्षा सिद्ध नहीं कर सकते। वर्तमान मैदानी सत्यापन अनिवार्य है।',
+  checking: 'उपग्रह, मैदानी और रडार प्रमाण की जांच हो रही है...', stages_complete: 'तीनों सत्यापन चरण पूरे हुए', criteria: 'अंतर्निहित मानदंड देखें', potential_capacity: 'संभावित आवास क्षमता', historical_evidence: 'ऐतिहासिक प्रमाण', screening_unavailable: 'जांच उपलब्ध नहीं', integrity_alert: 'अखंडता चेतावनी', events: 'घटनाएं',
+  verdict_PROVISIONAL_PASS: 'प्रोटोटाइप जांच में पास', verdict_VERIFY: 'अधिक प्रमाण आवश्यक', verdict_FAIL: 'इस जांच में अनुपयुक्त', state_PASS: 'पास', state_VERIFY: 'सत्यापित करें', state_UNKNOWN: 'अज्ञात', state_FAIL: 'विफल',
+  voice_open: 'स्थिर वॉयस गाइड खोलें', voice_close: 'वॉयस गाइड बंद करें', voice_ask: 'स्थिर से पूछें', voice_guide_label: 'वॉयस गाइड', voice_title: 'स्थिर वॉयस गाइड', voice_interface: 'सर्वम एआई इंटरफेस', voice_description: 'उम्मीदवार स्थलों, सत्यापन चरणों या पास-विफल कारणों के बारे में पूछें।', voice_transcript_label: 'स्थिर गाइड', voice_idle: 'उम्मीदवार स्थलों, सत्यापन चरणों या परिणामों के बारे में पूछें।', voice_listening: 'आपका प्रश्न सुना जा रहा है... यह प्रीव्यू ऑडियो रिकॉर्ड या भेजता नहीं है।', voice_preview: 'सुनने की स्थिति देखें', voice_stop: 'सुनने का प्रीव्यू रोकें', voice_not_connected: 'केवल इंटरफेस प्रीव्यू। सर्वम एआई अभी जुड़ा नहीं है।', voice_capture_off: 'सुनने की स्थिति का प्रीव्यू। माइक्रोफोन बंद है।'
+});
+
+function t(key) {
+  return i18n[currentLang]?.[key] || i18n.en[key] || key;
 }
 
-let activeTab = 'overview';
+function switchLanguage(lang) {
+  currentLang = lang;
+  voiceLanguage = lang === 'ml' ? 'Malayalam' : lang === 'hi' ? 'Hindi' : 'English';
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-ui-language]').forEach(button => {
+    button.classList.toggle('active', button.dataset.uiLanguage === lang);
+    button.setAttribute('aria-pressed', String(button.dataset.uiLanguage === lang));
+  });
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (i18n[lang]?.[key]) {
+      el.textContent = t(key);
+    }
+  });
+  document.querySelectorAll('[data-i18n-aria-label]').forEach(el => {
+    el.setAttribute('aria-label', t(el.getAttribute('data-i18n-aria-label')));
+  });
+  renderActiveTab();
+  updateVoiceGuideCopy();
+  loadData();
+}
+
+let activeTab = 'screening';
 let cachedData = null;
+
+const HISTORICAL_IMAGERY_URL = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=HLS_S30_Nadir_BRDF_Adjusted_Reflectance&STYLES=&FORMAT=image/jpeg&TRANSPARENT=false&HEIGHT=900&WIDTH=1400&CRS=EPSG:4326&BBOX=11.52,76.05,11.64,76.18&TIME=2024-03-31';
 
 async function loadData() {
   try {
     const healthRes = await fetch(`${API_BASE}/health`).then(r => r.json());
     document.getElementById('audit-status-badge').textContent = healthRes.data.audit_chain_valid 
-      ? `✓ ${i18n[currentLang].audit_valid_msg} (${healthRes.data.audit_entries_count} events)`
-      : '⚠ Integrity Alert';
+      ? `${i18n[currentLang].audit_valid_msg} (${healthRes.data.audit_entries_count} ${t('events')})`
+      : t('integrity_alert');
   } catch(e) {
     console.log('API health poll notice:', e);
   }
@@ -204,7 +317,72 @@ function showTab(tabId) {
 
 function renderActiveTab() {
   const content = document.getElementById('tab-content');
-  if (activeTab === 'overview') {
+  if (activeTab === 'screening') {
+    content.innerHTML = `
+      <section class="viewer-shell">
+        <figure class="viewer-map" aria-labelledby="imagery-heading">
+          <img src="${HISTORICAL_IMAGERY_URL}" alt="${t('historical_scene')}: ${t('area_title')}" loading="eager">
+          <svg class="viewer-overlay" viewBox="0 0 1400 900" preserveAspectRatio="xMidYMid slice" aria-label="${t('hazard_area')}">
+            <polygon class="hazard-area" points="754,600 1131,600 1131,825 754,825"></polygon>
+            <text class="hazard-label" x="770" y="635">${t('hazard_area')}</text>
+            <g class="site-marker marker-pass" data-screening-site="SITE-ELSTONE-01" transform="translate(377 225)">
+              <circle r="12"></circle><circle r="4"></circle>
+              <text x="18" y="5">Elstone | ${t('state_PASS')}</text>
+            </g>
+            <g class="site-marker marker-verify" data-screening-site="SITE-NEDUMBALA-02" transform="translate(700 562)">
+              <circle r="12"></circle><circle r="4"></circle>
+              <text x="18" y="5">Nedumbala | ${t('state_VERIFY')}</text>
+            </g>
+            <g class="site-marker marker-fail" data-screening-site="SITE-HIGH-SLOPE-03" transform="translate(1185 450)">
+              <circle r="12"></circle><circle r="4"></circle>
+              <text x="-190" y="5">Kottapadi | ${t('state_FAIL')}</text>
+            </g>
+          </svg>
+          <div class="map-screening-layer" id="map-screening-layer" aria-live="polite"></div>
+          <div class="viewer-map-title">
+            <span>${t('historical_scene')}</span>
+            <strong id="imagery-heading">${t('area_title')}</strong>
+          </div>
+          <div class="viewer-map-legend"><span class="legend-risk"></span>${t('hazard_area')} <span class="legend-site"></span>${t('candidate_site')}</div>
+          <div class="viewer-scale">${t('study_extent')} | 11.52-11.64°N / 76.05-76.18°E</div>
+          <figcaption>NASA Earthdata GIBS | HLS Sentinel-2 30 m | ${t('observation_date')}</figcaption>
+        </figure>
+
+        <aside class="viewer-panel">
+          <div class="viewer-panel-intro">
+            <div class="viewer-status-row">
+              <span class="freshness historical">${t('historical_not_live')}</span>
+              <span class="viewer-site-count">${t('site_count')}</span>
+            </div>
+            <p class="hero-kicker">${t('prototype_kicker')}</p>
+            <h2>${t('main_question')}</h2>
+            <p>${t('main_description')}</p>
+            <section class="verification-method" aria-labelledby="verification-method-title">
+              <h3 id="verification-method-title">${t('triple_verification')}</h3>
+              <ol class="verification-pipeline">
+                <li><span>1</span><div><strong>${t('satellite')}</strong><small>${t('satellite_detail')}</small></div></li>
+                <li><span>2</span><div><strong>${t('ground')}</strong><small>${t('ground_detail')}</small></div></li>
+                <li><span>3</span><div><strong>${t('radar')}</strong><small>${t('radar_detail')}</small></div></li>
+              </ol>
+              <p>${t('synthetic_note')}</p>
+            </section>
+            <dl class="viewer-facts">
+              <div><dt>${t('observation')}</dt><dd>${t('observation_date')}</dd></div>
+              <div><dt>${t('evidence_stages')}</dt><dd>${t('evidence_value')}</dd></div>
+              <div><dt>${t('possible_result')}</dt><dd>${t('result_value')}</dd></div>
+            </dl>
+            <button class="screening-run" id="run-screening" onclick="runPredeterminedScreening()">${t('run_screening')}</button>
+            <p class="run-note">${t('run_note')}</p>
+          </div>
+          <div id="screening-results" class="viewer-results-empty">
+            <strong>${t('ready_title')}</strong>
+            <span>${t('ready_body')}</span>
+          </div>
+          <div class="viewer-caution">${t('caution')}</div>
+        </aside>
+      </section>
+    `;
+  } else if (activeTab === 'overview') {
     content.innerHTML = `
       <div class="grid-2">
         <div class="card">
@@ -1257,6 +1435,189 @@ function renderActiveTab() {
         </div>
       </div>
     `;
+  }
+}
+
+function gateClass(state) {
+  if (state === 'PASS') return 'gate-pass';
+  if (state === 'FAIL') return 'gate-fail';
+  return 'gate-verify';
+}
+
+function verdictClass(verdict) {
+  if (verdict === 'PROVISIONAL_PASS') return 'verdict-pass';
+  if (verdict === 'FAIL') return 'verdict-fail';
+  return 'verdict-verify';
+}
+
+function siteDisplayName(siteId) {
+  if (siteId === 'SITE-ELSTONE-01') return 'Elstone Estate';
+  if (siteId === 'SITE-NEDUMBALA-02') return 'Nedumbala Estate';
+  return 'Kottapadi Hillside';
+}
+
+function mapSiteClass(siteId) {
+  if (siteId === 'SITE-ELSTONE-01') return 'map-site-elstone';
+  if (siteId === 'SITE-NEDUMBALA-02') return 'map-site-nedumbala';
+  return 'map-site-kottapadi';
+}
+
+const resultCopy = {
+  en: {
+    gate_names: { 'GATE-HAZ-01': 'Hazard safety', 'GATE-LEG-01': 'Land and legal', 'GATE-WAT-01': 'Lean-season water', 'GATE-INF-01': 'Emergency access' },
+    evidence: { SATELLITE: 'Historical satellite imagery and hazard overlay', GROUND: 'Predetermined field and administrative records', TERRAIN_RADAR: 'Predetermined radar-derived elevation and slope model' }
+  },
+  ml: {
+    gate_names: { 'GATE-HAZ-01': 'അപകട സുരക്ഷ', 'GATE-LEG-01': 'ഭൂമിയും നിയമവും', 'GATE-WAT-01': 'വേനൽക്കാല ജലം', 'GATE-INF-01': 'അടിയന്തര പ്രവേശനം' },
+    evidence: { SATELLITE: 'ചരിത്ര ഉപഗ്രഹ ചിത്രവും അപകട മേഖലയും', GROUND: 'മുൻനിശ്ചിത ഫീൽഡ്, ഭരണ രേഖകൾ', TERRAIN_RADAR: 'മുൻനിശ്ചിത റഡാർ ഉയര-ചരിവ് മാതൃക' }
+  },
+  hi: {
+    gate_names: { 'GATE-HAZ-01': 'जोखिम सुरक्षा', 'GATE-LEG-01': 'भूमि और कानूनी', 'GATE-WAT-01': 'शुष्क-मौसम जल', 'GATE-INF-01': 'आपातकालीन पहुंच' },
+    evidence: { SATELLITE: 'ऐतिहासिक उपग्रह चित्र और जोखिम ओवरले', GROUND: 'पूर्वनिर्धारित मैदानी और प्रशासनिक रिकॉर्ड', TERRAIN_RADAR: 'पूर्वनिर्धारित रडार-आधारित ऊंचाई और ढलान मॉडल' }
+  }
+};
+
+function localizedStageLabel(stageId) {
+  if (stageId === 'SATELLITE') return t('satellite');
+  if (stageId === 'GROUND') return t('ground');
+  return t('radar');
+}
+
+function localizedGateReason(gate, site) {
+  const values = {
+    en: {
+      'GATE-HAZ-01': gate.state === 'PASS' ? 'Outside the mapped high-hazard zone.' : 'Inside the mapped high-hazard zone.',
+      'GATE-LEG-01': 'Ownership or an approved acquisition route is recorded.',
+      'GATE-WAT-01': gate.state === 'UNKNOWN' ? 'A verified lean-season water test is missing.' : gate.state === 'PASS' ? `${site.lean_season_tested_lpcd} LPCD exceeds the baseline.` : `${site.lean_season_tested_lpcd} LPCD is below the baseline.`,
+      'GATE-INF-01': gate.state === 'PASS' ? `${site.road_access_width_m} m road width meets the access rule.` : `${site.road_access_width_m} m road width is below the access rule.`
+    },
+    ml: {
+      'GATE-HAZ-01': gate.state === 'PASS' ? 'രേഖപ്പെടുത്തിയ ഉയർന്ന അപകട മേഖലയ്ക്ക് പുറത്താണ്.' : 'രേഖപ്പെടുത്തിയ ഉയർന്ന അപകട മേഖലയിലാണ്.',
+      'GATE-LEG-01': 'ഉടമസ്ഥതയോ അംഗീകൃത ഏറ്റെടുക്കൽ മാർഗമോ രേഖപ്പെടുത്തിയിട്ടുണ്ട്.',
+      'GATE-WAT-01': gate.state === 'UNKNOWN' ? 'സ്ഥിരീകരിച്ച വേനൽക്കാല ജലപരിശോധന ലഭ്യമല്ല.' : gate.state === 'PASS' ? `${site.lean_season_tested_lpcd} LPCD അടിസ്ഥാന പരിധിക്ക് മുകളിലാണ്.` : `${site.lean_season_tested_lpcd} LPCD അടിസ്ഥാന പരിധിക്ക് താഴെയാണ്.`,
+      'GATE-INF-01': gate.state === 'PASS' ? `${site.road_access_width_m} മീറ്റർ റോഡ് പ്രവേശന മാനദണ്ഡം പാലിക്കുന്നു.` : `${site.road_access_width_m} മീറ്റർ റോഡ് പ്രവേശന മാനദണ്ഡത്തിന് താഴെയാണ്.`
+    },
+    hi: {
+      'GATE-HAZ-01': gate.state === 'PASS' ? 'मानचित्रित उच्च-जोखिम क्षेत्र से बाहर है।' : 'मानचित्रित उच्च-जोखिम क्षेत्र के भीतर है।',
+      'GATE-LEG-01': 'स्वामित्व या स्वीकृत अधिग्रहण मार्ग दर्ज है।',
+      'GATE-WAT-01': gate.state === 'UNKNOWN' ? 'सत्यापित शुष्क-मौसम जल परीक्षण उपलब्ध नहीं है।' : gate.state === 'PASS' ? `${site.lean_season_tested_lpcd} LPCD आधार सीमा से अधिक है।` : `${site.lean_season_tested_lpcd} LPCD आधार सीमा से कम है।`,
+      'GATE-INF-01': gate.state === 'PASS' ? `${site.road_access_width_m} मीटर सड़क पहुंच नियम पूरा करती है।` : `${site.road_access_width_m} मीटर सड़क पहुंच नियम से कम है।`
+    }
+  };
+  return values[currentLang][gate.gate_id] || gate.reason;
+}
+
+function resetMapScreening() {
+  document.querySelectorAll('.site-marker').forEach(marker => {
+    marker.classList.remove('is-visible', 'is-checking', 'is-resolved');
+  });
+  const layer = document.getElementById('map-screening-layer');
+  if (layer) layer.innerHTML = '';
+}
+
+function waitForScreeningStep(milliseconds) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return Promise.resolve();
+  return new Promise(resolve => window.setTimeout(resolve, milliseconds));
+}
+
+async function animateMapAssessments(assessments) {
+  const layer = document.getElementById('map-screening-layer');
+  if (!layer) return;
+
+  resetMapScreening();
+  for (const item of assessments) {
+    const siteId = item.site.site_id;
+    const marker = document.querySelector(`[data-screening-site="${siteId}"]`);
+    const callout = document.createElement('article');
+    callout.className = `map-screening-callout ${mapSiteClass(siteId)} is-checking`;
+    callout.innerHTML = `
+      <strong>${siteDisplayName(siteId)}</strong>
+      <span><i aria-hidden="true"></i>${t('checking')}</span>
+    `;
+    layer.appendChild(callout);
+    marker?.classList.add('is-visible', 'is-checking');
+
+    await waitForScreeningStep(850);
+
+    marker?.classList.remove('is-checking');
+    marker?.classList.add('is-resolved');
+    callout.className = `map-screening-callout ${mapSiteClass(siteId)} ${verdictClass(item.verdict)} is-resolved`;
+    callout.innerHTML = `
+      <strong>${siteDisplayName(siteId)}</strong>
+      <span>${t(`verdict_${item.verdict}`)}</span>
+      <small>${t('stages_complete')}</small>
+    `;
+    await waitForScreeningStep(400);
+  }
+}
+
+function renderScreeningAssessment(item) {
+  const gates = item.report.gate_results.map(gate => `
+    <li>
+      <span>${resultCopy[currentLang].gate_names[gate.gate_id] || gate.gate_name}</span>
+      <strong class="gate-state ${gateClass(gate.state)}">${t(`state_${gate.state}`)}</strong>
+      <small>${localizedGateReason(gate, item.site)}</small>
+    </li>
+  `).join('');
+  const verificationResults = item.verification_results.map((stage, index) => `
+    <li>
+      <span class="verification-stage-number">${index + 1}</span>
+      <div>
+        <strong>${localizedStageLabel(stage.stage_id)}</strong>
+        <small>${resultCopy[currentLang].evidence[stage.stage_id]}</small>
+      </div>
+      <b class="gate-state ${gateClass(stage.state)}">${t(`state_${stage.state}`)}</b>
+    </li>
+  `).join('');
+
+  return `
+    <article class="site-screening-card ${verdictClass(item.verdict)}">
+      <header>
+        <div>
+          <p>${item.site.site_id}</p>
+          <h4>${siteDisplayName(item.site.site_id)}</h4>
+        </div>
+        <span class="site-verdict">${t(`verdict_${item.verdict}`)}</span>
+      </header>
+      <ol class="verification-result-list">${verificationResults}</ol>
+      <details class="ground-detail">
+        <summary>${t('criteria')}</summary>
+        <ul class="gate-list">${gates}</ul>
+      </details>
+      <footer>
+        <span>${item.site.dwelling_capacity} ${t('potential_capacity')}</span>
+        <span>${t('historical_evidence')}</span>
+      </footer>
+    </article>
+  `;
+}
+
+async function runPredeterminedScreening() {
+  const button = document.getElementById('run-screening');
+  const results = document.getElementById('screening-results');
+  if (!button || !results) return;
+
+  button.disabled = true;
+  button.textContent = t('running_screening');
+  resetMapScreening();
+  results.className = 'screening-loading';
+  results.innerHTML = `<span class="scan-line"></span><p>${t('checking')}</p>`;
+
+  try {
+    const response = await fetch(`${API_BASE}/api/v1/demo/site-screening`);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || 'Screening could not run');
+
+    await animateMapAssessments(payload.data.assessments);
+    results.className = 'screening-results-grid';
+    results.innerHTML = payload.data.assessments.map(renderScreeningAssessment).join('');
+    button.textContent = t('rerun_screening');
+  } catch (error) {
+    results.className = 'screening-error';
+    results.textContent = `${t('screening_unavailable')}: ${error.message}`;
+    button.textContent = t('retry_screening');
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -3971,6 +4332,8 @@ async function loadReleaseAssuranceReportDemo() {
 
 document.addEventListener('DOMContentLoaded', () => {
   renderSessionStatus();
-  loadData();
-  renderActiveTab();
+  switchLanguage('en');
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && voiceGuideOpen) toggleVoiceGuide(false);
+  });
 });

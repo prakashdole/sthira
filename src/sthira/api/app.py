@@ -400,6 +400,146 @@ def get_health():
     )
 
 
+@app.get("/api/v1/demo/site-screening", response_model=APIResponseEnvelope)
+def get_site_screening_demo():
+    """Public, predetermined prototype flow; it never allocates or approves land."""
+    terrain_fixtures = {
+        "SITE-ELSTONE-01": {
+            "state": "PASS",
+            "elevation_m": 780,
+            "slope_deg": 8.4,
+            "reading": "Moderate elevation and gentle terrain in the prototype model.",
+        },
+        "SITE-NEDUMBALA-02": {
+            "state": "PASS",
+            "elevation_m": 845,
+            "slope_deg": 12.8,
+            "reading": "Terrain remains within the prototype slope threshold.",
+        },
+        "SITE-HIGH-SLOPE-03": {
+            "state": "FAIL",
+            "elevation_m": 1120,
+            "slope_deg": 31.6,
+            "reading": "Steep terrain exceeds the prototype slope threshold.",
+        },
+    }
+    assessments = []
+    for item in policy_engine.list_registered_site_assessments():
+        report = item["report"]
+        gate_states = [gate["state"] for gate in report["gate_results"]]
+        if "FAIL" in gate_states:
+            verdict = "FAIL"
+            verdict_label = "Not suitable in this screening"
+        elif "UNKNOWN" in gate_states or "BLOCKED" in gate_states:
+            verdict = "VERIFY"
+            verdict_label = "More evidence required"
+        else:
+            verdict = "PROVISIONAL_PASS"
+            verdict_label = "Passed prototype screening"
+
+        hazard_gate = next(
+            gate for gate in report["gate_results"] if gate["gate_id"] == "GATE-HAZ-01"
+        )
+        ground_gates = [
+            gate for gate in report["gate_results"] if gate["gate_id"] != "GATE-HAZ-01"
+        ]
+        ground_states = [gate["state"] for gate in ground_gates]
+        if "FAIL" in ground_states:
+            ground_state = "FAIL"
+        elif "UNKNOWN" in ground_states or "BLOCKED" in ground_states:
+            ground_state = "VERIFY"
+        else:
+            ground_state = "PASS"
+        terrain = terrain_fixtures[item["site"]["site_id"]]
+
+        assessments.append(
+            {
+                **item,
+                "verdict": verdict,
+                "verdict_label": verdict_label,
+                "verification_results": [
+                    {
+                        "stage_id": "SATELLITE",
+                        "label": "Satellite screening",
+                        "state": hazard_gate["state"],
+                        "reading": hazard_gate["reason"],
+                        "evidence": "Historical NASA HLS imagery and hazard-zone overlay",
+                    },
+                    {
+                        "stage_id": "GROUND",
+                        "label": "On-ground verification",
+                        "state": ground_state,
+                        "reading": "Legal, water and emergency-access evidence checked.",
+                        "evidence": "Predetermined synthetic field and administrative records",
+                    },
+                    {
+                        "stage_id": "TERRAIN_RADAR",
+                        "label": "Radar and elevation",
+                        "state": terrain["state"],
+                        "reading": terrain["reading"],
+                        "evidence": (
+                            f"Synthetic radar-derived terrain fixture: {terrain['elevation_m']} m "
+                            f"elevation, {terrain['slope_deg']}° slope"
+                        ),
+                    },
+                ],
+            }
+        )
+
+    return APIResponseEnvelope(
+        data={
+            "demo_mode": "HISTORICAL_DATA_PROTOTYPE",
+            "study_area": "Wayanad, Kerala",
+            "verification_model": [
+                {
+                    "stage_id": "SATELLITE",
+                    "label": "Satellite screening",
+                    "description": "Historical optical imagery and hazard overlays identify candidate areas.",
+                    "data_status": "HISTORICAL",
+                },
+                {
+                    "stage_id": "GROUND",
+                    "label": "On-ground verification",
+                    "description": "Field and administrative evidence checks water, access and legal readiness.",
+                    "data_status": "SYNTHETIC_DEMO",
+                },
+                {
+                    "stage_id": "TERRAIN_RADAR",
+                    "label": "Radar and elevation",
+                    "description": "A radar-derived terrain model checks elevation and slope constraints.",
+                    "data_status": "SYNTHETIC_DEMO",
+                },
+            ],
+            "imagery": {
+                "provider": "NASA Earthdata GIBS",
+                "product": "HLS Sentinel-2 30 m Nadir BRDF-Adjusted Reflectance",
+                "observation_date": "2024-03-31",
+                "freshness": "HISTORICAL",
+                "url": (
+                    "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi"
+                    "?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0"
+                    "&LAYERS=HLS_S30_Nadir_BRDF_Adjusted_Reflectance"
+                    "&STYLES=&FORMAT=image/jpeg&TRANSPARENT=false"
+                    "&HEIGHT=900&WIDTH=1400&CRS=EPSG:4326"
+                    "&BBOX=11.52,76.05,11.64,76.18&TIME=2024-03-31"
+                ),
+                "limitation": (
+                    "Visual context only. It does not establish current safety, title, "
+                    "water availability, occupancy, or official approval."
+                ),
+            },
+            "ground_evidence_note": (
+                "Predetermined synthetic field and administrative evidence is used for this hackathon demo."
+            ),
+            "assessments": assessments,
+            "outcome_notice": (
+                "No land is allocated or approved. Results are prototype screening outcomes "
+                "that require current field verification and government review."
+            ),
+        }
+    )
+
+
 @app.get("/api/v1/programme/{programme_id}", response_model=APIResponseEnvelope)
 def get_programme(programme_id: str):
     prg = programme_service.get_programme(programme_id)

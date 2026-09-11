@@ -14,7 +14,7 @@
       <div class="ml-note" data-i18n="advisory_banner_ml">ഉപദേശക സ്വഭാവമുള്ളത് മാത്രം. ഔദ്യോഗിക ഗസറ്റ് വിജ്ഞാപനമോ ഉത്തരവോ അല്ല.</div>
     </div>
     <div class="audit-indicator" id="audit-status-badge">
-      ✓ Verifying Cryptographic Audit...
+      <span data-i18n="audit_checking">Verifying audit trail...</span>
     </div>
   </div>
 
@@ -25,45 +25,65 @@
         <p data-i18n="brand_subtitle">Proactive Permanent Relocation Decision Support — Wayanad Pilot</p>
       </div>
       <div class="lang-toggle">
-        <form class="login-bar" onsubmit="event.preventDefault(); loginPrototype();">
-          <label class="sr-only" for="login-username">Username</label>
-          <input id="login-username" name="username" type="text" autocomplete="username" placeholder="collector.wayanad" class="btn">
-          <label class="sr-only" for="login-password">Password</label>
-          <input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="password" class="btn">
-          <button type="submit" class="btn btn-primary">Sign in</button>
-          <button type="button" class="btn" onclick="logoutPrototype()">Sign out</button>
-        </form>
-        <p id="session-status" class="session-status">Not signed in</p>
-        <p id="login-status" class="login-status" role="status"></p>
-        <button class="btn" onclick="switchLanguage('en')">English</button>
-        <button class="btn" onclick="switchLanguage('ml')">മലയാളം</button>
-        <button class="btn" onclick="switchLanguage('hi')">हिन्दी</button>
+        <span class="demo-mode-chip" data-i18n="prototype_chip">Open prototype | no sign-in</span>
+        <button class="btn active" data-ui-language="en" onclick="switchLanguage('en')">English</button>
+        <button class="btn" data-ui-language="ml" onclick="switchLanguage('ml')">മലയാളം</button>
+        <button class="btn" data-ui-language="hi" onclick="switchLanguage('hi')">हिन्दी</button>
       </div>
     </header>
 
     <nav class="tabs" role="tablist">
-      <button class="tab-btn active" data-tab="overview" onclick="showTab('overview')" data-i18n="tab_overview">Programme Overview</button>
-      <button class="tab-btn" data-tab="sites" onclick="showTab('sites')" data-i18n="tab_sites">Candidate Sites & Gates</button>
-      <button class="tab-btn" data-tab="parcels" onclick="showTab('parcels')" data-i18n="tab_parcels">Affected Parcels & Truth</button>
-      <button class="tab-btn" data-tab="allocation" onclick="showTab('allocation')" data-i18n="tab_allocation">Advisory Allocation</button>
-      <button class="tab-btn" data-tab="phase2" onclick="showTab('phase2')" data-i18n="tab_phase2">Phase 2 Shadow Pilot</button>
-      <button class="tab-btn" data-tab="phase3" onclick="showTab('phase3')" data-i18n="tab_phase3">Phase 3 Live Ops</button>
-      <button class="tab-btn" data-tab="scaling" onclick="showTab('scaling')" data-i18n="tab_scaling">Kerala Scaling (PH-4)</button>
-      <button class="tab-btn" data-tab="adaptation" onclick="showTab('adaptation')" data-i18n="tab_adaptation">Multi-State Adaptation (PH-5)</button>
-      <button class="tab-btn" data-tab="clearinghouse" onclick="showTab('clearinghouse')" data-i18n="tab_clearinghouse">National Clearinghouse (Phase 6)</button>
-      <button class="tab-btn" data-tab="phase9" onclick="showTab('phase9')" data-i18n="tab_phase9">Approvals & Objections (Phase 9)</button>
-      <button class="tab-btn" data-tab="phase10" onclick="showTab('phase10')" data-i18n="tab_phase10">Delivery & Completion (Phase 10)</button>
-      <button class="tab-btn" data-tab="phase11" onclick="showTab('phase11')" data-i18n="tab_phase11">Dossiers & Manifests (Phase 11)</button>
-      <button class="tab-btn" data-tab="phase12" onclick="showTab('phase12')" data-i18n="tab_phase12">Formulas & Compliance (Phase 12)</button>
-      <button class="tab-btn" data-tab="phase13" onclick="showTab('phase13')" data-i18n="tab_phase13">Source Readiness & Health (Phase 13)</button>
-      <button class="tab-btn" data-tab="phase14" onclick="showTab('phase14')" data-i18n="tab_phase14">Resilience & Release Assurance (Phase 14)</button>
-      <button class="tab-btn" data-tab="audit" onclick="showTab('audit')" data-i18n="tab_audit">Audit & Integrity</button>
+      <button class="tab-btn active" data-tab="screening" data-i18n="screening_tab" onclick="showTab('screening')">Satellite site-screening demo</button>
     </nav>
 
     <main id="tab-content">
       <!-- Dynamic Content Rendered by app.js -->
     </main>
   </div>
+
+  <button class="voice-guide-launcher" id="voice-guide-launcher" type="button"
+          aria-label="Open Sthira voice guide" data-i18n-aria-label="voice_open" aria-controls="voice-guide-panel"
+          aria-expanded="false" onclick="toggleVoiceGuide()">
+    <span class="guide-pet" aria-hidden="true">
+      <span class="guide-pet-ridge"></span>
+      <span class="guide-pet-eye guide-pet-eye-left"></span>
+      <span class="guide-pet-eye guide-pet-eye-right"></span>
+      <span class="guide-pet-wave"><i></i><i></i><i></i></span>
+    </span>
+    <span class="voice-launcher-copy"><strong data-i18n="voice_ask">Ask Sthira</strong><small data-i18n="voice_guide_label">Voice guide</small></span>
+  </button>
+
+  <aside class="voice-guide-panel" id="voice-guide-panel" role="dialog"
+         aria-labelledby="voice-guide-title" aria-describedby="voice-guide-description" hidden>
+    <header class="voice-guide-header">
+      <div class="voice-guide-identity">
+        <span class="guide-pet guide-pet-small" aria-hidden="true">
+          <span class="guide-pet-ridge"></span>
+          <span class="guide-pet-eye guide-pet-eye-left"></span>
+          <span class="guide-pet-eye guide-pet-eye-right"></span>
+          <span class="guide-pet-wave"><i></i><i></i><i></i></span>
+        </span>
+        <div><strong id="voice-guide-title" data-i18n="voice_title">Sthira voice guide</strong><span data-i18n="voice_interface">Sarvam AI interface</span></div>
+      </div>
+      <button class="voice-guide-close" type="button" aria-label="Close voice guide" data-i18n-aria-label="voice_close" onclick="toggleVoiceGuide(false)">×</button>
+    </header>
+
+    <div class="voice-guide-body">
+      <p id="voice-guide-description" data-i18n="voice_description">Ask about candidate sites, verification stages, or why a site passed or failed.</p>
+
+      <div class="voice-transcript" aria-live="polite">
+        <span data-i18n="voice_transcript_label">Sthira Guide</span>
+        <p id="voice-transcript-text" data-i18n="voice_idle">Ask about candidate sites, verification stages, or screening results.</p>
+      </div>
+
+      <button class="voice-preview-button" id="voice-preview-button" type="button"
+              aria-pressed="false" onclick="toggleVoicePreview()">
+        <span class="voice-mic" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span id="voice-preview-label" data-i18n="voice_preview">Preview listening state</span>
+      </button>
+      <p class="voice-connection-note" id="voice-connection-note" data-i18n="voice_not_connected">Interface preview only. Sarvam AI is not connected yet.</p>
+    </div>
+  </aside>
 
   <script src="app.js"></script>
 </body>

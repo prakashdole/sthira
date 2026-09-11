@@ -2,6 +2,9 @@
 Tests for Sthira FastAPI REST Endpoints.
 """
 
+from fastapi.testclient import TestClient
+
+from sthira.api.app import app
 from tests.authutil import authed_client
 
 client = authed_client()
@@ -66,6 +69,40 @@ def test_api_evaluate_site_gates():
     assert res["overall_gate_pass"] is True
     assert len(res["gate_results"]) == 4
     assert res["decision_scope"] == "PROTOTYPE_ADVISORY_ONLY"
+
+
+def test_public_demo_is_predetermined_screening_not_allocation():
+    response = TestClient(app).get("/api/v1/demo/site-screening")
+    assert response.status_code == 200
+    demo = response.json()["data"]
+    assert demo["demo_mode"] == "HISTORICAL_DATA_PROTOTYPE"
+    assert demo["imagery"]["observation_date"] == "2024-03-31"
+    assert "No land is allocated" in demo["outcome_notice"]
+    assert [stage["stage_id"] for stage in demo["verification_model"]] == [
+        "SATELLITE",
+        "GROUND",
+        "TERRAIN_RADAR",
+    ]
+
+    verdicts = {
+        item["site"]["site_id"]: item["verdict"]
+        for item in demo["assessments"]
+    }
+    assert verdicts["SITE-ELSTONE-01"] == "PROVISIONAL_PASS"
+    assert verdicts["SITE-NEDUMBALA-02"] == "VERIFY"
+    assert verdicts["SITE-HIGH-SLOPE-03"] == "FAIL"
+
+    stage_results = {
+        item["site"]["site_id"]: {
+            stage["stage_id"]: stage["state"]
+            for stage in item["verification_results"]
+        }
+        for item in demo["assessments"]
+    }
+    assert set(stage_results["SITE-ELSTONE-01"].values()) == {"PASS"}
+    assert stage_results["SITE-NEDUMBALA-02"]["GROUND"] == "VERIFY"
+    assert stage_results["SITE-HIGH-SLOPE-03"]["SATELLITE"] == "FAIL"
+    assert stage_results["SITE-HIGH-SLOPE-03"]["TERRAIN_RADAR"] == "FAIL"
 
 
 def test_api_detect_discrepancies():

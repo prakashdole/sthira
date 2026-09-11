@@ -1,0 +1,34 @@
+:root {
+  --color-paper-blue: oklch(97% 0.018 238);
+  --color-pastel-blue: oklch(92% 0.038 238);
+  --color-blue-border: oklch(81% 0.045 238);
+  --color-paper-green: oklch(96% 0.018 190);
+  --color-pastel-green: oklch(91% 0.05 164);
+  --color-green-border: oklch(75% 0.07 162);
+  --color-shell-teal: oklch(31% 0.055 190);
+  --color-shell-teal-soft: oklch(39% 0.052 190);
+  --color-on-shell: oklch(97% 0.018 210);
+  --color-ink: oklch(29% 0.045 224);
+  --color-ink-soft: oklch(43% 0.038 220);
+  --color-accent: oklch(46% 0.105 164);
+  --color-accent-strong: oklch(37% 0.082 166);
+  --color-accent-ink: oklch(98% 0.018 155);
+  --color-focus: oklch(55% 0.145 242);
+  --color-pass: oklch(48% 0.12 157);
+  --color-verify: oklch(55% 0.12 78);
+  --color-fail: oklch(48% 0.16 27);
+  --font-display: "Segoe UI Variable", "Noto Sans Malayalam", "Segoe UI", sans-serif;
+  --font-body: "Segoe UI Variable", "Noto Sans Malayalam", "Segoe UI", sans-serif;
+  --space-2xs: 0.5rem;
+  --space-xs: 0.75rem;
+  --space-sm: 1rem;
+  --space-md: 1.5rem;
+  --space-lg: 2rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-short: 150ms;
+  --radius-control: 7px;
+  --radius-panel: 14px;
+}

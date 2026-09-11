@@ -20,6 +20,7 @@ PUBLIC_EXACT = {
 PUBLIC_PREFIXES = ("/ui",)
 PUBLIC_POST = {"/api/v1/auth/login"}
 PUBLIC_GET_PREFIXES = (
+    "/api/v1/demo",
     "/api/v1/localization",
     "/api/v1/reporting/public-projection",
     "/api/v1/reporting/public-transparency-projection",
