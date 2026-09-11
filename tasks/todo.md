@@ -46,6 +46,7 @@
 - [x] Add append-only audit hash chaining with tamper verification.
 - [x] Add database constraints for provenance, versions, capacity, party size, and legal stored states.
 - [x] Add focused server-free metadata, bitemporal, and audit tests.
+- [x] Add v2 API readiness endpoint with fail-closed database, artifact, source, and migration states.
 - [ ] Exercise upgrade/downgrade and spatial SRID checks on a real PostgreSQL 16/PostGIS service (external database unavailable in this environment).
 - [ ] Add operational readiness endpoints after the real database/artifact-store configuration exists.
 
