@@ -87,8 +87,8 @@ function render() {
         <section class="floating-drawer civic-drawer" data-testid="emergency-card" aria-labelledby="alert-title">
           <button class="drawer-handle" type="button" aria-expanded="${drawerExpanded}" aria-label="${drawerExpanded ? t.collapse : t.drawer}" data-action="drawer"><span></span></button>
           <div class="drawer-scroll">
-            <div class="official-strip">OFFICIAL EMERGENCY DIRECTIVE · NDMA / KSDMA <span>${t.live}</span></div>
-            <div class="urgent-header"><span class="critical-badge"><i></i>FLOOD ACTIVE</span><button class="detail-trigger" type="button" data-action="details" aria-label="${t.details}">ⓘ</button><p class="overline">SYNTHETIC_DEMO · SOURCE VERIFIED FOR UI ONLY</p><h1 id="alert-title">LEAVE WARD 12 BEFORE 6:00 PM</h1><p class="summary">Severe flash flooding. Water levels rising rapidly near River Basin.</p></div>
+            <div class="official-strip">OFFICIAL EMERGENCY DIRECTIVE · NDMA / KSDMA <span>${t.live} · SYNTHETIC_DEMO</span></div>
+            <div class="urgent-header"><span class="critical-badge"><i></i>FLOOD ACTIVE</span><button class="detail-trigger" type="button" data-action="details" aria-label="${t.details}">ⓘ</button><h1 id="alert-title">LEAVE WARD 12 BEFORE 6:00 PM</h1><p class="summary">Severe flash flooding. Water levels rising rapidly near River Basin.</p></div>
             <article class="civic-destination"><div><p class="overline">WHERE TO GO</p><h2>Government Higher Secondary School, Ward 8</h2><span class="open-badge">✓ OPEN · MEDICAL & FOOD AVAILABLE</span></div><strong>1.4 km<br /><small>~18 min walk</small></strong></article>
             <button class="start-button civic-start ${routeStarted ? 'is-started' : ''}" type="button" data-testid="start-route" data-action="route"><span>${routeStarted ? '✓' : '➜'}</span>${routeStarted ? 'ROUTE ACTIVE' : 'START STEP-BY-STEP EVACUATION ROUTE'}</button>
             <ul class="civic-directives"><li>Bridges on Main Canal Rd are <strong>SUBMERGED</strong> — use Ridge Road only.</li><li>Move on foot or light vehicle; avoid low-lying culverts.</li><li>Take essential medications and identity documents.</li></ul>
@@ -149,6 +149,9 @@ function initMap() {
       ],
     },
   });
+  map.once('load', () => map?.resize());
+  const observer = new ResizeObserver(() => map?.resize());
+  observer.observe(container);
 }
 
 function bindInteractions() {
