@@ -76,9 +76,7 @@ function render() {
   map?.remove();
   document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <div class="app-shell tactical-shell ${drawerExpanded ? 'drawer-expanded' : 'drawer-collapsed'}">
-      <div class="tactical-map" role="img" aria-label="${t.mapAria}">
-        <div id="map-canvas" aria-hidden="true"></div><div class="map-noise"></div><div class="map-contours"></div><div class="hazard-zone"><span>⚠ HIGH HAZARD · WARD 12 FLOOD INUNDATION</span></div><div class="route-trail ${routeStarted ? 'route-active' : ''}"></div><div class="route-dots"><i></i><i></i><i></i><i></i></div><div class="citizen-pin">S</div><div class="shelter-marker"><span>⌂</span><small>WARD 8</small><b>SAFE SHELTER</b></div>
-        <div class="map-controls" aria-label="Map controls"><button type="button" aria-label="Zoom in" data-action="zoom-in">+</button><button type="button" aria-label="Zoom out" data-action="zoom-out">−</button></div><div class="map-action-pill"><button type="button" data-action="recenter">⌖ Recenter</button><button type="button" data-action="pitch">◇ ${pitched ? '3D' : '2D'}</button><button type="button" data-action="layers">◉ Layers</button></div><div class="map-attribution">${t.source}</div>
+      <div class="tactical-map" role="img" aria-label="${t.mapAria}"><div id="map-canvas" aria-hidden="true"></div><div class="map-controls" aria-label="Map controls"><button type="button" aria-label="Zoom in" data-action="zoom-in">+</button><button type="button" aria-label="Zoom out" data-action="zoom-out">−</button></div><div class="map-action-pill"><button type="button" data-action="recenter">Recenter</button><button type="button" data-action="directions">Turn-by-turn list</button><button type="button" data-action="voice">Voice control</button></div>
       </div>
       <header class="tactical-topbar">
         <a class="wordmark" href="/" aria-label="Sthira home"><span class="wordmark-mark">S</span><span>Sthira <small>v2</small></span></a>
@@ -86,20 +84,21 @@ function render() {
         <div class="topbar-actions"><button class="voice-control ${voiceListening ? 'is-listening' : ''}" type="button" aria-label="${t.voiceOpen}" aria-expanded="${voiceOpen}" data-action="voice"><span class="mic-icon">●</span><span>${t.voice}</span></button><div class="language-switcher" role="group" aria-label="Language"><button class="language-choice ${language === 'EN' ? 'is-selected' : ''}" data-language="EN" type="button">EN</button><button class="language-choice ${language === 'ML' ? 'is-selected' : ''}" data-language="ML" type="button">ML</button><button class="language-choice ${language === 'HI' ? 'is-selected' : ''}" data-language="HI" type="button">HI</button></div></div>
       </header>
       <main class="tactical-main">
-        <section class="floating-drawer" data-testid="emergency-card" aria-labelledby="alert-title">
+        <section class="floating-drawer civic-drawer" data-testid="emergency-card" aria-labelledby="alert-title">
           <button class="drawer-handle" type="button" aria-expanded="${drawerExpanded}" aria-label="${drawerExpanded ? t.collapse : t.drawer}" data-action="drawer"><span></span></button>
           <div class="drawer-scroll">
-            <div class="alert-row"><span class="critical-badge"><i></i>${t.alert}</span><span class="live-stamp">${t.live}</span></div>
-            <div class="alert-heading"><div><p class="overline">SYNTHETIC_DEMO · SOURCE VERIFIED FOR UI ONLY</p><h1 id="alert-title">${t.headline}</h1><p class="summary">${t.summary}</p></div><button class="detail-trigger" type="button" data-action="details" aria-label="${t.details}">ⓘ</button></div>
-            <ol class="timeline">${t.steps.map((step, index) => `<li><span class="timeline-dot">${index + 1}</span><p>${step}</p></li>`).join('')}</ol>
-            <article class="shelter-card"><div class="shelter-header"><div class="shelter-icon">⌂</div><div><h2>${t.shelter}</h2><span class="open-badge">✓ ${t.open}</span></div></div><div class="shelter-grid"><div><span>${t.deadline}</span><strong>${t.deadlineValue}</strong></div><div><span>${t.assigned}</span><strong>${t.assignedValue}</strong></div><div><span>${t.routeMetric}</span><strong>${t.routeValue}</strong></div></div></article>
-            <div class="action-bar"><button class="start-button ${routeStarted ? 'is-started' : ''}" type="button" data-testid="start-route" data-action="route"><span>${routeStarted ? '✓' : '↗'}</span>${routeStarted ? 'ROUTE ACTIVE' : t.start}</button><a class="call-button" data-testid="call-112" href="tel:112"><span>☎</span>${t.call}</a></div>
-            <div class="utility-row"><button type="button" data-action="listen">▶ ${t.listen}</button><button type="button" data-action="isl">◉ ${t.isl}</button><button type="button" data-action="directions">☷ ${t.directions}</button></div>
-            <button class="arrival-trigger" type="button" data-action="arrival-open">✓ CONFIRM ARRIVAL (PARTY YES/NO)</button>
+            <div class="official-strip">OFFICIAL EMERGENCY DIRECTIVE · NDMA / KSDMA <span>${t.live}</span></div>
+            <div class="urgent-header"><span class="critical-badge"><i></i>FLOOD ACTIVE</span><button class="detail-trigger" type="button" data-action="details" aria-label="${t.details}">ⓘ</button><p class="overline">SYNTHETIC_DEMO · SOURCE VERIFIED FOR UI ONLY</p><h1 id="alert-title">LEAVE WARD 12 BEFORE 6:00 PM</h1><p class="summary">Severe flash flooding. Water levels rising rapidly near River Basin.</p></div>
+            <article class="civic-destination"><div><p class="overline">WHERE TO GO</p><h2>Government Higher Secondary School, Ward 8</h2><span class="open-badge">✓ OPEN · MEDICAL & FOOD AVAILABLE</span></div><strong>1.4 km<br /><small>~18 min walk</small></strong></article>
+            <button class="start-button civic-start ${routeStarted ? 'is-started' : ''}" type="button" data-testid="start-route" data-action="route"><span>${routeStarted ? '✓' : '➜'}</span>${routeStarted ? 'ROUTE ACTIVE' : 'START STEP-BY-STEP EVACUATION ROUTE'}</button>
+            <ul class="civic-directives"><li>Bridges on Main Canal Rd are <strong>SUBMERGED</strong> — use Ridge Road only.</li><li>Move on foot or light vehicle; avoid low-lying culverts.</li><li>Take essential medications and identity documents.</li></ul>
+            <div class="utility-row"><button type="button" data-action="listen">🔊 ${t.listen}</button><button type="button" data-action="isl">✋ ${t.isl}</button><button type="button" data-action="directions">☷ ${t.directions}</button></div>
+            <button class="arrival-trigger" data-testid="arrival-confirmation" type="button" data-action="arrival-open">I HAVE REACHED THE SHELTER</button>
+            <a class="rescue-link" data-testid="call-112" href="tel:112">Trapped or cut off by water? <strong>Call 112 for Rescue</strong></a>
           </div>
         </section>
       </main>
-      <div class="map-legend-floating context-widget"><span>LAT 11.685° N, LON 76.132° E</span><span>PRECIPITATION: 64mm/h (HEAVY)</span><span><i class="legend-mint"></i>${t.source}</span></div>
+      <div class="map-legend-floating context-widget"><span><i class="legend-crimson"></i> Hazard inundation area · Ward 12</span><span><i class="legend-cobalt"></i> Official evacuation route</span><span><i class="legend-mint"></i> Assigned destination</span></div>
       <footer class="tactical-footer"><span>${t.mapNote}</span><button type="button" data-action="details">${t.details}</button></footer>
       <div class="toast" role="status" aria-live="polite" hidden></div>
       <dialog class="tactical-dialog" aria-labelledby="details-title" ${detailsOpen ? 'open' : ''}><div class="dialog-top"><h2 id="details-title">${t.detailsTitle}</h2><button type="button" aria-label="${t.detailsClose}" data-action="details-close">×</button></div><p>${t.detailsBody}</p><dl><div><dt>${t.issued}</dt><dd>${t.source}</dd></div><div><dt>${t.expires}</dt></div></dl><button class="start-button" type="button" data-action="details-close">${t.detailsClose}</button></dialog>
@@ -132,6 +131,8 @@ function initMap() {
         roads: { type: 'geojson', data: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: [[75.9, 11.45], [76.05, 11.53], [76.3, 11.57]] }, properties: {} }, { type: 'Feature', geometry: { type: 'LineString', coordinates: [[76.02, 11.72], [76.1, 11.55], [76.21, 11.42]] }, properties: {} }] } },
         river: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [[75.9, 11.68], [76.02, 11.6], [76.15, 11.48], [76.3, 11.43]] }, properties: {} } },
         buildings: { type: 'geojson', data: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[76.16, 11.58], [76.18, 11.58], [76.18, 11.6], [76.16, 11.6], [76.16, 11.58]]] }, properties: {} }, { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[76.2, 11.53], [76.22, 11.53], [76.22, 11.55], [76.2, 11.55], [76.2, 11.53]]] }, properties: {} }] } },
+        places: { type: 'geojson', data: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [76.1, 11.55] }, properties: { label: 'You · Ridge Road' } }, { type: 'Feature', geometry: { type: 'Point', coordinates: [76.19, 11.62] }, properties: { label: 'Ward 8 Government School · North Gate' } }] } },
+        blockages: { type: 'geojson', data: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [76.05, 11.53] }, properties: { label: 'Bridge submerged' } }] } },
       },
       layers: [
         { id: 'background', type: 'background', paint: { 'background-color': '#101b24' } },
@@ -141,6 +142,10 @@ function initMap() {
         { id: 'hazard-fill', type: 'fill', source: 'hazard', paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.12 } },
         { id: 'hazard-edge', type: 'line', source: 'hazard', paint: { 'line-color': '#f87171', 'line-width': 2, 'line-opacity': 0.65 } },
         { id: 'approved-route', type: 'line', source: 'route', paint: { 'line-color': '#3b82f6', 'line-width': 3, 'line-opacity': 0.85 } },
+        { id: 'place-labels', type: 'symbol', source: 'places', layout: { 'text-field': ['get', 'label'], 'text-size': 11, 'text-offset': [0, 1.4], 'text-anchor': 'top' }, paint: { 'text-color': '#e2e8f0', 'text-halo-color': '#0b0f17', 'text-halo-width': 2 } },
+        { id: 'place-points', type: 'circle', source: 'places', paint: { 'circle-radius': 6, 'circle-color': '#38bdf8', 'circle-stroke-color': '#f8fafc', 'circle-stroke-width': 2 } },
+        { id: 'blocked-bridge', type: 'circle', source: 'blockages', paint: { 'circle-radius': 7, 'circle-color': '#dc2626', 'circle-stroke-color': '#fecaca', 'circle-stroke-width': 2 } },
+        { id: 'blocked-labels', type: 'symbol', source: 'blockages', layout: { 'text-field': ['get', 'label'], 'text-size': 10, 'text-offset': [0, 1.5], 'text-anchor': 'top' }, paint: { 'text-color': '#fecaca', 'text-halo-color': '#0b0f17', 'text-halo-width': 2 } },
       ],
     },
   });

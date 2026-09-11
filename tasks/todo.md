@@ -42,6 +42,7 @@
 - [x] Refine tactical PWA into centered device frame with consolidated status pill, richer local geospatial layers, required test hooks, and non-overlapping controls.
 - [x] Replace device frame with full-screen spatial HUD: desktop left command panel, floating glass islands, telemetry widget, and mobile bottom sheet.
 - [x] Inject interactive arrival party stepper, 112 confirmation, route camera animation, voice command chips, directions drawer, multimodal assist previews, map layer controls, and tactile press states.
+- [x] Reset citizen UI to civic evacuation hierarchy: deadline first, destination second, one dominant route action, plain-language directives, human arrival copy, and rescue escalation.
 - [ ] Add database/migrations in Phase 2.
 
 ### Phase 2 — persistence, audit, and operational states
