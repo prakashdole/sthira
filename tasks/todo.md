@@ -39,6 +39,7 @@
 - [x] Apply government-style red-alert hierarchy, severity words/icons, large emergency actions, multilingual controls, and bundled Noto fonts.
 - [x] Add explicit connection/offline state and keyboard-accessible alert details with synthetic source, issue, and expiry metadata.
 - [x] Complete tactical full-viewport emergency PWA composition with MapLibre local synthetic canvas, floating guidance drawer, route/shelter metrics, voice panel, and arrival preview.
+- [x] Refine tactical PWA into centered device frame with consolidated status pill, richer local geospatial layers, required test hooks, and non-overlapping controls.
 - [ ] Add database/migrations in Phase 2.
 
 ### Phase 2 — persistence, audit, and operational states

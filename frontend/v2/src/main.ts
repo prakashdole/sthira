@@ -65,23 +65,23 @@ function render() {
   document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <div class="app-shell tactical-shell ${drawerExpanded ? 'drawer-expanded' : 'drawer-collapsed'}">
       <div class="tactical-map" role="img" aria-label="${t.mapAria}">
-        <div id="map-canvas" aria-hidden="true"></div><div class="map-noise"></div><div class="map-contours"></div><div class="hazard-zone"><span>${t.hazard}</span></div><div class="route-trail ${routeStarted ? 'route-active' : ''}"></div><div class="route-dots"><i></i><i></i><i></i><i></i></div><div class="citizen-pin">S</div><div class="shelter-marker"><span>⌂</span><small>WARD 8</small></div>
+        <div id="map-canvas" aria-hidden="true"></div><div class="map-noise"></div><div class="map-contours"></div><div class="hazard-zone"><span>⚠ HIGH HAZARD · WARD 12 FLOOD INUNDATION</span></div><div class="route-trail ${routeStarted ? 'route-active' : ''}"></div><div class="route-dots"><i></i><i></i><i></i><i></i></div><div class="citizen-pin">S</div><div class="shelter-marker"><span>⌂</span><small>WARD 8</small><b>SAFE SHELTER</b></div>
         <div class="map-controls" aria-label="Map controls"><button type="button" aria-label="Zoom in" data-action="zoom-in">+</button><button type="button" aria-label="Zoom out" data-action="zoom-out">−</button></div><div class="map-attribution">${t.source}</div>
       </div>
       <header class="tactical-topbar">
         <a class="wordmark" href="/" aria-label="Sthira home"><span class="wordmark-mark">S</span><span>Sthira <small>v2</small></span></a>
-        <div class="topbar-center"><span class="heartbeat"><i></i>${isOffline ? t.offline : t.online}</span><span class="demo-badge">${t.demo}</span></div>
+        <div class="topbar-center"><span class="heartbeat"><i></i>${isOffline ? t.offline : t.demo}</span></div>
         <div class="topbar-actions"><button class="voice-control ${voiceListening ? 'is-listening' : ''}" type="button" aria-label="${t.voiceOpen}" aria-expanded="${voiceOpen}" data-action="voice"><span class="mic-icon">●</span><span>${t.voice}</span></button><div class="language-switcher" role="group" aria-label="Language"><button class="language-choice ${language === 'EN' ? 'is-selected' : ''}" data-language="EN" type="button">EN</button><button class="language-choice ${language === 'ML' ? 'is-selected' : ''}" data-language="ML" type="button">ML</button><button class="language-choice ${language === 'HI' ? 'is-selected' : ''}" data-language="HI" type="button">HI</button></div></div>
       </header>
       <main class="tactical-main">
-        <section class="floating-drawer" aria-labelledby="alert-title">
+        <section class="floating-drawer" data-testid="emergency-card" aria-labelledby="alert-title">
           <button class="drawer-handle" type="button" aria-expanded="${drawerExpanded}" aria-label="${drawerExpanded ? t.collapse : t.drawer}" data-action="drawer"><span></span></button>
           <div class="drawer-scroll">
             <div class="alert-row"><span class="critical-badge"><i></i>${t.alert}</span><span class="live-stamp">${t.live}</span></div>
             <div class="alert-heading"><div><p class="overline">SYNTHETIC_DEMO · SOURCE VERIFIED FOR UI ONLY</p><h1 id="alert-title">${t.headline}</h1><p class="summary">${t.summary}</p></div><button class="detail-trigger" type="button" data-action="details" aria-label="${t.details}">ⓘ</button></div>
             <ol class="timeline">${t.steps.map((step, index) => `<li><span class="timeline-dot">${index + 1}</span><p>${step}</p></li>`).join('')}</ol>
             <article class="shelter-card"><div class="shelter-header"><div class="shelter-icon">⌂</div><div><h2>${t.shelter}</h2><span class="open-badge">✓ ${t.open}</span></div></div><div class="shelter-grid"><div><span>${t.deadline}</span><strong>${t.deadlineValue}</strong></div><div><span>${t.assigned}</span><strong>${t.assignedValue}</strong></div><div><span>${t.routeMetric}</span><strong>${t.routeValue}</strong></div></div></article>
-            <div class="action-bar"><button class="start-button ${routeStarted ? 'is-started' : ''}" type="button" data-action="route"><span>${routeStarted ? '✓' : '↗'}</span>${routeStarted ? 'ROUTE ACTIVE' : t.start}</button><a class="call-button" href="tel:112"><span>☎</span>${t.call}</a></div>
+            <div class="action-bar"><button class="start-button ${routeStarted ? 'is-started' : ''}" type="button" data-testid="start-route" data-action="route"><span>${routeStarted ? '✓' : '↗'}</span>${routeStarted ? 'ROUTE ACTIVE' : t.start}</button><a class="call-button" data-testid="call-112" href="tel:112"><span>☎</span>${t.call}</a></div>
             <div class="utility-row"><button type="button" data-action="listen">▶ ${t.listen}</button><button type="button" data-action="isl">◉ ${t.isl}</button><button type="button" data-action="directions">☷ ${t.directions}</button></div>
           </div>
         </section>
@@ -110,9 +110,15 @@ function initMap() {
       sources: {
         hazard: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[76.00, 11.62], [76.18, 11.67], [76.24, 11.5], [76.05, 11.45], [76.00, 11.62]]] }, properties: {} } },
         route: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [[75.98, 11.48], [76.08, 11.55], [76.19, 11.62]] }, properties: {} } },
+        roads: { type: 'geojson', data: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: [[75.9, 11.45], [76.05, 11.53], [76.3, 11.57]] }, properties: {} }, { type: 'Feature', geometry: { type: 'LineString', coordinates: [[76.02, 11.72], [76.1, 11.55], [76.21, 11.42]] }, properties: {} }] } },
+        river: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [[75.9, 11.68], [76.02, 11.6], [76.15, 11.48], [76.3, 11.43]] }, properties: {} } },
+        buildings: { type: 'geojson', data: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[76.16, 11.58], [76.18, 11.58], [76.18, 11.6], [76.16, 11.6], [76.16, 11.58]]] }, properties: {} }, { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[76.2, 11.53], [76.22, 11.53], [76.22, 11.55], [76.2, 11.55], [76.2, 11.53]]] }, properties: {} }] } },
       },
       layers: [
         { id: 'background', type: 'background', paint: { 'background-color': '#101b24' } },
+        { id: 'river', type: 'line', source: 'river', paint: { 'line-color': '#164e63', 'line-width': 5, 'line-opacity': 0.72 } },
+        { id: 'roads', type: 'line', source: 'roads', paint: { 'line-color': '#64748b', 'line-width': 1.6, 'line-opacity': 0.46 } },
+        { id: 'buildings', type: 'fill', source: 'buildings', paint: { 'fill-color': '#334155', 'fill-opacity': 0.58, 'fill-outline-color': '#64748b' } },
         { id: 'hazard-fill', type: 'fill', source: 'hazard', paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.12 } },
         { id: 'hazard-edge', type: 'line', source: 'hazard', paint: { 'line-color': '#f87171', 'line-width': 2, 'line-opacity': 0.65 } },
         { id: 'approved-route', type: 'line', source: 'route', paint: { 'line-color': '#3b82f6', 'line-width': 3, 'line-opacity': 0.85 } },
