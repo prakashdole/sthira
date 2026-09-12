@@ -1,0 +1,9 @@
+{
+  "name": "Sthira synthetic emergency guidance",
+  "short_name": "Sthira demo",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#0f172a",
+  "description": "Synthetic, source-stamped emergency guidance demonstration."
+}

@@ -27,6 +27,11 @@ h1, h2, p { margin-top: 0; } h1 { margin-bottom: 1.1rem; color: var(--teal); fon
 @media (max-width: 760px) { .topbar { padding: 1rem 1.15rem; }.demo-pill { display: none; }.icon-button { display: block; } main { padding: 2.35rem 1.15rem 3rem; }.intro { padding-bottom: 2.3rem; } h1 { font-size: clamp(3.25rem, 17vw, 5rem); }.alert-card { padding: 1.2rem; margin-bottom: 2.7rem; }.alert-meta { max-width: 110px; text-align: right; line-height: 1.35; }.action-grid, .workspace-grid { grid-template-columns: 1fr; }.action-grid { margin-bottom: 2.7rem; }.map-stage { height: 245px; }.footer { padding: 1.1rem 1.15rem 1.5rem; flex-direction: column; }.footer span:last-child { text-align: left; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; } }
 
+.scenario-gate { min-height: 100svh; display: grid; align-content: center; gap: 1rem; max-width: 38rem; margin: auto; padding: 2rem; color: #e5e7eb; background: #020617; }
+.scenario-gate h1 { margin: 0; color: #f8fafc; font-size: clamp(2rem, 6vw, 4rem); letter-spacing: -.04em; }
+.scenario-gate p:not(.eyebrow) { color: #cbd5e1; line-height: 1.6; }
+.scenario-gate button { width: fit-content; padding: .75rem 1rem; color: #fff; background: #175cd3; border: 0; border-radius: .4rem; font-weight: 700; }
+
 .voice-pet-button { display: inline-flex; align-items: center; gap: .5rem; padding: .35rem .65rem .35rem .35rem; color: var(--ink); background: #fffdf8; border: 1px solid #c9d6cc; border-radius: 999px; box-shadow: 0 4px 12px rgba(23,59,58,.08); }
 .voice-pet-button:hover { border-color: #b96645; transform: translateY(-1px); }
 .voice-pet-label { font-size: .7rem; font-weight: 700; }

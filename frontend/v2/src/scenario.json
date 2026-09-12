@@ -1,0 +1,17 @@
+{
+  "scenario_date": "2026-09-12",
+  "expires_at": "2026-09-12T18:00:00+05:30",
+  "evidence_class": "SYNTHETIC_DEMO",
+  "disclaimer": "SYNTHETIC HACKATHON DEMO — NOT A LIVE WARNING OR EVACUATION SYSTEM",
+  "alert": {"id": "ALERT-DEMO-2026-09-12", "event": "Synthetic flood exercise", "active": true, "source_status": "SYNTHETIC_DEMO"},
+  "red_zones": [{"id": "RZ-DEMO-01", "geometry": {"type": "Polygon", "coordinates": [[[76.00,11.62],[76.18,11.67],[76.24,11.50],[76.05,11.45],[76.00,11.62]]]}}],
+  "safe_zones": [
+    {"id": "SZ-DEMO-01", "name": "Synthetic Ward 8 School", "assigned": true, "geometry": {"type": "Point", "coordinates": [76.19,11.62]}},
+    {"id": "SZ-DEMO-02", "name": "Synthetic Ridge Hall", "assigned": false, "geometry": {"type": "Point", "coordinates": [76.13,11.49]}},
+    {"id": "SZ-DEMO-03", "name": "Synthetic Valley Centre", "assigned": false, "geometry": {"type": "Point", "coordinates": [76.28,11.57]}}
+  ],
+  "routes": [{"id": "ROUTE-DEMO-01", "geometry": {"type": "LineString", "coordinates": [[75.98,11.48],[76.08,11.55],[76.19,11.62]]}, "safe_zone_id": "SZ-DEMO-01"}],
+  "citizen_location": {"id": "MY-LOCATION-DEMO", "geometry": {"type": "Point", "coordinates": [76.10,11.55]}},
+  "supported_languages": ["EN", "ML"],
+  "instruction": {"EN": "Follow the stored synthetic demo route to the assigned safe zone.", "ML": "നിയോഗിച്ച സിന്തറ്റിക് ഡെമോ സുരക്ഷിത കേന്ദ്രത്തിലേക്കുള്ള സംഭരിച്ച മാർഗ്ഗം പിന്തുടരുക."}
+}
