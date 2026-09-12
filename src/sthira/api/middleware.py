@@ -7,7 +7,7 @@ from starlette.responses import JSONResponse
 
 from sthira.core.identity import parse_bearer, verify_access_token
 from sthira.modules.live_ops.service import degraded_mode_controller
-from sthira_v2.security import new_request_id, validate_public_identifier
+from sthira_v2.security import MAX_AUDIO_BYTES, MAX_REQUEST_BYTES, new_request_id, validate_public_identifier
 
 PUBLIC_EXACT = {
     "/",
@@ -20,6 +20,7 @@ PUBLIC_EXACT = {
 }
 PUBLIC_PREFIXES = ("/ui", "/v2")
 PUBLIC_POST = {"/api/v1/auth/login"}
+PUBLIC_POST_PREFIXES = ("/api/v2/voice/",)
 PUBLIC_GET_PREFIXES = (
     "/api/v1/demo",
     "/api/v2/status",
@@ -44,6 +45,8 @@ def _is_public(method: str, path: str) -> bool:
         return True
     if method == "POST" and path in PUBLIC_POST:
         return True
+    if method == "POST" and any(path.startswith(prefix) for prefix in PUBLIC_POST_PREFIXES):
+        return True
     if method == "POST" and (path == "/api/v2/assignments" or path.startswith("/api/v2/assignments/")):
         return True
     if method == "GET" and path.startswith("/api/v2/assignments/"):
@@ -63,6 +66,19 @@ async def security_middleware(request: Request, call_next):
     except ValueError:
         request_id = new_request_id()
     request.state.request_id = request_id
+
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            limit = (MAX_AUDIO_BYTES * 4 // 3) + 1024 if path == "/api/v2/voice/transcriptions" else MAX_REQUEST_BYTES
+            if int(content_length) > limit:
+                response = JSONResponse(status_code=413, content={"detail": "request body exceeds limit"})
+                response.headers["X-Request-ID"] = request_id
+                return response
+        except ValueError:
+            response = JSONResponse(status_code=400, content={"detail": "invalid content-length"})
+            response.headers["X-Request-ID"] = request_id
+            return response
 
     if not _is_public(method, path):
         token = parse_bearer(request.headers.get("authorization"))

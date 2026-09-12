@@ -2,18 +2,18 @@
   "schema_version": "2.0",
   "provenance": {
     "evidence_class": "SYNTHETIC_DEMO",
-    "dataset_id": "STHIRA-V2-WAYANAD-DEMO-001",
+    "dataset_id": "STHIRA-V2-FLOOD-DEMO-2026-09-12",
     "version": 1,
-    "jurisdiction": "Wayanad",
+    "jurisdiction": "SYNTHETIC_DEMO",
     "authority": "Sthira synthetic exercise authority",
-    "effective_at": "2026-09-11T03:30:00Z",
-    "expires_at": "2026-09-12T03:30:00Z",
-    "checksum_sha256": "c6bb114bcedfa4b9b9dd2e77a08bb556ad5951e4929731301eeb15a9c378a55b",
+    "effective_at": "2026-09-12T10:30:00Z",
+    "expires_at": "2026-09-12T12:30:00Z",
+    "checksum_sha256": "132a3ccb970df11221b33cd4f1593a803705ba609804afce0c2835525da44a1c",
     "description": "Fictional data for demonstrating Sthira v2 workflows.",
     "disclaimer": "Not an official warning, evacuation order, shelter listing, or government route approval. Do not use for real-world decisions."
   },
   "alert": {
-    "identifier": "DEMO-WYD-LANDSLIDE-001",
+    "identifier": "ALERT-DEMO-2026-09-12",
     "sender": "demo@sthira.invalid",
     "sent": "2026-09-11T09:00:00+05:30",
     "status": "Exercise",
@@ -24,7 +24,7 @@
     "info": {
       "language": "en-IN",
       "category": ["Geo"],
-      "event": "Synthetic landslide evacuation exercise",
+      "event": "Synthetic flood exercise",
       "urgency": "Immediate",
       "severity": "Severe",
       "certainty": "Likely",
@@ -32,37 +32,37 @@
       "description": "Exercise scenario only; no real incident or official alert is represented.",
       "instruction": "Follow a listed demo route and check the destination capacity before departure.",
       "area": {
-        "areaDesc": "Synthetic Wayanad exercise area",
-        "polygon": "11.548,76.118 11.548,76.128 11.558,76.128 11.558,76.118 11.548,76.118"
+        "areaDesc": "Synthetic flood exercise area",
+        "polygon": "11.62,76.00 11.67,76.18 11.50,76.24 11.45,76.05 11.62,76.00"
       }
     }
   },
   "red_zones": [
     {
       "id": "RZ-DEMO-01",
-      "name": "Demo hillside exclusion zone",
+      "name": "Synthetic flood red zone",
       "geometry": {
         "type": "Polygon",
-        "coordinates": [[[76.118, 11.548], [76.128, 11.548], [76.128, 11.558], [76.118, 11.558], [76.118, 11.548]]]
+        "coordinates": [[[76.00, 11.62], [76.18, 11.67], [76.24, 11.50], [76.05, 11.45], [76.00, 11.62]]]
       }
     }
   ],
   "safe_zones": [
-    {"id": "SZ-DEMO-01", "name": "Demo Community Hall", "location": [76.105, 11.570], "capacity": 120},
-    {"id": "SZ-DEMO-02", "name": "Demo School Shelter", "location": [76.096, 11.578], "capacity": 80},
-    {"id": "SZ-DEMO-03", "name": "Demo Sports Centre", "location": [76.088, 11.584], "capacity": 160}
+    {"id": "SZ-DEMO-01", "name": "Synthetic Ward 8 School", "location": [76.19, 11.62], "capacity": 120},
+    {"id": "SZ-DEMO-02", "name": "Synthetic Ridge Hall", "location": [76.13, 11.49], "capacity": 80},
+    {"id": "SZ-DEMO-03", "name": "Synthetic Valley Centre", "location": [76.28, 11.57], "capacity": 160}
   ],
   "facilities": [
-    {"id": "SZ-DEMO-01", "name": "Demo Community Hall", "operational_status": "OPEN", "accessibility": ["wheelchair_ramp"]},
-    {"id": "SZ-DEMO-02", "name": "Demo School Shelter", "operational_status": "OPEN", "accessibility": []},
-    {"id": "SZ-DEMO-03", "name": "Demo Sports Centre", "operational_status": "OPEN", "accessibility": []}
+    {"id": "SZ-DEMO-01", "name": "Synthetic Ward 8 School", "operational_status": "OPEN", "accessibility": ["wheelchair_ramp"]},
+    {"id": "SZ-DEMO-02", "name": "Synthetic Ridge Hall", "operational_status": "OPEN", "accessibility": []},
+    {"id": "SZ-DEMO-03", "name": "Synthetic Valley Centre", "operational_status": "OPEN", "accessibility": []}
   ],
   "allocation_policy": {
     "reference": "SYNTHETIC-DEMO-POLICY-001",
     "order": ["SZ-DEMO-01", "SZ-DEMO-02", "SZ-DEMO-03"]
   },
   "emergency_contacts": [
-    {"label": "Emergency services", "number": "112", "jurisdiction": "Wayanad"}
+    {"label": "Emergency services", "number": "112", "jurisdiction": "SYNTHETIC_DEMO"}
   ],
   "approved_routes": [
     {
@@ -70,8 +70,8 @@
       "from_zone_id": "RZ-DEMO-01",
       "to_safe_zone_id": "SZ-DEMO-01",
       "approval": "SYNTHETIC_DEMO",
-      "distance_km": 3.4,
-      "geometry": {"type": "LineString", "coordinates": [[76.123, 11.553], [76.114, 11.561], [76.105, 11.570]]}
+      "distance_km": 1.4,
+      "geometry": {"type": "LineString", "coordinates": [[75.98, 11.48], [76.08, 11.55], [76.19, 11.62]]}
     },
     {
       "id": "ROUTE-DEMO-02",
@@ -79,7 +79,7 @@
       "to_safe_zone_id": "SZ-DEMO-02",
       "approval": "SYNTHETIC_DEMO",
       "distance_km": 4.8,
-      "geometry": {"type": "LineString", "coordinates": [[76.123, 11.553], [76.109, 11.566], [76.096, 11.578]]}
+      "geometry": {"type": "LineString", "coordinates": [[75.98, 11.48], [76.10, 11.52], [76.13, 11.49]]}
     },
     {
       "id": "ROUTE-DEMO-03",
@@ -87,7 +87,7 @@
       "to_safe_zone_id": "SZ-DEMO-03",
       "approval": "SYNTHETIC_DEMO",
       "distance_km": 6.1,
-      "geometry": {"type": "LineString", "coordinates": [[76.123, 11.553], [76.104, 11.570], [76.088, 11.584]]}
+      "geometry": {"type": "LineString", "coordinates": [[75.98, 11.48], [76.14, 11.55], [76.28, 11.57]]}
     }
   ],
   "instruction_assets": [

@@ -1,0 +1,9 @@
+# Pinned local-only speech runtime for Apple Silicon model-volume deployments.
+torch==2.14.0
+torchaudio==2.11.0
+transformers==4.46.1
+onnxruntime==1.20.1
+soundfile==0.14.0
+safetensors==0.8.0
+sentencepiece==0.2.2
+git+https://github.com/huggingface/parler-tts.git@d108732cd57788ec86bc857d99a6cabd66663d68

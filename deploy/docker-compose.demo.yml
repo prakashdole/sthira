@@ -6,5 +6,10 @@ services:
     environment:
       STHIRA_PROFILE: DEMO
       STHIRA_CORS_ORIGINS: http://localhost:8000
+      STHIRA_ASR_MODEL_DIR: /models/indic-conformer-600m-multilingual
+      STHIRA_TTS_MODEL_DIR: /models/indic-parler-tts
+    volumes:
+      - ${STHIRA_ASR_MODEL_HOST_DIR:-/dev/null}:/models/indic-conformer-600m-multilingual:ro
+      - ${STHIRA_TTS_MODEL_HOST_DIR:-/dev/null}:/models/indic-parler-tts:ro
     ports:
       - "8000:8000"

@@ -5,7 +5,7 @@ from sthira.api.app import app
 
 def test_assignment_and_arrival_api_is_idempotent_and_demo_labeled():
     client = TestClient(app)
-    request = {"assignment_id": "api-a1", "alert_id": "DEMO-WYD-LANDSLIDE-001", "citizen_session_id": "synthetic-session-001", "idempotency_key": "assignment-key-1", "party_size": 2}
+    request = {"assignment_id": "api-a1", "alert_id": "ALERT-DEMO-2026-09-12", "citizen_session_id": "synthetic-session-001", "idempotency_key": "assignment-key-1", "party_size": 2}
     first = client.post("/api/v2/assignments", json=request)
     repeated = client.post("/api/v2/assignments", json=request)
 

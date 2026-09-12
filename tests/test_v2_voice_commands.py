@@ -4,8 +4,8 @@ from sthira_v2.voice_commands import MapIntent, parse_map_command
 def test_voice_map_command_is_allowlisted():
     assert parse_map_command("show the alert area", confidence=0.95).intent is MapIntent.SHOW_ALERT_AREA
     assert parse_map_command("zoom in", confidence=0.95).intent is MapIntent.ZOOM_IN
-    focused = parse_map_command("focus on Community Hall", confidence=0.95)
-    assert focused.place == "Community Hall"
+    focused = parse_map_command("focus on Ward 8 School", confidence=0.95)
+    assert focused.place == "Synthetic Ward 8 School"
     assert focused.target_id == "SZ-DEMO-01"
     assert parse_map_command("show my route", confidence=0.95).intent is MapIntent.SHOW_ROUTE
     assert parse_map_command("show my location", confidence=0.95).intent is MapIntent.SHOW_MY_LOCATION

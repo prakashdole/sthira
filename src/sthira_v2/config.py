@@ -25,7 +25,8 @@ class V2Settings:
     source_authorization: str | None
     auth_issuer: str | None
     operations_owner: str | None
-    # Optional legacy experiment metadata; it is disabled and unconfigured by default.
+    # Compatibility-only fields for an isolated legacy experiment. They are not
+    # consumed by the v2 citizen flow; Azure OpenAI is the optional interpreter.
     nemotron_enabled: bool = False
     aws_region: str = ""
     nemotron_model_id: str = ""
@@ -94,9 +95,10 @@ def profile_metadata(settings: V2Settings | None = None) -> dict[str, object]:
         "startup_ready": not missing if resolved.profile in {RuntimeProfile.PILOT, RuntimeProfile.PRODUCTION} else True,
         "missing_production_requirements": list(missing),
         "legacy_v1_isolation": True,
-        "nemotron": {
-            "enabled": resolved.nemotron_enabled,
-            "region": resolved.aws_region,
-            "model_id": resolved.nemotron_model_id,
+        "optional_voice_interpreter": {
+            "provider": "AZURE_OPENAI",
+            "configured": bool(os.getenv("AZURE_OPENAI_RESPONSES_URL") and os.getenv("AZURE_OPENAI_API_KEY")),
+            "deployment": os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini"),
+            "scope": "SYNTHETIC_DEMO_MAP_ACTION_INTERPRETATION_ONLY",
         },
     }

@@ -10,7 +10,7 @@ def test_synthetic_operational_package_validates_without_inference():
     result = validate_operational_package(load_v2_fixture())
 
     assert result.evidence_class == "SYNTHETIC_DEMO"
-    assert result.alert_id == "DEMO-WYD-LANDSLIDE-001"
+    assert result.alert_id == "ALERT-DEMO-2026-09-12"
     assert len(result.safe_zone_ids) == 3
     assert set(result.instruction_languages) == {"en-IN", "ml-IN"}
 
@@ -51,7 +51,7 @@ def test_signature_metadata_and_verifier_are_required_when_enabled():
         signed_package,
         require_signature=True,
         signature_verifier=lambda _package, signature: signature["value"] == "sig",
-    ).package_id == "STHIRA-V2-WAYANAD-DEMO-001"
+    ).package_id == "STHIRA-V2-FLOOD-DEMO-2026-09-12"
 
 
 def test_manifest_checksum_and_required_operational_facts_fail_closed():

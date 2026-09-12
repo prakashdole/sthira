@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, Field
+import base64
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,11 @@ from sthira_v2.readiness import ReadinessState, build_readiness_report
 from sthira_v2.cap import AlertLifecycleService
 from sthira_v2.allocation import AssignmentUnavailable, FacilityCapacity, InMemoryAllocationService
 from sthira_v2.contracts import ArrivalResponse
+from sthira_v2.local_voice import LocalVoiceUnavailable, asr_runtime, tts_runtime
+from sthira_v2.speech_stt import INDIC_CONFORMER_MODEL, IndicConformerAdapter, STTArtifactGate, STTState
 from sthira_v2.package_service import OperationalPackageService, PackageAuthorizationError
+from sthira_v2.voice_map import interpret_voice_map_command
+from sthira_v2.azure_openai import AzureOpenAIResponses
 
 router = APIRouter(prefix="/api/v2", tags=["v2-runtime"])
 _DEMO_SCENARIO = Path(__file__).resolve().parents[2] / "frontend" / "v2" / "src" / "scenario.json"
@@ -31,8 +36,8 @@ for _facility in (
 
 package_service = OperationalPackageService()
 _demo_package = json.loads((Path(__file__).resolve().parents[2] / "fixtures" / "v2_wayanad_demo.json").read_text(encoding="utf-8"))
-_demo_package_record = package_service.preview(_demo_package, jurisdiction="Wayanad")
-package_service.publish(_demo_package_record.validation.package_id, operator_jurisdiction="Wayanad", authenticated=True)
+_demo_package_record = package_service.preview(_demo_package, jurisdiction="SYNTHETIC_DEMO")
+package_service.publish(_demo_package_record.validation.package_id, operator_jurisdiction="SYNTHETIC_DEMO", authenticated=True)
 
 
 class AssignmentRequest(BaseModel):
@@ -46,6 +51,25 @@ class AssignmentRequest(BaseModel):
 class ArrivalRequest(BaseModel):
     response: ArrivalResponse
     idempotency_key: str = Field(min_length=8, max_length=200)
+
+
+class VoiceTranscriptionRequest(BaseModel):
+    audio_base64: str = Field(min_length=1, max_length=13_500_000)
+    language: str = Field(pattern=r"^(en|hi|ml)-IN$")
+    duration_seconds: float = Field(gt=0, le=30)
+    media_type: str = Field(pattern=r"^audio/(wav|ogg|webm)$")
+
+
+class VoiceSynthesisRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+    language: str = Field(pattern=r"^(en|hi|ml)-IN$")
+    idempotency_key: str = Field(min_length=8, max_length=200)
+
+
+class VoiceMapCommandRequest(BaseModel):
+    transcript: str = Field(min_length=1, max_length=500)
+    language: str = Field(pattern=r"^(en|hi|ml)-IN$")
+    confidence: float = Field(ge=0, le=1)
 
 
 def _alert_response(parsed) -> dict[str, object]:
@@ -77,18 +101,76 @@ def v2_status() -> dict[str, object]:
 @router.get("/ai/provider/status", tags=["v2-ai"])
 def ai_provider_status() -> dict[str, object]:
     """Expose configuration only; this endpoint never makes a paid model call."""
-    settings = V2Settings.from_environment()
+    provider = AzureOpenAIResponses()
     return {
         "data": {
             "provider": "AZURE_OPENAI",
             "configured_model_id": "gpt-4.1-mini",
-            "configured": bool(os.getenv("AZURE_OPENAI_RESPONSES_URL") and os.getenv("AZURE_OPENAI_API_KEY")),
+            "configured": provider.configured,
             "purpose": "VOICE_MAP_INTERPRETATION_ONLY",
             "requires_validated_map_actions": True,
         },
         "source_status": "SYNTHETIC_DEMO",
-        "degraded": not settings.nemotron_enabled,
+        "degraded": not provider.configured,
     }
+
+
+@router.get("/voice/status", tags=["v2-voice"])
+def voice_status() -> dict[str, object]:
+    """Report local artifact availability without loading model weights."""
+    import os
+    from pathlib import Path
+    asr_path = Path(os.getenv("STHIRA_ASR_MODEL_DIR", ""))
+    tts_path = Path(os.getenv("STHIRA_TTS_MODEL_DIR", ""))
+    return {"data": {
+        "asr": {"model": INDIC_CONFORMER_MODEL, "ready": (asr_path / "model_onnx.py").is_file(), "local_only": True, "supported_languages": ["hi-IN", "ml-IN"]},
+        "tts": {"model": "ai4bharat/indic-parler-tts", "ready": (tts_path / "model.safetensors").is_file(), "local_only": True},
+    }, "source_status": "SYNTHETIC_DEMO"}
+
+
+@router.post("/voice/transcriptions", tags=["v2-voice"])
+def transcribe_voice(request: VoiceTranscriptionRequest) -> dict[str, object]:
+    try:
+        audio = base64.b64decode(request.audio_base64, validate=True)
+        adapter = IndicConformerAdapter(
+            STTArtifactGate(INDIC_CONFORMER_MODEL, "e9b71b369c048e2c6b634d4c131061c34e441179", None, "MIT", "TorchScript+ONNX", "Apple Silicon", STTState.READY, ("hi-IN", "ml-IN")),
+            asr_runtime(),
+        )
+        transcript = adapter.transcribe(audio, language=request.language, duration_seconds=request.duration_seconds, media_type=request.media_type)
+    except (LocalVoiceUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="local speech recognition unavailable") from exc
+    return {"data": {"request_id": transcript.request_id, "language": transcript.language, "text": transcript.text, "confidence": transcript.confidence, "raw_audio_retained": False}, "source_status": "SYNTHETIC_DEMO"}
+
+
+@router.post("/voice/speech", tags=["v2-voice"])
+def synthesize_voice(request: VoiceSynthesisRequest) -> Response:
+    language_key = {"en-IN": "EN", "ml-IN": "ML"}.get(request.language)
+    if language_key is None:
+        raise HTTPException(status_code=422, detail="language is not configured for local speech")
+    scenario = json.loads(_DEMO_SCENARIO.read_text(encoding="utf-8"))
+    approved_text = scenario["instruction"].get(language_key)
+    if request.text != approved_text:
+        raise HTTPException(status_code=422, detail="only the current approved scenario instruction may be synthesized")
+    try:
+        audio = tts_runtime().synthesize_wav(request.text)
+    except LocalVoiceUnavailable as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="local speech synthesis unavailable") from exc
+    return Response(content=audio, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+
+@router.post("/voice/commands", tags=["v2-voice"])
+def interpret_voice_map(request: VoiceMapCommandRequest) -> dict[str, object]:
+    """Interpret an utterance through the constrained synthetic map contract."""
+    response = interpret_voice_map_command(
+        request.transcript,
+        language=request.language,
+        confidence=request.confidence,
+    )
+    return {"data": response, "source_status": "SYNTHETIC_DEMO", "degraded": True}
 
 
 @router.get("/health/readiness")
@@ -153,7 +235,7 @@ def demo_scenario() -> dict[str, object]:
 @router.get("/operational-packages/active", tags=["v2-operational-package"])
 def active_operational_package() -> dict[str, object]:
     """Return the locally published synthetic package, never an external authority."""
-    record = package_service.active(jurisdiction="Wayanad")
+    record = package_service.active(jurisdiction="SYNTHETIC_DEMO")
     if record is None or record.state != "PUBLISHED":
         raise HTTPException(status_code=503, detail="operational package unavailable")
     return {

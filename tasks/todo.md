@@ -28,7 +28,7 @@
 
 - [x] Add strict Pydantic v2 contracts and legal state transitions.
 - [x] Add CAP alert, provenance, freshness, geometry, zone, route, instruction, session, assignment, arrival, and capacity models.
-- [x] Add SYNTHETIC_DEMO Wayanad fixture with one alert, one red zone, three safe zones, routes, capacities, and English/Malayalam instructions.
+- [x] Add a current-dated `SYNTHETIC_DEMO` flood fixture with one alert, one red zone, three safe zones, stored routes, capacities, and English/Malayalam instructions.
 - [x] Add fixture integrity validation and focused tests.
 - [x] Expose v2 OpenAPI status smoke coverage.
 - [x] Add Makefile checks for Python compile, frontend syntax, full tests, and v2 tests.
@@ -62,7 +62,7 @@
 - [x] Preserved pre-existing working-tree changes and confirmed no `.txt` file diff.
 - [x] Reconciled the preferred `origin/main` Vite frontend into local `main` without restoring the duplicate static v2 frontend.
 - [x] Ported the isolated synthetic CAP, operational-package, allocation/capacity, offline, source-health, deterministic voice, deployment, and acceptance slices.
-- [x] Added the OpenFreeMap Liberty style, India overview camera, versioned local scenario JSON, GeoJSON overlays, attribution, and fail-soft basemap messaging.
+- [x] Added Esri World Imagery as a satellite-style visual-only basemap, India overview camera, versioned local scenario JSON, GeoJSON overlays, attribution, and fail-soft imagery messaging.
 - [x] Added strict ID-only map-action validation with bounded camera actions and reduced-motion handling.
 - [x] Verified desktop and 390x844 browser flows: initial map, attribution, stored-route action, Voice Map Control panel, alert-area action, keyboard-visible accessible names, and synthetic date/disclaimer.
 - [x] Add typed synthetic-scenario API response and API-backed frontend loading/provenance validation.
@@ -104,7 +104,17 @@ The current application is a locally runnable synthetic emergency-guidance demo 
 - [x] Fixture-only source adapter validates timestamps, units, provenance, schema metadata, and source identity; known live connectors remain `BLOCKED_EXTERNAL`.
 - [x] Deterministic voice parser covers allow-listed map intents, known synthetic place aliases, confirmation-only emergency-call intent, low-confidence rejection, and prohibited/ranking/prompt-injection rejection.
 - [x] TTS artifact gate/cache purge semantics, pending ISL status with text fallback, offline expiry/cancellation cache, privacy deletion/expiry, and degraded-mode runbook are implemented and tested.
-- [x] CI workflow and Makefile v2 build target added; `make check`: 256 passed, 2 dependency deprecation warnings; frontend `npm ci` and `npm run build` pass; `git diff --check` and `.txt` guard pass.
+- [x] Local AI4Bharat voice endpoints are wired to the demo UI: short recordings are transcribed locally, and only approved English/Malayalam synthetic instruction text can be synthesized locally.
+- [x] Direct local Indic Parler-TTS smoke synthesis produced a 114,732-byte WAV from the approved English synthetic instruction on 2026-09-12; first cold loading/generation took about 28 seconds on this Mac and an in-process content-hash cache repeat completed in 0 seconds.
+- [x] Transcript map control now crosses a constrained backend boundary. Azure GPT-4.1 mini may phrase a response when configured, but the deterministic local grammar constructs the only executable action plan and the browser validates it again.
+- [x] Live Azure command smoke request returned `SHOW_SAFE_ZONE` with exactly three deterministic actions targeting `SZ-DEMO-01`; no provider-generated coordinate, route, or unknown ID was accepted.
+- [x] Voice Map Control exposes a microphone-free `Demo transcript` field for the same constrained map-action path, so the presentation remains usable when recording is denied or unavailable.
+- [x] The installed IndicConformer artifact’s language masks were inspected: Hindi (`hi-IN`) and Malayalam (`ml-IN`) are supported by this demo runtime; English microphone capture now fails visibly before recording instead of passing an invalid model key. English text/TTS and demo-transcript control remain available.
+- [x] Corrected Malayalam runtime-key smoke execution completed locally. A synthetic TTS-generated Malayalam clip transcribed as empty text, so it is recorded only as runtime compatibility—not an ASR accuracy claim. Real recorded-utterance accuracy remains a pilot/hardware evaluation gate.
+- [ ] Exercise browser microphone media compatibility, real local TTS playback, Azure-backed command explanation, and the complete voice failure matrix only after the implementation pass is declared complete.
+- [x] CI workflow and Makefile v2 build target added; latest `make test`: 259 passed, 2 dependency deprecation warnings; frontend `npm run build` passes; deterministic `/api/v2/voice/commands` smoke check returns only validated safe-zone actions with Azure disabled; `git diff --check` and `.txt` guard pass.
+- [x] The demo runbook includes the exact two-terminal local presentation commands and clearly states the local TTS cold-start and English ASR limitation.
 - [x] Browser evidence: India overview, attribution, route/arrival flow with one reservation and one arrival POST, voice panel, alert-area action, API-unavailable fail-closed state, and recovery after backend restoration.
+- [x] Latest local browser inspection at `http://127.0.0.1:5173/` renders the synthetic flood alert, Synthetic Ward 8 School assignment, synthetic disclaimer, text-first directives, emergency-call handoff, MapLibre surface, and language controls without real-world route wording.
 - [ ] Real PostgreSQL 16/PostGIS migration/SRID/locking/restore evidence remains unavailable.
 - [ ] Authorized government endpoints, operational samples, SOPs, source ownership, model artifacts/hardware, TTS/ISL approvals, and pilot sign-offs remain external blockers.

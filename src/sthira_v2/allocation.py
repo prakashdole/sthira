@@ -27,7 +27,7 @@ class Allocation:
     facility_id: str
     party_size: int
     state: AssignmentState
-    alert_id: str = "DEMO-WYD-LANDSLIDE-001"
+    alert_id: str = "ALERT-DEMO-2026-09-12"
     citizen_session_id: str = "synthetic-demo-session"
     idempotency_key: str = "synthetic-demo-assignment"
 
@@ -54,7 +54,7 @@ class InMemoryAllocationService:
         assignment_id: str,
         party_size: int,
         *,
-        alert_id: str = "DEMO-WYD-LANDSLIDE-001",
+        alert_id: str = "ALERT-DEMO-2026-09-12",
         citizen_session_id: str = "synthetic-demo-session",
         idempotency_key: str | None = None,
     ) -> Allocation:

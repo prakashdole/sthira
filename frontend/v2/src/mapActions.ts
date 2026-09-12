@@ -1,4 +1,5 @@
 import type { Map } from 'maplibre-gl';
+import scenario from './scenario.json';
 
 export type Layer = 'RED_ZONES' | 'SAFE_ZONES' | 'ROUTES' | 'MY_LOCATION';
 export type Panel = 'ALERT_DETAILS' | 'SAFE_ZONE_DETAILS' | 'ROUTE_GUIDANCE' | 'CAPACITY_DETAILS' | 'EMERGENCY_CALL_CONFIRMATION' | 'DEMO_INFORMATION';
@@ -15,17 +16,28 @@ export type MapAction =
 export type VoiceResponse = { schema_version: '1.0'; status: 'OK' | 'CLARIFY' | 'UNSUPPORTED' | 'DATA_UNAVAILABLE' | 'ERROR'; actions: MapAction[] };
 
 const layers: Record<Layer, string> = { RED_ZONES: 'red-zones-fill', SAFE_ZONES: 'safe-zones', ROUTES: 'routes', MY_LOCATION: 'my-location' };
-const ids = new Set(['RZ-DEMO-01', 'SZ-DEMO-01', 'SZ-DEMO-02', 'SZ-DEMO-03', 'ROUTE-DEMO-01', 'ROUTE-DEMO-02', 'ROUTE-DEMO-03', 'MY-LOCATION-DEMO']);
-const bounds: Record<string, [[number, number], [number, number]]> = {
-  'RZ-DEMO-01': [[76.00, 11.45], [76.24, 11.67]],
-  'SZ-DEMO-01': [[76.17, 11.60], [76.21, 11.64]],
-  'SZ-DEMO-02': [[76.11, 11.47], [76.15, 11.51]],
-  'SZ-DEMO-03': [[76.26, 11.55], [76.30, 11.59]],
-  'ROUTE-DEMO-01': [[75.98, 11.48], [76.19, 11.62]],
-  'ROUTE-DEMO-02': [[75.98, 11.48], [76.17, 11.64]],
-  'ROUTE-DEMO-03': [[75.98, 11.48], [76.20, 11.66]],
-  'MY-LOCATION-DEMO': [[76.08, 11.53], [76.12, 11.57]],
-};
+type Bounds = [[number, number], [number, number]];
+
+function collectPositions(value: unknown): [number, number][] {
+  if (!Array.isArray(value)) return [];
+  if (value.length >= 2 && typeof value[0] === 'number' && typeof value[1] === 'number') return [[value[0], value[1]]];
+  return value.flatMap(collectPositions);
+}
+
+function geometryBounds(geometry: { coordinates: unknown }): Bounds {
+  const positions = collectPositions(geometry.coordinates);
+  if (!positions.length) throw new Error('scenario feature has no coordinates');
+  return [[Math.min(...positions.map(([lng]) => lng)), Math.min(...positions.map(([, lat]) => lat))], [Math.max(...positions.map(([lng]) => lng)), Math.max(...positions.map(([, lat]) => lat))]];
+}
+
+const scenarioFeatures = [
+  ...scenario.red_zones,
+  ...scenario.safe_zones,
+  ...scenario.routes,
+  scenario.citizen_location,
+];
+const bounds: Record<string, Bounds> = Object.fromEntries(scenarioFeatures.map((feature) => [feature.id, geometryBounds(feature.geometry)]));
+const ids = new Set(Object.keys(bounds));
 
 const panels = new Set<Panel>(['ALERT_DETAILS', 'SAFE_ZONE_DETAILS', 'ROUTE_GUIDANCE', 'CAPACITY_DETAILS', 'EMERGENCY_CALL_CONFIRMATION', 'DEMO_INFORMATION']);
 
@@ -49,7 +61,7 @@ export function validateVoiceResponse(value: unknown): VoiceResponse | null {
   return response as unknown as VoiceResponse;
 }
 
-export function executeMapActions(map: Map, response: unknown, reducedMotion: boolean, onPanel: (panel: Panel) => void): boolean {
+export function executeMapActions(map: Map, response: unknown, reducedMotion: boolean, onPanel: (panel: Panel) => void, onLanguage?: (language: string) => void): boolean {
   const valid = validateVoiceResponse(response);
   if (!valid) return false;
   const duration = reducedMotion ? 0 : 900;
@@ -78,6 +90,7 @@ export function executeMapActions(map: Map, response: unknown, reducedMotion: bo
       const [dx, dy] = offsets[action.direction]; map.easeTo({ center: [lng + dx, lat + dy], duration });
     }
     if (action.type === 'OPEN_PANEL') onPanel(action.panel as Panel);
+    if (action.type === 'SET_LANGUAGE') onLanguage?.(action.language);
   }
   return true;
 }

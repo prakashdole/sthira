@@ -168,14 +168,14 @@ Update this table only after verifying the corresponding exit gate.
 | 2 | Persistence, audit, and operational states | BLOCKED_EXTERNAL | Local models, repositories, migration scaffolding, audit chain, source lifecycle, readiness probe, and server-free tests exist; a real PostgreSQL 16/PostGIS runtime is unavailable, so migrations, SRID enforcement, locking, and operational readiness are not verified |
 | 3 | SACHET-compatible CAP alert backbone | DONE | Synthetic CAP parser/lifecycle/API, raw artifact preservation, ETag/304 cache adapter, bounded retries, quarantine, and 200/304/update/cancel/outage tests; live SACHET authorization and operational samples remain unavailable |
 | 4 | Government operational-package ingestion | IN_PROGRESS | Synthetic manifest validation, checksum/signature seam, authenticated demo publication, version conflict, supersession/cancel/rollback, active-package API, and tests; real authority package/signature and operator identity remain external |
-| 5 | Citizen emergency interface | IN_PROGRESS | Integrated Vite/TypeScript UI, API-backed synthetic scenario loading, OpenFreeMap/MapLibre overlays, text-first fallback, PWA assets, browser desktop/mobile and fail-closed evidence; full state/accessibility matrix remains |
+| 5 | Citizen emergency interface | IN_PROGRESS | Integrated Vite/TypeScript UI, API-backed synthetic scenario loading, MapLibre with satellite-style visual-only imagery and local overlays, text-first fallback, PWA assets, browser desktop/mobile and fail-closed evidence; full state/accessibility matrix remains |
 | 6 | Assignment, arrival, and capacity integrity | IN_PROGRESS | Explicit alert/session/idempotency API linkage, local atomic allocation, arrival Yes/No semantics, concurrent tests, and browser confirmation; PostgreSQL transaction/concurrency and full UI integration remain |
 | 7 | Official context connectors and source health | IN_PROGRESS | Strict fixture adapter/source metadata contract and explicit blocked registry for IMD/CWC/GSI/INCOIS/FSI/NCS/KSDMA/NDEM; authorized endpoints and samples remain unavailable |
-| 8 | Voice Map Control with IndicConformer | IN_PROGRESS | Integrated deterministic allow-list/parser, ID-only map validator, bounded camera actions, confirmation-only emergency call, and browser voice controls; IndicConformer artifact/hardware benchmark remains external |
-| 9 | TTS, multilingual content, ISL, and accessibility | IN_PROGRESS | TTS artifact gate/cache purge seam, English/Malayalam demo text, pending ISL state with transcript fallback, and focused tests; exact TTS artifact/license, human review, ISL approval, and full WCAG/GIGW audit remain |
+| 8 | Voice Map Control with IndicConformer | IN_PROGRESS | Local AI4Bharat IndicConformer transcription endpoint accepts bounded explicitly recorded Hindi/Malayalam audio (the downloaded artifact has no English vocabulary); English remains available through text/TTS and the microphone-free developer transcript input. Voice suggestion buttons use the same synthetic-only command endpoint. A live Azure GPT-4.1 mini command smoke call returned the deterministic three-action `SHOW_SAFE_ZONE` plan for `SZ-DEMO-01`; Azure may provide short explanation but can never alter the local allow-list. The browser revalidates all returned IDs/actions before camera movement. Hardware/browser media compatibility and command-evaluation evidence remain pending. |
+| 9 | TTS, multilingual content, ISL, and accessibility | IN_PROGRESS | Local Indic Parler-TTS serves only the current approved English/Malayalam synthetic instruction and caches its loaded local model runtime plus up to four approved WAVs by content hash. A real English WAV synthesis completed locally on 2026-09-12 (114,732 bytes; ~28-second cold load; 0-second repeat cache hit). Hindi has text-only fallback; ISL remains visibly pending approval. Human language review, exact license evidence, ISL approval, and full WCAG/GIGW audit remain. |
 | 10 | Offline operation, emergency calling, and notifications | IN_PROGRESS | PWA manifest/service worker, expiry/cancel cache seam, explicit dialler confirmation, fail-closed UI, and browser outage evidence; authorized notifications and platform installation matrix remain |
 | 11 | Security, privacy, resilience, and observability | IN_PROGRESS | Existing auth/degraded guard plus v2 bounded identifiers, inert imported text, request/privacy helpers, and recovery runbook; full threat, dependency, load, backup/restore, and pilot-profile evidence remains |
-| 12 | End-to-end assurance and deployment packaging | IN_PROGRESS | Demo deployment files, acceptance matrix, 253-test backend suite, frontend build, diff guards, and browser evidence; full automated browser/accessibility/security/load/DR matrix remains |
+| 12 | End-to-end assurance and deployment packaging | IN_PROGRESS | Demo deployment files, acceptance matrix, 259-test backend suite, TypeScript/Vite build, deterministic voice-command API smoke check, diff guards, and prior browser evidence; full automated browser/accessibility/security/load/DR matrix remains |
 | 13 | Authorized shadow pilot | BLOCKED_EXTERNAL | Requires government agreements and live samples |
 | 14 | Controlled citizen pilot | BLOCKED_EXTERNAL | Requires Phase 13 approval and 24×7 operations |
 
@@ -188,7 +188,7 @@ Allowed statuses: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED_EXTERNAL`, `DONE`.
 Verified repository state on 2026-09-11:
 
 - Local `main` is at `dd5a2db` and is eleven commits behind `origin/main` as of 2026-09-12.
-- `origin/main` at `efe376d` contains the preferred Vite/TypeScript citizen interface, `maplibre-gl`, Voice Map Control UI, government-alert visual treatment, and v2 readiness endpoint. `npm ci` and `npm run build` pass for that exact tree. Its current map is still an inline synthetic canvas: it does not yet load OpenFreeMap, starts directly over Wayanad, and uses hard-coded demo geometry.
+- Historical reconciliation note: `origin/main` at `efe376d` contained the preferred Vite/TypeScript citizen interface, `maplibre-gl`, Voice Map Control UI, government-alert visual treatment, and v2 readiness endpoint. The current integrated frontend supersedes that inline synthetic canvas with a MapLibre satellite-style visual background and local versioned demo geometry.
 - Isolated commit `d115ee3` contains the synthetic CAP, operational-package, assignment/capacity, offline, source-health, deterministic voice-command, deployment, and acceptance-test vertical slices. Its complete Python suite previously passed with 233 tests.
 - The isolated backend commit is not an ancestor of `origin/main`. Both histories modify `frontend/v2/index.html` and `tasks/todo.md`; a blind merge would select conflicting implementations.
 - The current local tree passes 212 Python tests. Passing branch-local tests does not prove an integrated application.
@@ -210,28 +210,28 @@ When the user says **“Move to the next phase”**, execute this checkpoint bef
 
 Mark this checkpoint `CLOSED` only when one local branch contains the chosen Vite frontend and the required backend vertical slices, all applicable automated checks pass, the running citizen flow is verified, `.txt` files are unchanged, and all live-government/model dependencies remain honestly labeled. Then continue with the first remaining safe `IN_PROGRESS` phase; do not wait on a `BLOCKED_EXTERNAL` phase when independent local work remains.
 
-## 4.2 Mandatory hackathon map slice — MapLibre + OpenFreeMap
+## 4.2 Mandatory hackathon map slice — MapLibre + satellite-style imagery
 
 **Status: OPEN. Execute immediately after §4.1 is reconciled.**
 
 ### Outcome
 
-Deliver a free, keyless, moving map that opens on India and responds to validated voice-map actions by flying to a current-dated synthetic incident, revealing a red zone, preconfigured safe zones, and stored routes. MapLibre renders and animates the map. OpenFreeMap supplies the visual basemap only. Neither component supplies disaster truth.
+Deliver a free, keyless, moving map that opens on India and responds to validated voice-map actions by flying to a current-dated synthetic incident, revealing a red zone, preconfigured safe zones, and stored routes. MapLibre renders and animates the map. Esri World Imagery supplies satellite-style visual context only. Neither component supplies disaster truth.
 
 ### Fixed technology decision
 
 - Renderer: the existing `maplibre-gl` dependency in `frontend/v2`.
-- Basemap style: `https://tiles.openfreemap.org/styles/liberty`.
+- Basemap tiles: `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}`.
 - Operational overlays: local versioned GeoJSON loaded by ID.
 - Voice contract: `voice-map-system-prompt.md`.
 - No Google Maps, Google Routes, Mapbox, Places API, geocoder, or routing API in this hackathon slice.
-- Keep visible OpenFreeMap/OpenMapTiles/OpenStreetMap attribution.
-- OpenFreeMap is a free third-party visual basemap with no SLA. If it fails, retain the local solid-background map and all local overlays/text guidance.
+- Keep visible Esri/Maxar/Earthstar Geographics/GIS User Community attribution.
+- Satellite imagery is third-party visual context with no SLA and is not live hazard data. If it fails, retain the local solid-background map and all local overlays/text guidance.
 
 ### Implementation prompt
 
 1. Start only from the reconciled Vite frontend. Do not rebuild a second frontend.
-2. Preserve the installed MapLibre package and CSS import. Replace the inline empty style with the OpenFreeMap `liberty` style URL after checking that the map container has a stable non-zero height.
+2. Preserve the installed MapLibre package and CSS import. Configure a raster source for the approved satellite-style tile URL after checking that the map container has a stable non-zero height. Keep its attribution visible.
 3. Initialize the camera at an India overview using center `[78.9629, 20.5937]`, approximately zoom `3.5`, bearing `0`, and pitch `0`. Treat these as presentation defaults, not user location.
 4. Replace the historical Wayanad-specific UI copy and geometry with one current-dated scenario package. Preferred demo preparation path:
    - capture a recent SACHET alert and its capture/issue time when an appropriate public alert is available;
@@ -261,7 +261,7 @@ Deliver a free, keyless, moving map that opens on India and responds to validate
 - `SHOW_ASSIGNED_SAFE_ZONE` focuses only the preconfigured assignment.
 - `SHOW_ROUTE` reveals only the stored route and fits its known features.
 - Unknown IDs, raw coordinates, invalid JSON, low confidence, prompt injection, missing data, and prohibited prediction produce no camera action.
-- OpenFreeMap failure leaves overlays, text guidance, and controls usable on the local fallback background.
+- Satellite-imagery failure leaves overlays, text guidance, and controls usable on the local fallback background.
 - Reduced-motion mode avoids the cinematic flight.
 - Mobile and desktop browser checks cover mouse, touch, keyboard, screen-reader names, resize, and map-container visibility.
 - The scenario date, capture time when applicable, evidence class, source status, and synthetic disclaimer remain visible.

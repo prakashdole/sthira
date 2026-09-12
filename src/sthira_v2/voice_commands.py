@@ -37,12 +37,12 @@ class ParsedCommand:
 
 _PATTERNS: tuple[tuple[MapIntent, re.Pattern[str]], ...] = (
     (MapIntent.SHOW_MY_LOCATION, re.compile(r"\b(show|find|locate)\b.*\b(my location|where i am|current position)\b", re.I)),
-    (MapIntent.SHOW_ALERT_AREA, re.compile(r"\b(show|display)\b.*\b(alert|danger|red)\b", re.I)),
+    (MapIntent.SHOW_ALERT_AREA, re.compile(r"\b(show|display)\b.*\b(alert|danger|red)\b|റെഡ്\s*സോൺ|അപകട\s*മേഖല|അലേർട്ട്\s*മേഖല|लाल\s*क्षेत्र|खतरे\s*का\s*क्षेत्र", re.I)),
     (MapIntent.SHOW_ALL_SAFE_ZONES, re.compile(r"\b(show|display)\b.*\b(all|every)\b.*\b(safe zone|shelter)\b", re.I)),
-    (MapIntent.SHOW_ROUTE, re.compile(r"\b(show|repeat|display)\b.*\b(route|way|directions)\b|\bhow do i reach\b", re.I)),
-    (MapIntent.SHOW_SAFE_ZONE, re.compile(r"\b(show|display)\b.*\b(assigned|my|safe zone|destination|shelter)\b", re.I)),
-    (MapIntent.ZOOM_IN, re.compile(r"\b(zoom in|closer)\b", re.I)),
-    (MapIntent.ZOOM_OUT, re.compile(r"\b(zoom out|wider|farther)\b", re.I)),
+    (MapIntent.SHOW_ROUTE, re.compile(r"\b(show|repeat|display)\b.*\b(route|way|directions)\b|\bhow do i reach\b|മാർഗം|വഴി\s*(കാണി|കാണിക്ക)|റൂട്ട്|रास्ता\s*(दिखा|बताओ)|मार्ग\s*(दिखा|बताओ)", re.I)),
+    (MapIntent.SHOW_SAFE_ZONE, re.compile(r"\b(show|display)\b.*\b(assigned|my|safe zone|destination|shelter)\b|\b(where should i go|which.*(?:safe|relocation)|relocation\s*(?:zone|area)|nearest\s*(?:safe zone|shelter))\b|സുരക്ഷിത\s*(മേഖല|കേന്ദ്രം)|നികാസി\s*പ്രദേശം|ഷെൽട്ടർ|सुरक्षित\s*(क्षेत्र|स्थान)|निकासी\s*क्षेत्र|शेल्टर", re.I)),
+    (MapIntent.ZOOM_IN, re.compile(r"\b(zoom in|closer)\b|വലുതാക്കൂ|ज़ूम\s*इन", re.I)),
+    (MapIntent.ZOOM_OUT, re.compile(r"\b(zoom out|wider|farther)\b|ചെറുതാക്കൂ|ज़ूम\s*आउट", re.I)),
     (MapIntent.PAN_NORTH, re.compile(r"\b(pan|move)\b.*\b(north|up)\b", re.I)),
     (MapIntent.PAN_SOUTH, re.compile(r"\b(pan|move)\b.*\b(south|down)\b", re.I)),
     (MapIntent.PAN_EAST, re.compile(r"\b(pan|move)\b.*\b(east|right)\b", re.I)),
@@ -55,12 +55,11 @@ _PATTERNS: tuple[tuple[MapIntent, re.Pattern[str]], ...] = (
 
 
 _PLACE_ALIASES = {
-    "community hall": ("Community Hall", "SZ-DEMO-01"),
-    "demo community hall": ("Demo Community Hall", "SZ-DEMO-01"),
-    "school shelter": ("School Shelter", "SZ-DEMO-02"),
-    "demo school shelter": ("Demo School Shelter", "SZ-DEMO-02"),
-    "sports centre": ("Sports Centre", "SZ-DEMO-03"),
-    "sports center": ("Sports Centre", "SZ-DEMO-03"),
+    "ward 8 school": ("Synthetic Ward 8 School", "SZ-DEMO-01"),
+    "school shelter": ("Synthetic Ward 8 School", "SZ-DEMO-01"),
+    "ridge hall": ("Synthetic Ridge Hall", "SZ-DEMO-02"),
+    "valley centre": ("Synthetic Valley Centre", "SZ-DEMO-03"),
+    "valley center": ("Synthetic Valley Centre", "SZ-DEMO-03"),
 }
 
 

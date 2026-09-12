@@ -55,6 +55,13 @@ Each phase ends with working evidence. Live integrations stay behind feature fla
 
 **Exit:** approved task accuracy/latency thresholds pass; prohibited commands cause no side effect.
 
+Implementation note (2026-09-12): the hackathon implementation now uses local
+IndicConformer for bounded recorded audio and local Indic Parler-TTS for approved
+English/Malayalam synthetic instruction text. Azure GPT-4.1 mini is an optional
+interpreter for short display wording only; executable map actions are constructed
+by the local allow-list and revalidated in the browser. This is not evidence of a
+voice accuracy, latency, or hardware benchmark; those checks remain pending.
+
 ## Phase 5 — Speech, ISL, and accessibility
 
 - Verify exact Indic Parler-TTS artifact/license/languages; integrate only approved languages.

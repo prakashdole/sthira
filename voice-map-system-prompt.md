@@ -22,18 +22,22 @@ Use the fictional names and coordinates in this file and `fixtures/v2_wayanad_de
 ## 2. Integration boundary
 
 ```text
-Microphone -> speech-to-text -> model with this system prompt
-           -> validated JSON response -> deterministic map controller
-           -> map animation + visible answer + optional speech playback
+Microphone -> local IndicConformer speech-to-text -> deterministic allow-list
+           -> optional Azure GPT-4.1 mini wording pass with this system prompt
+           -> locally constructed, browser-validated JSON map action
+           -> map animation + visible answer + optional local speech playback
 ```
 
-The model never receives a general map-control tool. The application validates every returned ID and action against the active local dataset before doing anything.
+The model never receives a general map-control tool. The local grammar constructs
+the action plan first; Azure may provide a concise screen/spoken response only when
+its output preserves that exact plan. The browser validates every returned ID and
+action against the active local dataset before doing anything.
 
 The UI owns the demonstration timing. Show an accessible `Interpreting request…` state for approximately 2.5–4 seconds, but never delay an emergency-call button. Do not ask the model to sleep, stream fake reasoning, or manufacture latency.
 
-The hackathon map stack is fixed to MapLibre GL JS with the free OpenFreeMap `liberty` style. Start at an India overview and use validated `flyTo`/`fitBounds` camera actions to reach the configured scenario. OpenFreeMap is visual context only and is not a disaster-data source. Preserve its required attribution.
+The hackathon map stack is fixed to MapLibre GL JS with Esri World Imagery as the satellite-style basemap. Start at an India overview and use validated `flyTo`/`fitBounds` camera actions to reach the configured scenario. The imagery is visual context only, not a disaster-data source. Preserve its required attribution and label it `SYNTHETIC DEMO — SATELLITE IMAGERY IS NOT LIVE HAZARD DATA`.
 
-If a satellite-style close-up is later added, use only a locally bundled image with redistribution rights or an authorized government imagery service. Label it `DEMO BACKGROUND — NOT LIVE SATELLITE IMAGERY`. The red zone, safe zones, citizen marker, and route remain explicit GeoJSON overlays; imagery is never evidence that a location is safe or dangerous.
+The red zone, safe zones, citizen marker, and route remain explicit local GeoJSON overlays; imagery is never evidence that a location is safe or dangerous. If the imagery service is unavailable, retain the overlays and text guidance on the local fallback background.
 
 ## 3. Copy-paste system prompt
 
@@ -162,14 +166,14 @@ ACTIVE_DEMO_CONTEXT_END
 
 ## 4. Fixed hackathon context
 
-Send this as `ACTIVE_DEMO_CONTEXT_JSON` for the initial demo. The application may update `request_id`, transcript confidence, selected language, party size, location permission, and assignment, but it must not allow the user or model to rewrite the feature catalogue.
+Build `ACTIVE_DEMO_CONTEXT_JSON` from [`frontend/v2/src/scenario.json`](frontend/v2/src/scenario.json) at request time. That file is the executable catalogue; it wins if this illustrative shape ever differs. The application may update `request_id`, transcript confidence, selected language, party size, location permission, and assignment, but it must not allow the user or model to rewrite the feature catalogue.
 
 ```json
 {
   "request_id": "DEMO-REQUEST-0001",
   "data_profile": "SYNTHETIC_DEMO",
-  "scenario_id": "STHIRA-V2-WAYANAD-DEMO-001",
-  "scenario_label": "Fictional Wayanad landslide exercise",
+  "scenario_id": "ALERT-DEMO-2026-09-12",
+  "scenario_label": "Synthetic flood exercise — 12 September 2026",
   "selected_language": "en-IN",
   "supported_languages": ["en-IN", "ml-IN"],
   "min_command_confidence": 0.85,
@@ -178,15 +182,15 @@ Send this as `ACTIVE_DEMO_CONTEXT_JSON` for the initial demo. The application ma
   "session": {
     "session_id": "SESSION-DEMO-01",
     "party_size": 4,
-    "my_location_id": "LOC-DEMO-01",
+    "my_location_id": "MY-LOCATION-DEMO",
     "assigned_safe_zone_id": "SZ-DEMO-01",
     "assigned_route_id": "ROUTE-DEMO-01",
     "assignment_basis": "Preconfigured synthetic exercise assignment; not selected by the model"
   },
   "alert": {
-    "id": "DEMO-WYD-LANDSLIDE-001",
+    "id": "ALERT-DEMO-2026-09-12",
     "status": "Exercise",
-    "event": "Synthetic landslide evacuation exercise",
+    "event": "Synthetic flood exercise",
     "severity": "Severe",
     "headline": "DEMO: Move from the marked red zone to a listed safe zone",
     "source_label": "SYNTHETIC_DEMO",
@@ -194,7 +198,7 @@ Send this as `ACTIVE_DEMO_CONTEXT_JSON` for the initial demo. The application ma
   },
   "locations": [
     {
-      "id": "LOC-DEMO-01",
+      "id": "MY-LOCATION-DEMO",
       "display_name": "Demo citizen position",
       "aliases": ["my location", "where I am", "current position"]
     }
@@ -202,7 +206,7 @@ Send this as `ACTIVE_DEMO_CONTEXT_JSON` for the initial demo. The application ma
   "red_zones": [
     {
       "id": "RZ-DEMO-01",
-      "display_name": "Demo hillside exclusion zone",
+      "display_name": "Synthetic flood red zone",
       "aliases": ["red zone", "danger area", "alert area", "affected area"],
       "source_label": "SYNTHETIC_DEMO"
     }
@@ -210,8 +214,8 @@ Send this as `ACTIVE_DEMO_CONTEXT_JSON` for the initial demo. The application ma
   "safe_zones": [
     {
       "id": "SZ-DEMO-01",
-      "display_name": "Demo Community Hall",
-      "aliases": ["community hall", "assigned shelter", "my safe zone"],
+      "display_name": "Synthetic Ward 8 School",
+      "aliases": ["ward 8 school", "assigned shelter", "my safe zone"],
       "total_capacity": 120,
       "available_capacity": null,
       "operational_state": "DEMO_OPEN",
@@ -219,8 +223,8 @@ Send this as `ACTIVE_DEMO_CONTEXT_JSON` for the initial demo. The application ma
     },
     {
       "id": "SZ-DEMO-02",
-      "display_name": "Demo School Shelter",
-      "aliases": ["school shelter"],
+      "display_name": "Synthetic Ridge Hall",
+      "aliases": ["ridge hall"],
       "total_capacity": 80,
       "available_capacity": null,
       "operational_state": "DEMO_OPEN",
@@ -228,8 +232,8 @@ Send this as `ACTIVE_DEMO_CONTEXT_JSON` for the initial demo. The application ma
     },
     {
       "id": "SZ-DEMO-03",
-      "display_name": "Demo Sports Centre",
-      "aliases": ["sports centre", "sports center"],
+      "display_name": "Synthetic Valley Centre",
+      "aliases": ["valley centre", "valley center"],
       "total_capacity": 160,
       "available_capacity": null,
       "operational_state": "DEMO_OPEN",
@@ -239,7 +243,7 @@ Send this as `ACTIVE_DEMO_CONTEXT_JSON` for the initial demo. The application ma
   "routes": [
     {
       "id": "ROUTE-DEMO-01",
-      "display_name": "Demo route to Demo Community Hall",
+      "display_name": "Stored synthetic route to Ward 8 School",
       "from_id": "RZ-DEMO-01",
       "to_id": "SZ-DEMO-01",
       "distance_km": 3.4,
@@ -247,7 +251,7 @@ Send this as `ACTIVE_DEMO_CONTEXT_JSON` for the initial demo. The application ma
     },
     {
       "id": "ROUTE-DEMO-02",
-      "display_name": "Demo route to Demo School Shelter",
+      "display_name": "Synthetic route to Ridge Hall",
       "from_id": "RZ-DEMO-01",
       "to_id": "SZ-DEMO-02",
       "distance_km": 4.8,
@@ -255,7 +259,7 @@ Send this as `ACTIVE_DEMO_CONTEXT_JSON` for the initial demo. The application ma
     },
     {
       "id": "ROUTE-DEMO-03",
-      "display_name": "Demo route to Demo Sports Centre",
+      "display_name": "Synthetic route to Valley Centre",
       "from_id": "RZ-DEMO-01",
       "to_id": "SZ-DEMO-03",
       "distance_km": 6.1,
@@ -291,7 +295,7 @@ The evaluation set should include at least these utterances and close paraphrase
 | “Show my safe zone and the route.” | `SHOW_ROUTE` | Reveal `SZ-DEMO-01` and `ROUTE-DEMO-01`, fit both, open route guidance. |
 | “What is the nearest shelter?” | `SHOW_ASSIGNED_SAFE_ZONE` | Do not calculate nearest; show the assigned demo safe zone. |
 | “Show all available shelters.” | `SHOW_ALL_SAFE_ZONES` | Show all three markers; do not claim remaining availability. |
-| “How many people can the hall hold?” | `EXPLAIN_CAPACITY` | State total demo capacity 120 and that current availability is unknown. |
+| “How many people can the school hold?” | `EXPLAIN_CAPACITY` | State only a capacity value that is present in the active synthetic package; do not infer availability. |
 | “Zoom in.” | `ZOOM_IN` | One bounded zoom step. |
 | “Move the map north.” | `PAN_NORTH` | One bounded pan step. |
 | “Take me back to the complete view.” | `RECENTER` | Restore `DEMO_OVERVIEW`. |
@@ -333,13 +337,13 @@ The model may answer these only through `EXPLAIN_DEMO` using the fixed answers b
   "status": "OK",
   "intent": "SHOW_ROUTE",
   "language": "en-IN",
-  "screen_response": "Your preconfigured demo destination is Demo Community Hall. Showing the stored 3.4 km demo route.",
+  "screen_response": "Your preconfigured demo destination is Synthetic Ward 8 School. Showing the stored route.",
   "spoken_response": "Showing your assigned demo safe zone and stored route.",
   "actions": [
     {"type": "SET_LAYER_VISIBILITY", "layer": "SAFE_ZONES", "visible": true},
     {"type": "SET_LAYER_VISIBILITY", "layer": "ROUTES", "visible": true},
     {"type": "HIGHLIGHT_FEATURE", "target_id": "SZ-DEMO-01"},
-    {"type": "FIT_FEATURES", "target_ids": ["LOC-DEMO-01", "SZ-DEMO-01", "ROUTE-DEMO-01"]},
+    {"type": "FIT_FEATURES", "target_ids": ["MY-LOCATION-DEMO", "SZ-DEMO-01", "ROUTE-DEMO-01"]},
     {"type": "OPEN_PANEL", "panel": "ROUTE_GUIDANCE", "target_id": "ROUTE-DEMO-01"}
   ],
   "evidence_ids": ["SESSION-DEMO-01", "SZ-DEMO-01", "ROUTE-DEMO-01"],
@@ -356,8 +360,8 @@ The model may answer these only through `EXPLAIN_DEMO` using the fixed answers b
   "status": "UNSUPPORTED",
   "intent": null,
   "language": "en-IN",
-  "screen_response": "This demo cannot predict where a landslide will occur. It can only show the synthetic red zone already stored in the exercise dataset.",
-  "spoken_response": "I cannot predict a landslide. I can show the stored demo red zone.",
+  "screen_response": "This demo cannot predict flooding. It can only show the synthetic red zone already stored in the exercise dataset.",
+  "spoken_response": "I cannot predict flooding. I can show the stored demo red zone.",
   "actions": [],
   "evidence_ids": [],
   "demo_disclaimer": "SYNTHETIC HACKATHON DEMO — NOT A LIVE WARNING OR EVACUATION SYSTEM"
@@ -398,7 +402,7 @@ The system prompt is not a security boundary. Before executing a response, the a
 
 ## 9. Hackathon acceptance checklist
 
-- The map displays one red polygon, three safe-zone markers, one demo citizen marker, and three stored routes from `fixtures/v2_wayanad_demo.json`.
+- The map displays one red polygon, three safe-zone markers, one demo citizen marker, and the preconfigured assigned stored route from `frontend/v2/src/scenario.json`.
 - The assigned flow uses `SZ-DEMO-01` and `ROUTE-DEMO-01`; the model does not choose them.
 - At least the citizen and judge questions in §§5–6 are tested.
 - Invalid JSON, invented IDs, prompt injection, low confidence, missing data, and prohibited prediction cause no map action.
