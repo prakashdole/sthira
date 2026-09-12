@@ -3,6 +3,12 @@
   "provenance": {
     "evidence_class": "SYNTHETIC_DEMO",
     "dataset_id": "STHIRA-V2-WAYANAD-DEMO-001",
+    "version": 1,
+    "jurisdiction": "Wayanad",
+    "authority": "Sthira synthetic exercise authority",
+    "effective_at": "2026-09-11T03:30:00Z",
+    "expires_at": "2026-09-12T03:30:00Z",
+    "checksum_sha256": "c6bb114bcedfa4b9b9dd2e77a08bb556ad5951e4929731301eeb15a9c378a55b",
     "description": "Fictional data for demonstrating Sthira v2 workflows.",
     "disclaimer": "Not an official warning, evacuation order, shelter listing, or government route approval. Do not use for real-world decisions."
   },
@@ -45,6 +51,18 @@
     {"id": "SZ-DEMO-01", "name": "Demo Community Hall", "location": [76.105, 11.570], "capacity": 120},
     {"id": "SZ-DEMO-02", "name": "Demo School Shelter", "location": [76.096, 11.578], "capacity": 80},
     {"id": "SZ-DEMO-03", "name": "Demo Sports Centre", "location": [76.088, 11.584], "capacity": 160}
+  ],
+  "facilities": [
+    {"id": "SZ-DEMO-01", "name": "Demo Community Hall", "operational_status": "OPEN", "accessibility": ["wheelchair_ramp"]},
+    {"id": "SZ-DEMO-02", "name": "Demo School Shelter", "operational_status": "OPEN", "accessibility": []},
+    {"id": "SZ-DEMO-03", "name": "Demo Sports Centre", "operational_status": "OPEN", "accessibility": []}
+  ],
+  "allocation_policy": {
+    "reference": "SYNTHETIC-DEMO-POLICY-001",
+    "order": ["SZ-DEMO-01", "SZ-DEMO-02", "SZ-DEMO-03"]
+  },
+  "emergency_contacts": [
+    {"label": "Emergency services", "number": "112", "jurisdiction": "Wayanad"}
   ],
   "approved_routes": [
     {

@@ -1,9 +1,9 @@
 ---
 title: Sthira v2 — End-to-End Autonomous Build Prompts
 document_id: STHIRA-PROMPTS
-version: 1.0
-status: Ready for execution
-as_of: 2026-09-11
+version: 1.2
+status: Hackathon map integration planned; branch reconciliation required
+as_of: 2026-09-12
 ---
 
 # Sthira v2 End-to-End Build Prompts
@@ -18,7 +18,7 @@ After a phase is genuinely complete, the user only needs to say:
 
 > Move to the next phase.
 
-On that instruction, the agent must reread this file, inspect the execution ledger and repository evidence, select the first phase that is not `DONE`, and execute that phase. It must not merely describe the work.
+On that instruction, the agent must reread this file, inspect the execution ledger and repository evidence, complete any open mandatory integration checkpoint first, then select the first safe phase that is `IN_PROGRESS` or `NOT_STARTED`. A `BLOCKED_EXTERNAL` phase must be revisited only when its named external evidence becomes available. The agent must not merely describe the work.
 
 If a phase is blocked by government authorization, credentials, policy, hardware, or another external dependency, complete every safe synthetic/local part, mark the phase `BLOCKED_EXTERNAL`, document the exact evidence required, and continue only to work that does not falsely imply the blocker is resolved.
 
@@ -165,21 +165,111 @@ Update this table only after verifying the corresponding exit gate.
 | --- | --- | --- | --- |
 | 0 | Repository pivot and safety baseline | DONE | v2 boundary, profile guard, legacy warning; .venv/bin/python -m pytest -q 186 passed |
 | 1 | v2 foundation and contracts | DONE | strict contracts, synthetic fixture, OpenAPI smoke, Makefile; make check: 203 passed |
-| 2 | Persistence, audit, and operational states | NOT_STARTED | — |
-| 3 | SACHET-compatible CAP alert backbone | NOT_STARTED | — |
-| 4 | Government operational-package ingestion | NOT_STARTED | — |
-| 5 | Citizen emergency interface | NOT_STARTED | — |
-| 6 | Assignment, arrival, and capacity integrity | NOT_STARTED | — |
-| 7 | Official context connectors and source health | NOT_STARTED | — |
-| 8 | Voice Map Control with IndicConformer | NOT_STARTED | — |
+| 2 | Persistence, audit, and operational states | BLOCKED_EXTERNAL | Local models, repositories, migration scaffolding, audit chain, source lifecycle, readiness probe, and server-free tests exist; a real PostgreSQL 16/PostGIS runtime is unavailable, so migrations, SRID enforcement, locking, and operational readiness are not verified |
+| 3 | SACHET-compatible CAP alert backbone | IN_PROGRESS | CAP parser/lifecycle/API and tests passed on isolated commit `d115ee3`, but are not integrated into `main`; live SACHET authorization, endpoint, credentials, and operational samples also remain unavailable |
+| 4 | Government operational-package ingestion | IN_PROGRESS | Synthetic package validation/publication code and tests exist only on isolated commit `d115ee3`; authenticated publication, signatures, authority packages, and integration remain |
+| 5 | Citizen emergency interface | IN_PROGRESS | Vite/TypeScript government-alert UI builds on `origin/main` at `f100551`; it is not in local `main`, is not connected to the v2 APIs, and lacks the full emergency state matrix and browser/accessibility proof |
+| 6 | Assignment, arrival, and capacity integrity | IN_PROGRESS | Local idempotent assignment/capacity implementation and tests exist only on isolated commit `d115ee3`; integration and real PostgreSQL transaction/concurrency proof remain |
+| 7 | Official context connectors and source health | IN_PROGRESS | Generic source-health behavior exists only on isolated commit `d115ee3`; integration remains, and authorized IMD/CWC/GSI or other approved endpoints and samples are externally blocked |
+| 8 | Voice Map Control with IndicConformer | IN_PROGRESS | Voice UI exists on `origin/main` and deterministic allow-listed parsing exists on isolated commit `d115ee3`; they are not integrated, and actual IndicConformer deployment/benchmark hardware remains externally blocked |
 | 9 | TTS, multilingual content, ISL, and accessibility | NOT_STARTED | — |
-| 10 | Offline operation, emergency calling, and notifications | NOT_STARTED | — |
+| 10 | Offline operation, emergency calling, and notifications | IN_PROGRESS | Cache-expiry and explicit dialler primitives exist only on isolated commit `d115ee3`; integration, service-worker behavior, authorized notifications, and browser proof remain |
 | 11 | Security, privacy, resilience, and observability | NOT_STARTED | — |
-| 12 | End-to-end assurance and deployment packaging | NOT_STARTED | — |
+| 12 | End-to-end assurance and deployment packaging | IN_PROGRESS | Demo deployment examples and an acceptance matrix exist only on isolated commit `d115ee3`; integrated browser, accessibility, security, load, and disaster-recovery evidence remains |
 | 13 | Authorized shadow pilot | BLOCKED_EXTERNAL | Requires government agreements and live samples |
 | 14 | Controlled citizen pilot | BLOCKED_EXTERNAL | Requires Phase 13 approval and 24×7 operations |
 
 Allowed statuses: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED_EXTERNAL`, `DONE`.
+
+## 4.1 Mandatory next checkpoint — reconcile and verify the integrated baseline
+
+**Status: OPEN. This checkpoint takes precedence over every phase prompt below.**
+
+Verified repository state on 2026-09-11:
+
+- Local `main` is at `dd5a2db` and is eleven commits behind `origin/main` as of 2026-09-12.
+- `origin/main` at `efe376d` contains the preferred Vite/TypeScript citizen interface, `maplibre-gl`, Voice Map Control UI, government-alert visual treatment, and v2 readiness endpoint. `npm ci` and `npm run build` pass for that exact tree. Its current map is still an inline synthetic canvas: it does not yet load OpenFreeMap, starts directly over Wayanad, and uses hard-coded demo geometry.
+- Isolated commit `d115ee3` contains the synthetic CAP, operational-package, assignment/capacity, offline, source-health, deterministic voice-command, deployment, and acceptance-test vertical slices. Its complete Python suite previously passed with 233 tests.
+- The isolated backend commit is not an ancestor of `origin/main`. Both histories modify `frontend/v2/index.html` and `tasks/todo.md`; a blind merge would select conflicting implementations.
+- The current local tree passes 212 Python tests. Passing branch-local tests does not prove an integrated application.
+
+When the user says **“Move to the next phase”**, execute this checkpoint before Phase 3 or later work:
+
+1. Preserve all current user changes and confirm no `.txt` file changes.
+2. Bring the four verified `origin/main` commits into local `main` without discarding local Phase 2 work.
+3. Keep `origin/main`'s Vite/TypeScript `frontend/v2` implementation as the frontend baseline. Do not restore the isolated branch's duplicate static `app.js`, `styles.css`, or service-worker shell merely to resolve conflicts.
+4. Selectively port the production modules, tests, deployment examples, and acceptance matrix from `d115ee3`: CAP, operational packages, package service, assignment/capacity, offline primitives, source health, deterministic voice commands, and their API wiring. Reconcile `readiness.py`, `app.py`, `decisions.md`, and `tasks/todo.md` manually.
+5. Keep every fixture and UI state labeled `SYNTHETIC_DEMO`. Do not add or claim live SACHET, IMD, satellite, safe-zone, route, capacity, speech-model, or notification access.
+6. Connect the Vite UI to the integrated v2 API contracts. Remove duplicated frontend domain truth and add explicit loading, empty, invalid, stale, conflict, full/closed facility, offline, and service-failure states. A network failure must never be displayed as a successful official response.
+7. Preserve the deterministic voice allow-list: voice may pan, zoom, focus an approved region/facility, change language, repeat official instructions, and prepare an emergency call. It must not generate routes, zones, facilities, policy, or free-form emergency advice.
+8. Run the complete Python suite, frontend tests if present, `npm ci`, `npm run build`, `git diff --check`, and the `.txt`-diff guard.
+9. Start the integrated application and verify the citizen flow in a real browser at mobile and desktop widths, including keyboard operation, accessible names, reduced motion, and the complete degraded-state matrix.
+10. Update `tasks/todo.md`, this ledger, and relevant architecture/decision records using only observed evidence. Do not mark this checkpoint closed while code remains split across branches or browser verification is missing.
+
+### Checkpoint exit gate
+
+Mark this checkpoint `CLOSED` only when one local branch contains the chosen Vite frontend and the required backend vertical slices, all applicable automated checks pass, the running citizen flow is verified, `.txt` files are unchanged, and all live-government/model dependencies remain honestly labeled. Then continue with the first remaining safe `IN_PROGRESS` phase; do not wait on a `BLOCKED_EXTERNAL` phase when independent local work remains.
+
+## 4.2 Mandatory hackathon map slice — MapLibre + OpenFreeMap
+
+**Status: OPEN. Execute immediately after §4.1 is reconciled.**
+
+### Outcome
+
+Deliver a free, keyless, moving map that opens on India and responds to validated voice-map actions by flying to a current-dated synthetic incident, revealing a red zone, preconfigured safe zones, and stored routes. MapLibre renders and animates the map. OpenFreeMap supplies the visual basemap only. Neither component supplies disaster truth.
+
+### Fixed technology decision
+
+- Renderer: the existing `maplibre-gl` dependency in `frontend/v2`.
+- Basemap style: `https://tiles.openfreemap.org/styles/liberty`.
+- Operational overlays: local versioned GeoJSON loaded by ID.
+- Voice contract: `voice-map-system-prompt.md`.
+- No Google Maps, Google Routes, Mapbox, Places API, geocoder, or routing API in this hackathon slice.
+- Keep visible OpenFreeMap/OpenMapTiles/OpenStreetMap attribution.
+- OpenFreeMap is a free third-party visual basemap with no SLA. If it fails, retain the local solid-background map and all local overlays/text guidance.
+
+### Implementation prompt
+
+1. Start only from the reconciled Vite frontend. Do not rebuild a second frontend.
+2. Preserve the installed MapLibre package and CSS import. Replace the inline empty style with the OpenFreeMap `liberty` style URL after checking that the map container has a stable non-zero height.
+3. Initialize the camera at an India overview using center `[78.9629, 20.5937]`, approximately zoom `3.5`, bearing `0`, and pitch `0`. Treat these as presentation defaults, not user location.
+4. Replace the historical Wayanad-specific UI copy and geometry with one current-dated scenario package. Preferred demo preparation path:
+   - capture a recent SACHET alert and its capture/issue time when an appropriate public alert is available;
+   - preserve only verified alert fields from that capture;
+   - keep shelters, red-zone geometry, assignments, capacities, and routes explicitly `SYNTHETIC_DEMO` unless the captured alert itself supplies an applicable field;
+   - otherwise use a wholly synthetic exercise dated for the hackathon and never imply that a real event occurred.
+5. Store the scenario in one JSON/GeoJSON fixture, not inside UI strings. Include stable IDs, scenario date, evidence class, alert, red-zone polygon, citizen marker, three safe-zone points, preconfigured assignment, stored routes, and English/Malayalam display text.
+6. Add stable MapLibre sources and layers for `red-zones`, `safe-zones`, `routes`, and `my-location`. Render red zones as translucent red fill plus border, routes as high-contrast lines, the assigned safe zone distinctly, and non-assigned safe zones without implying selection.
+7. Add a typed map-action executor for the exact schema in `voice-map-system-prompt.md`. It must resolve IDs from the local catalogue and support only layer visibility, focus/highlight, fit features, bounded zoom/pan, recenter, language change, and allowed panels. Reject coordinates or unknown IDs returned by a model.
+8. Implement this camera sequence for a successful voice request:
+   - show an accessible `Interpreting request…` status;
+   - validate the model JSON before moving the map;
+   - use `flyTo` from India to the incident region;
+   - use `fitBounds` for the requested red zone, assignment, or route;
+   - reveal/highlight the requested layers and open the matching details panel;
+   - keep total perceived interaction near 3–4 seconds without asking the model to delay.
+9. Respect `prefers-reduced-motion`: use an immediate or very short camera change instead of the cinematic flight. Do not mark the animation essential merely to override the user's preference.
+10. Make the first vertical slice work without microphone or external model access: route the existing voice suggestion buttons and a developer transcript input through the same validator and map-action executor. Then connect speech/model APIs behind that already-tested boundary.
+11. Keep the essential citizen controls available as visible buttons: show alert area, show assigned safe zone, show route, show all safe zones, recenter, zoom, and open emergency-call confirmation.
+12. Do not calculate routes, infer red zones from the basemap, rank shelters, use basemap place data as operational truth, or label the basemap/satellite imagery as live.
+
+### Required verification
+
+- `npm ci` and `npm run build` pass in `frontend/v2`.
+- Initial load shows the whole of India with required attribution.
+- `SHOW_ALERT_AREA` flies to and fits only the configured red-zone ID.
+- `SHOW_ASSIGNED_SAFE_ZONE` focuses only the preconfigured assignment.
+- `SHOW_ROUTE` reveals only the stored route and fits its known features.
+- Unknown IDs, raw coordinates, invalid JSON, low confidence, prompt injection, missing data, and prohibited prediction produce no camera action.
+- OpenFreeMap failure leaves overlays, text guidance, and controls usable on the local fallback background.
+- Reduced-motion mode avoids the cinematic flight.
+- Mobile and desktop browser checks cover mouse, touch, keyboard, screen-reader names, resize, and map-container visibility.
+- The scenario date, capture time when applicable, evidence class, source status, and synthetic disclaimer remain visible.
+- `git diff --check` passes and no `.txt` file changes.
+
+### Exit gate
+
+Mark this slice `CLOSED` only when the reconciled application starts at India, the free basemap loads with attribution, validated voice/button commands animate to the configured scenario and reveal the correct stored overlays, all failure paths cause no unsafe action, and the browser/build checks pass. Then proceed to the external model API adapter without changing the map-action contract.
 
 ---
 

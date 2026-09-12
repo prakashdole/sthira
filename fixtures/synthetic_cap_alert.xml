@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+  <identifier>DEMO-CAP-2026-09-12-001</identifier>
+  <sender>synthetic.ndma.example</sender>
+  <sent>2026-09-12T04:00:00Z</sent>
+  <status>Exercise</status>
+  <msgType>Alert</msgType>
+  <scope>Public</scope>
+  <info>
+    <language>en-IN</language>
+    <category>Geo</category>
+    <event>Synthetic flood exercise</event>
+    <urgency>Immediate</urgency>
+    <severity>Severe</severity>
+    <certainty>Observed</certainty>
+    <effective>2026-09-12T04:00:00Z</effective>
+    <expires>2026-09-13T04:00:00Z</expires>
+    <headline>SYNTHETIC DEMO — configured alert area</headline>
+    <description>Exercise data only; not a live government warning.</description>
+    <instruction>Follow the stored synthetic demo route.</instruction>
+    <area>
+      <areaDesc>Synthetic demo area</areaDesc>
+      <polygon>11.45,76.00 11.67,76.24 11.50,76.24 11.45,76.00</polygon>
+    </area>
+  </info>
+</alert>

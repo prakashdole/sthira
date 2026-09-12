@@ -33,6 +33,16 @@
 - [x] Expose v2 OpenAPI status smoke coverage.
 - [x] Add Makefile checks for Python compile, frontend syntax, full tests, and v2 tests.
 - [x] Verify full suite: 203 passed, 2 existing dependency deprecation warnings.
+- [x] Add isolated Vite v2 frontend foundation with responsive synthetic emergency guidance shell and localhost dev command.
+- [x] Add Codex-like Voice Map Control launcher and model-ready voice-to-text panel with explicit demo state.
+- [x] Add satellite-ready map surface with explicit government-basemap authorization guard; no unapproved provider connected.
+- [x] Apply government-style red-alert hierarchy, severity words/icons, large emergency actions, multilingual controls, and bundled Noto fonts.
+- [x] Add explicit connection/offline state and keyboard-accessible alert details with synthetic source, issue, and expiry metadata.
+- [x] Complete tactical full-viewport emergency PWA composition with MapLibre local synthetic canvas, floating guidance drawer, route/shelter metrics, voice panel, and arrival preview.
+- [x] Refine tactical PWA into centered device frame with consolidated status pill, richer local geospatial layers, required test hooks, and non-overlapping controls.
+- [x] Replace device frame with full-screen spatial HUD: desktop left command panel, floating glass islands, telemetry widget, and mobile bottom sheet.
+- [x] Inject interactive arrival party stepper, 112 confirmation, route camera animation, voice command chips, directions drawer, multimodal assist previews, map layer controls, and tactile press states.
+- [x] Reset citizen UI to civic evacuation hierarchy: deadline first, destination second, one dominant route action, plain-language directives, human arrival copy, and rescue escalation.
 - [ ] Add database/migrations in Phase 2.
 
 ### Phase 2 — persistence, audit, and operational states
@@ -43,7 +53,8 @@
 - [x] Add append-only audit hash chaining with tamper verification.
 - [x] Add database constraints for provenance, versions, capacity, party size, and legal stored states.
 - [x] Add focused server-free metadata, bitemporal, and audit tests.
-- [ ] Exercise upgrade/downgrade and spatial SRID checks on a real PostgreSQL 16/PostGIS service (external database unavailable in this environment).
+- [x] Add v2 API readiness endpoint with fail-closed database, artifact, source, and migration states.
+- [ ] Exercise upgrade/downgrade and spatial SRID checks on a real PostgreSQL 16/PostGIS service (external database unavailable in this environment; ODN-007).
 - [ ] Add operational readiness endpoints after the real database/artifact-store configuration exists.
 
 - [ ] Inventory reusable infrastructure and isolate legacy v1 modules.

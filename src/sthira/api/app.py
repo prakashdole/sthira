@@ -4,6 +4,7 @@ Normative Reference: architecture.md §5, rules.md (RUL-001 advisory envelope).
 """
 
 from datetime import datetime, timezone, timedelta
+import os
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -337,10 +338,10 @@ app.include_router(v2_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[origin.strip() for origin in os.getenv("STHIRA_CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000,http://127.0.0.1:5173").split(",") if origin.strip()],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Accept", "Content-Type", "Authorization", "X-Request-ID"],
 )
 app.middleware("http")(security_middleware)
 
@@ -354,6 +355,11 @@ bootstrap_seed_data()
 frontend_dir = Path(__file__).resolve().parent.parent.parent.parent / "frontend"
 if frontend_dir.is_dir():
     app.mount("/ui", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+v2_frontend_dir = frontend_dir / "v2" / "dist"
+if not v2_frontend_dir.is_dir():
+    v2_frontend_dir = frontend_dir / "v2"
+if v2_frontend_dir.is_dir():
+    app.mount("/v2", StaticFiles(directory=str(v2_frontend_dir), html=True), name="v2-frontend")
 
 @app.get("/", include_in_schema=False)
 def root_redirect():
@@ -2905,10 +2911,6 @@ def get_release_assurance_report(
         automated_tests_passed=tests_passed,
     )
     return APIResponseEnvelope(data=report.model_dump())
-
-
-
-
 
 
 

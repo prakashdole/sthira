@@ -6,6 +6,10 @@ import os
 from dataclasses import dataclass
 from enum import StrEnum
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 class RuntimeProfile(StrEnum):
     DEMO = "DEMO"
@@ -21,6 +25,10 @@ class V2Settings:
     source_authorization: str | None
     auth_issuer: str | None
     operations_owner: str | None
+    # Optional legacy experiment metadata; it is disabled and unconfigured by default.
+    nemotron_enabled: bool = False
+    aws_region: str = ""
+    nemotron_model_id: str = ""
 
     @classmethod
     def from_environment(cls) -> "V2Settings":
@@ -38,6 +46,9 @@ class V2Settings:
             source_authorization=os.getenv("STHIRA_SOURCE_AUTHORIZATION"),
             auth_issuer=os.getenv("STHIRA_AUTH_ISSUER"),
             operations_owner=os.getenv("STHIRA_OPERATIONS_OWNER"),
+            nemotron_enabled=os.getenv("STHIRA_NEMOTRON_ENABLED", "false").strip().lower() == "true",
+            aws_region=os.getenv("AWS_REGION", "us-east-1"),
+            nemotron_model_id=os.getenv("STHIRA_NEMOTRON_MODEL_ID", "nvidia.nemotron-super-3-120b"),
         )
 
     @property
@@ -83,5 +94,9 @@ def profile_metadata(settings: V2Settings | None = None) -> dict[str, object]:
         "startup_ready": not missing if resolved.profile in {RuntimeProfile.PILOT, RuntimeProfile.PRODUCTION} else True,
         "missing_production_requirements": list(missing),
         "legacy_v1_isolation": True,
+        "nemotron": {
+            "enabled": resolved.nemotron_enabled,
+            "region": resolved.aws_region,
+            "model_id": resolved.nemotron_model_id,
+        },
     }
-
