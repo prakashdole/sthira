@@ -1,0 +1,27 @@
+{
+  "evidence_class": "SYNTHETIC_DEMO",
+  "status": "LOCAL_VERIFICATION_INCOMPLETE_EXTERNAL_GATES",
+  "verified": [
+    "v2 contracts and synthetic fixture validation",
+    "CAP parser lifecycle and quarantine",
+    "operational package cross-reference validation",
+    "idempotent concurrent local assignment and arrival",
+    "deterministic prohibited voice command rejection",
+    "offline expiry and explicit dialler URI",
+    "text-first /v2/ citizen UI and PWA assets"
+    ,"operational-package manifest/checksum/version lifecycle and active API"
+    ,"assignment alert/session/idempotency contract and local concurrency invariant"
+    ,"fixture-only source adapter metadata validation and blocked-source registry"
+    ,"deterministic allow-listed voice intent coverage and ID-only camera validation"
+    ,"TTS/ISL pending boundary, offline invalidation, privacy expiry/deletion, and degraded runbook"
+    ,"browser API outage fail-closed state and recovery"
+  ],
+  "blocked_external": [
+    "PostgreSQL 16/PostGIS migration and spatial checks",
+    "authorized government source endpoints and samples",
+    "IndicConformer model artifact and benchmark hardware",
+    "Indic Parler-TTS license and human language review",
+    "ISL approved media",
+    "production security, load, disaster recovery, and government sign-off"
+  ]
+}

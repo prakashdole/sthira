@@ -29,6 +29,7 @@ Prior permanent-relocation decisions are superseded by DEC-001. Git history pres
 | DEC-013 | Wayanad remains the proposed pilot | ACCEPTED |
 | DEC-014 | Government-approved route only | ACCEPTED |
 | DEC-015 | Geofenced arrival is future-only | ACCEPTED |
+| DEC-016 | Local CAP ingestion is fixture-backed until source activation | ACCEPTED |
 
 ## DEC-001 — Product pivot
 
@@ -121,3 +122,29 @@ Prior permanent-relocation decisions are superseded by DEC-001. Git history pres
 **Decision:** Keep geofence arrival in the future register only. No background tracking or automatic occupancy transition is built now.
 
 **Review trigger:** A separate privacy, safety, battery, platform, legal, and field trial with explicit government approval.
+
+## DEC-016 — Fixture-backed CAP until activation
+
+**Decision:** Keep CAP ingestion local and fixture-backed, with an explicit synthetic evidence class and degraded API metadata, until an authorized SACHET endpoint, credentials, retention terms, and operational sample are provided.
+
+**Consequence:** The local parser and lifecycle are testable without implying a live government integration. External HTTP activation remains blocked.
+
+## DEC-017 — Synthetic package integrity and local API
+
+**Decision:** The demo operational package must carry a canonical checksum and
+explicit manifest facts; the local service may preview, publish, supersede,
+cancel, and rollback only within the synthetic jurisdiction seam. The active
+package API is always labelled `SYNTHETIC_DEMO`.
+
+**Consequence:** A missing or altered manifest cannot reach the demo guidance
+surface, while real signatures, operator identity, and authority packages remain
+external activation gates.
+
+## DEC-018 — Offline cache expiry
+
+**Decision:** Cache only the last verified synthetic scenario and use it only
+while its explicit expiry has not passed and the browser is offline. An online
+API failure remains fail-closed.
+
+**Consequence:** Network loss can preserve honest source-stamped demo guidance
+without turning an unavailable or expired response into current guidance.

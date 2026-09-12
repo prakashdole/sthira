@@ -1,7 +1,7 @@
-PYTHON ?= python3
+PYTHON ?= $(if $(wildcard .venv/bin/python),./.venv/bin/python,python3)
 NODE ?= node
 
-.PHONY: install-dev test test-v2 check-python check-frontend check database-readiness
+.PHONY: install-dev test test-v2 check-python check-frontend check-frontend-v2 check database-readiness
 
 install-dev:
 	$(PYTHON) -m pip install -e '.[dev]'
@@ -21,4 +21,7 @@ check-python:
 check-frontend:
 	$(NODE) --check frontend/app.js
 
-check: check-python check-frontend test
+check-frontend-v2:
+	cd frontend/v2 && npm ci --ignore-scripts && npm run build
+
+check: check-python check-frontend check-frontend-v2 test

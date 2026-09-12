@@ -57,9 +57,21 @@
 - [ ] Exercise upgrade/downgrade and spatial SRID checks on a real PostgreSQL 16/PostGIS service (external database unavailable in this environment; ODN-007).
 - [ ] Add operational readiness endpoints after the real database/artifact-store configuration exists.
 
+### Mandatory reconciliation checkpoint and hackathon map slice — execution evidence
+
+- [x] Preserved pre-existing working-tree changes and confirmed no `.txt` file diff.
+- [x] Reconciled the preferred `origin/main` Vite frontend into local `main` without restoring the duplicate static v2 frontend.
+- [x] Ported the isolated synthetic CAP, operational-package, allocation/capacity, offline, source-health, deterministic voice, deployment, and acceptance slices.
+- [x] Added the OpenFreeMap Liberty style, India overview camera, versioned local scenario JSON, GeoJSON overlays, attribution, and fail-soft basemap messaging.
+- [x] Added strict ID-only map-action validation with bounded camera actions and reduced-motion handling.
+- [x] Verified desktop and 390x844 browser flows: initial map, attribution, stored-route action, Voice Map Control panel, alert-area action, keyboard-visible accessible names, and synthetic date/disclaimer.
+- [x] Add typed synthetic-scenario API response and API-backed frontend loading/provenance validation.
+- [x] Verify API success and service-failure states in the running browser; no guidance is shown when the scenario cannot be verified.
+- [ ] Complete runtime verification of every remaining degraded/error matrix item before closing the checkpoint.
+
 - [ ] Inventory reusable infrastructure and isolate legacy v1 modules.
 - [ ] Create v2 domain contracts and synthetic government-format fixtures.
-- [ ] Implement SACHET-compatible CAP ingestion and lifecycle.
+- [x] Implement synthetic SACHET-compatible CAP parsing, lifecycle, raw-artifact API output, ETag/304 cache seam, retries, and quarantine tests.
 - [ ] Implement operational package validation for zones, routes, facilities, capacities, and policy.
 - [ ] Build citizen alert/map/non-map experience.
 - [ ] Implement assignment and capacity ledger with race/idempotency tests.
@@ -82,4 +94,17 @@
 
 ## Review
 
-The Markdown baseline is ready for code planning. The current application is not yet migrated and must not be represented as a live emergency system.
+The current application is a locally runnable synthetic emergency-guidance demo and must not be represented as a live emergency system.
+
+## Current execution evidence — 2026-09-12
+
+- [x] Operational-package manifest now requires authority, jurisdiction, version, effective/expiry window, checksum, facilities, allocation policy, emergency contacts, geometry, and cross-references.
+- [x] Synthetic package checksum verification, authenticated demo publication, version conflict detection, supersession, cancellation, rollback, and active-package API are covered by tests.
+- [x] Assignment API requires alert/session/idempotency linkage and rejects payload conflicts; local concurrent allocation and arrival tests pass.
+- [x] Fixture-only source adapter validates timestamps, units, provenance, schema metadata, and source identity; known live connectors remain `BLOCKED_EXTERNAL`.
+- [x] Deterministic voice parser covers allow-listed map intents, known synthetic place aliases, confirmation-only emergency-call intent, low-confidence rejection, and prohibited/ranking/prompt-injection rejection.
+- [x] TTS artifact gate/cache purge semantics, pending ISL status with text fallback, offline expiry/cancellation cache, privacy deletion/expiry, and degraded-mode runbook are implemented and tested.
+- [x] CI workflow and Makefile v2 build target added; `make check`: 256 passed, 2 dependency deprecation warnings; frontend `npm ci` and `npm run build` pass; `git diff --check` and `.txt` guard pass.
+- [x] Browser evidence: India overview, attribution, route/arrival flow with one reservation and one arrival POST, voice panel, alert-area action, API-unavailable fail-closed state, and recovery after backend restoration.
+- [ ] Real PostgreSQL 16/PostGIS migration/SRID/locking/restore evidence remains unavailable.
+- [ ] Authorized government endpoints, operational samples, SOPs, source ownership, model artifacts/hardware, TTS/ISL approvals, and pilot sign-offs remain external blockers.

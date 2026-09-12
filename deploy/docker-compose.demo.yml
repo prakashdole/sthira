@@ -1,0 +1,10 @@
+services:
+  sthira:
+    build:
+      context: ..
+    command: uvicorn sthira.api.app:app --host 0.0.0.0 --port 8000
+    environment:
+      STHIRA_PROFILE: DEMO
+      STHIRA_CORS_ORIGINS: http://localhost:8000
+    ports:
+      - "8000:8000"
