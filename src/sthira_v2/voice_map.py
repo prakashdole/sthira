@@ -31,6 +31,33 @@ RECENTER, OPEN_PANEL, SET_LANGUAGE. Every action must conform to the active cont
 Output keys exactly: schema_version, request_id, status, intent, language, screen_response,
 spoken_response, actions, evidence_ids, demo_disclaimer."""
 
+_SPOKEN_RESPONSES: dict[str, dict[str, str]] = {
+    "en-IN": {
+        "SHOW_ALERT_AREA": "Showing the synthetic alert area.",
+        "SHOW_SAFE_ZONE": "Showing your synthetic assigned safe zone.",
+        "SHOW_ALL_SAFE_ZONES": "Showing all synthetic safe zones.",
+        "SHOW_ROUTE": "Showing the stored synthetic route.",
+        "SHOW_MY_LOCATION": "Showing your synthetic location marker.",
+        "RECENTER": "Returning to the India overview.",
+    },
+    "ml-IN": {
+        "SHOW_ALERT_AREA": "സിന്തറ്റിക് അപകട മേഖല കാണിക്കുന്നു.",
+        "SHOW_SAFE_ZONE": "നിങ്ങളുടെ സിന്തറ്റിക് നിയോഗിച്ച സുരക്ഷിത മേഖല കാണിക്കുന്നു.",
+        "SHOW_ALL_SAFE_ZONES": "എല്ലാ സിന്തറ്റിക് സുരക്ഷിത മേഖലകളും കാണിക്കുന്നു.",
+        "SHOW_ROUTE": "സംഭരിച്ച സിന്തറ്റിക് മാർഗ്ഗം കാണിക്കുന്നു.",
+        "SHOW_MY_LOCATION": "നിങ്ങളുടെ സിന്തറ്റിക് ലൊക്കേഷൻ മാർക്കർ കാണിക്കുന്നു.",
+        "RECENTER": "ഇന്ത്യയുടെ അവലോകന മാപ്പിലേക്ക് മടങ്ങുന്നു.",
+    },
+    "hi-IN": {
+        "SHOW_ALERT_AREA": "सिंथेटिक खतरा क्षेत्र दिखा रहा हूँ।",
+        "SHOW_SAFE_ZONE": "आपका सिंथेटिक निर्धारित सुरक्षित क्षेत्र दिखा रहा हूँ।",
+        "SHOW_ALL_SAFE_ZONES": "सभी सिंथेटिक सुरक्षित क्षेत्र दिखा रहा हूँ।",
+        "SHOW_ROUTE": "संग्रहीत सिंथेटिक मार्ग दिखा रहा हूँ।",
+        "SHOW_MY_LOCATION": "आपका सिंथेटिक स्थान चिह्न दिखा रहा हूँ।",
+        "RECENTER": "भारत के अवलोकन मानचित्र पर लौट रहा हूँ।",
+    },
+}
+
 
 def _scenario() -> dict[str, Any]:
     data = json.loads(_SCENARIO_PATH.read_text(encoding="utf-8"))
@@ -45,6 +72,12 @@ def _empty(*, request_id: str, status: str, language: str, message: str) -> dict
         "language": language, "screen_response": message, "spoken_response": message,
         "actions": [], "evidence_ids": [], "demo_disclaimer": _DISCLAIMER,
     }
+
+
+def approved_spoken_responses() -> frozenset[str]:
+    """Texts that the local demo may synthesize; arbitrary API text is rejected."""
+    scenario = _scenario()
+    return frozenset({*scenario["instruction"].values(), *(message for messages in _SPOKEN_RESPONSES.values() for message in messages.values())})
 
 
 def _actions_for(command: ParsedCommand, scenario: dict[str, Any]) -> list[dict[str, Any]]:
@@ -85,7 +118,7 @@ def _deterministic_response(transcript: str, *, language: str, confidence: float
     if not actions and command.intent is not MapIntent.REPEAT_INSTRUCTION:
         return _empty(request_id=request_id, status="DATA_UNAVAILABLE", language=language, message="This synthetic scenario does not have that map data.")
     instruction = _scenario()["instruction"].get("ML" if language == "ml-IN" else "EN", "")
-    message = instruction if command.intent is MapIntent.REPEAT_INSTRUCTION else "Synthetic map updated from the approved demo scenario."
+    message = instruction if command.intent is MapIntent.REPEAT_INSTRUCTION else _SPOKEN_RESPONSES.get(language, _SPOKEN_RESPONSES["en-IN"]).get(command.intent.value, "Synthetic map updated from the approved demo scenario.")
     return {"schema_version": "1.0", "request_id": request_id, "status": "OK", "intent": command.intent.value, "language": command.language or language, "screen_response": message, "spoken_response": message, "actions": actions, "evidence_ids": [], "demo_disclaimer": _DISCLAIMER}
 
 
@@ -109,5 +142,6 @@ def interpret_voice_map_command(transcript: str, *, language: str, confidence: f
     # retains exactly the same safe action plan.
     if isinstance(candidate, dict) and candidate.get("request_id") == local["request_id"] and candidate.get("status") == "OK" and candidate.get("actions") == local["actions"]:
         local["screen_response"] = str(candidate.get("screen_response") or local["screen_response"])[:300]
-        local["spoken_response"] = str(candidate.get("spoken_response") or local["spoken_response"])[:300]
+        # Only the locally allow-listed response can be synthesized. Azure wording
+        # is visual-only and cannot change the spoken output.
     return local

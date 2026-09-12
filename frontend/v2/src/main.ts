@@ -63,6 +63,7 @@ let detailsOpen = false;
 let routeStarted = false;
 let isOffline = !navigator.onLine;
 let map: Map | null = null;
+let mapView = { center: [78.9629, 20.5937] as [number, number], zoom: 3.5, bearing: 0, pitch: 0 };
 let partySize = 1;
 let arrivalSuccess = false;
 let assistanceOpen = false;
@@ -80,6 +81,8 @@ let ttsLoading = false;
 let voiceRecorder: MediaRecorder | null = null;
 let voiceStream: MediaStream | null = null;
 let voiceTranscript = '';
+let voiceStatus = 'Ready — choose Hindi or Malayalam, then start listening.';
+let voiceReply = '';
 let developerTranscript = '';
 let assignmentState: 'UNASSIGNED' | 'RESERVED' | 'ARRIVED' = 'UNASSIGNED';
 let scenarioState: 'LOADING' | 'READY' | 'NO_ACTIVE' | 'ERROR' = 'LOADING';
@@ -157,7 +160,12 @@ function render() {
     return;
   }
   const t = copy[language];
-  map?.remove();
+  if (map) {
+    const center = map.getCenter();
+    mapView = { center: [center.lng, center.lat], zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() };
+    map.remove();
+    map = null;
+  }
   document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <div class="app-shell tactical-shell ${drawerExpanded ? 'drawer-expanded' : 'drawer-collapsed'}">
       <div class="tactical-map" role="img" aria-label="${t.mapAria}"><div id="map-canvas" aria-hidden="true"></div><div class="map-controls" aria-label="Map controls"><button type="button" aria-label="Zoom in" data-action="zoom-in">+</button><button type="button" aria-label="Zoom out" data-action="zoom-out">−</button></div><div class="map-action-pill"><button type="button" data-action="recenter">Recenter</button><button type="button" data-action="directions">Turn-by-turn list</button><button type="button" data-action="voice">Voice control</button></div>
@@ -186,7 +194,7 @@ function render() {
       <footer class="tactical-footer"><span>${t.mapNote}</span><button type="button" data-action="details">${t.details}</button></footer>
       <div class="toast" role="status" aria-live="polite" hidden></div>
       <dialog class="tactical-dialog" aria-labelledby="details-title" ${detailsOpen ? 'open' : ''}><div class="dialog-top"><h2 id="details-title">${t.detailsTitle}</h2><button type="button" aria-label="${t.detailsClose}" data-action="details-close">×</button></div><p>${t.detailsBody}</p><dl><div><dt>${t.issued}</dt><dd>${t.source}</dd></div><div><dt>${t.expires}</dt></div></dl><button class="start-button" type="button" data-action="details-close">${t.detailsClose}</button></dialog>
-      <aside class="voice-panel ${voiceOpen ? 'is-open' : ''}" aria-labelledby="voice-title" ${voiceOpen ? '' : 'hidden'}><div class="dialog-top"><div><p class="overline">${t.voice}</p><h2 id="voice-title">${t.voiceTitle}</h2></div><button type="button" aria-label="${t.close}" data-action="voice-close">×</button></div><p>${t.voiceBody}</p><div class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="voice-pending">● Local IndicConformer · audio is not retained</div><div class="voice-transcript" aria-live="polite"><span>${t.transcript}</span><strong>${escapeHtml(voiceTranscript || (voiceListening ? 'Recording…' : 'No voice command captured'))}</strong></div><div class="voice-chips"><button type="button" data-action="voice-safe">🎯 Focus Safe Zone</button><button type="button" data-action="voice-alert">⚠ Show Alert Area</button><button type="button" data-action="voice-route">🗺 Full Route</button><button type="button" data-action="voice-recenter">🔄 Recenter</button><button type="button" data-action="voice-repeat">🔊 Repeat Instruction</button></div><label class="developer-transcript"><span>Demo transcript</span><input type="text" maxlength="500" value="${escapeHtml(developerTranscript)}" placeholder="e.g. Show my safe zone" data-action="developer-transcript" /><button type="button" data-action="developer-transcript-run">Run on synthetic map</button></label><button class="voice-listen-button ${voiceListening ? 'is-listening' : ''}" type="button" aria-pressed="${voiceListening}" data-action="voice-listen">${voiceListening ? t.listenStop : t.listenStart}</button></aside>
+      <aside class="voice-panel ${voiceOpen ? 'is-open' : ''}" aria-labelledby="voice-title" ${voiceOpen ? '' : 'hidden'}><div class="dialog-top"><div><p class="overline">${t.voice}</p><h2 id="voice-title">Talk to the map</h2></div><button type="button" aria-label="${t.close}" data-action="voice-close">×</button></div><p>Speak a short command. The map responds and reads its approved synthetic answer back in your selected language.</p><div class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="voice-pending">● ${escapeHtml(voiceStatus)}</div><div class="voice-transcript" aria-live="polite"><span>Your request</span><strong>${escapeHtml(voiceTranscript || (voiceListening ? 'Listening…' : 'No command captured yet'))}</strong>${voiceReply ? `<span>Spoken response</span><strong>${escapeHtml(voiceReply)}</strong>` : ''}</div><div class="voice-chips"><button type="button" data-action="voice-safe">🎯 Focus Safe Zone</button><button type="button" data-action="voice-alert">⚠ Show Alert Area</button><button type="button" data-action="voice-route">🗺 Full Route</button><button type="button" data-action="voice-recenter">🔄 Recenter</button><button type="button" data-action="voice-repeat">🔊 Repeat Instruction</button></div><label class="developer-transcript"><span>Demo transcript</span><input type="text" maxlength="500" value="${escapeHtml(developerTranscript)}" placeholder="e.g. Show my safe zone" data-action="developer-transcript" /><button type="button" data-action="developer-transcript-run">Run on synthetic map</button></label><button class="voice-listen-button ${voiceListening ? 'is-listening' : ''}" type="button" aria-pressed="${voiceListening}" data-action="voice-listen">${voiceListening ? t.listenStop : t.listenStart}</button></aside>
       <dialog class="arrival-dialog capability-dialog" aria-labelledby="arrival-title" ${arrivalOpen ? 'open' : ''}><div class="dialog-top"><div><span class="arrival-icon">?</span><h2 id="arrival-title">Have you and your party safely arrived?</h2></div><button type="button" aria-label="${t.close}" data-action="arrival-close">×</button></div><p>Synthetic assignment · ${assignmentState === 'RESERVED' ? 'reservation recorded' : assignmentState === 'ARRIVED' ? 'arrival recorded' : 'reservation pending'}</p>${arrivalSuccess ? '<div class="success-state">✓ Arrival recorded in this demo. No live capacity was changed.</div>' : `<div class="party-stepper"><button type="button" data-action="party-minus" aria-label="Decrease party size">−</button><strong>${partySize} ${partySize === 1 ? 'Person' : 'People'}</strong><button type="button" data-action="party-plus" aria-label="Increase party size">+</button></div><div class="arrival-actions"><button class="arrived-button" type="button" data-action="arrival-yes">YES, WE HAVE ARRIVED</button><button class="help-button" type="button" data-action="arrival-no">NO, NEED ASSISTANCE</button></div>`}</dialog>
       <dialog class="arrival-dialog capability-dialog" aria-labelledby="assist-title" ${assistanceOpen ? 'open' : ''}><div class="dialog-top"><h2 id="assist-title">Need assistance?</h2><button type="button" aria-label="${t.close}" data-action="assist-close">×</button></div><p>No reservation or capacity event will be created. Use the device dialler for emergency help.</p><a class="call-button" href="tel:112">☎ CALL 112</a></dialog>
       <dialog class="arrival-dialog capability-dialog" aria-labelledby="call-title" ${callOpen ? 'open' : ''}><div class="dialog-top"><h2 id="call-title">Call emergency services?</h2><button type="button" aria-label="${t.close}" data-action="call-close">×</button></div><p>Sthira will open your device dialler for 112. It will not place a silent call or claim dispatch.</p><div class="arrival-actions"><a class="call-button" data-action="call-confirm" href="tel:112">☎ CALL 112</a><button class="help-button" type="button" data-action="call-close">CANCEL</button></div></dialog>
@@ -204,10 +212,10 @@ function initMap() {
   if (!container) return;
   map = new Map({
     container,
-    center: [78.9629, 20.5937],
-    zoom: 3.5,
-    bearing: 0,
-    pitch: 0,
+    center: mapView.center,
+    zoom: mapView.zoom,
+    bearing: mapView.bearing,
+    pitch: mapView.pitch,
     attributionControl: { compact: false },
     style: {
       version: 8,
@@ -297,6 +305,7 @@ function bindInteractions() {
 async function startVoiceCapture(): Promise<void> {
   if (language === 'EN') {
     voiceTranscript = 'Local speech recognition supports Hindi and Malayalam. Use the Demo transcript field or touch controls in English.';
+    voiceStatus = 'English speech input is unavailable with this downloaded model.';
     render();
     return;
   }
@@ -308,15 +317,15 @@ async function startVoiceCapture(): Promise<void> {
     voiceRecorder = new MediaRecorder(voiceStream, { mimeType });
     voiceRecorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
     voiceRecorder.onstop = () => void submitVoiceCapture(new Blob(chunks, { type: mimeType }), (performance.now() - startedAt) / 1000);
-    voiceRecorder.start(); voiceListening = true; voiceTranscript = ''; render();
+    voiceRecorder.start(); voiceListening = true; voiceTranscript = ''; voiceReply = ''; voiceStatus = 'Listening — tap Stop Listening when you finish speaking.'; render();
   } catch {
-    voiceTranscript = 'Microphone permission was not granted. Use touch controls instead.'; voiceListening = false; render();
+    voiceTranscript = 'Microphone permission was not granted. Use touch controls instead.'; voiceStatus = 'Microphone unavailable.'; voiceListening = false; render();
   }
 }
 
 function stopVoiceCapture(): void {
   voiceRecorder?.stop(); voiceStream?.getTracks().forEach((track) => track.stop());
-  voiceRecorder = null; voiceStream = null; voiceListening = false; render();
+  voiceRecorder = null; voiceStream = null; voiceListening = false; voiceStatus = 'Understanding your request…'; render();
 }
 
 async function submitVoiceCapture(blob: Blob, durationSeconds: number): Promise<void> {
@@ -326,8 +335,9 @@ async function submitVoiceCapture(blob: Blob, durationSeconds: number): Promise<
     const response = await fetch(`${API_BASE}/api/v2/voice/transcriptions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ audio_base64: btoa(encoded), language: language === 'ML' ? 'ml-IN' : language === 'HI' ? 'hi-IN' : 'en-IN', duration_seconds: Math.min(30, Math.max(.1, durationSeconds)), media_type: blob.type.startsWith('audio/ogg') ? 'audio/ogg' : 'audio/webm' }) });
     const body = await response.json() as { data?: { text?: string; confidence?: number } };
     voiceTranscript = response.ok && body.data?.text ? body.data.text : 'Voice command could not be understood. Use touch controls instead.';
+    voiceStatus = response.ok && body.data?.text ? 'Command understood. Updating the map…' : 'I could not understand that command.';
     if (response.ok && body.data?.text) void executeTranscriptMapAction(body.data.text, body.data.confidence ?? 0);
-  } catch { voiceTranscript = 'Voice command unavailable. Use touch controls instead.'; }
+  } catch { voiceTranscript = 'Voice command unavailable. Use touch controls instead.'; voiceStatus = 'Voice input is unavailable.'; }
   render();
 }
 
@@ -340,7 +350,7 @@ async function executeTranscriptMapAction(transcript: string, confidence: number
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ transcript, language: language === 'ML' ? 'ml-IN' : language === 'HI' ? 'hi-IN' : 'en-IN', confidence }),
     });
-    const body = await response.json() as { data?: unknown };
+    const body = await response.json() as { data?: { screen_response?: unknown; spoken_response?: unknown; language?: unknown } };
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const moved = response.ok && executeMapActions(map, body.data, reducedMotion, (panel: Panel) => {
       if (panel === 'EMERGENCY_CALL_CONFIRMATION') { callOpen = true; render(); }
@@ -348,31 +358,37 @@ async function executeTranscriptMapAction(transcript: string, confidence: number
     }, (newLanguage) => {
       language = newLanguage === 'ml-IN' ? 'ML' : newLanguage === 'hi-IN' ? 'HI' : 'EN';
     });
-    if (!moved) voiceTranscript = 'Command was rejected. Use touch controls instead.';
-    const screenResponse = body.data && typeof body.data === 'object' && typeof (body.data as { screen_response?: unknown }).screen_response === 'string'
-      ? (body.data as { screen_response: string }).screen_response
-      : null;
+    if (!moved) { voiceTranscript = 'Command was rejected. Use touch controls instead.'; voiceStatus = 'No map action was taken.'; }
+    const screenResponse = typeof body.data?.screen_response === 'string' ? body.data.screen_response : null;
+    const spokenResponse = typeof body.data?.spoken_response === 'string' ? body.data.spoken_response : null;
+    const responseLanguage = body.data?.language === 'ml-IN' || body.data?.language === 'hi-IN' ? body.data.language : 'en-IN';
     if (moved && screenResponse) showToast(screenResponse);
+    if (moved && spokenResponse) { voiceReply = spokenResponse; voiceStatus = 'Replying in your selected language…'; void playVoiceResponse(spokenResponse, responseLanguage); }
   } catch {
-    voiceTranscript = 'Voice map control is unavailable. Use touch controls instead.';
+    voiceTranscript = 'Voice map control is unavailable. Use touch controls instead.'; voiceStatus = 'Voice map control is unavailable.';
   }
   render();
 }
 
 async function playApprovedInstruction(): Promise<void> {
-  if (language === 'HI' || ttsLoading) return;
+  if (language === 'HI') return;
+  const key = language === 'ML' ? 'ML' : 'EN';
+  await playVoiceResponse(scenario.instruction[key], language === 'ML' ? 'ml-IN' : 'en-IN');
+}
+
+async function playVoiceResponse(text: string, responseLanguage: 'en-IN' | 'hi-IN' | 'ml-IN'): Promise<void> {
+  if (ttsLoading) return;
   ttsLoading = true; render();
   try {
-    const key = language === 'ML' ? 'ML' : 'EN';
-    const response = await fetch(`${API_BASE}/api/v2/voice/speech`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: scenario.instruction[key], language: language === 'ML' ? 'ml-IN' : 'en-IN', idempotency_key: crypto.randomUUID() }) });
+    const response = await fetch(`${API_BASE}/api/v2/voice/speech`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, language: responseLanguage, idempotency_key: crypto.randomUUID() }) });
     if (!response.ok) throw new Error('speech synthesis unavailable');
     ttsAudio?.pause();
     ttsAudio = new Audio(URL.createObjectURL(await response.blob()));
     await ttsAudio.play();
   } catch {
-    showToast('Approved audio is unavailable. Use the visible text instruction.');
+    voiceStatus = 'Text response is ready; voice playback is unavailable.'; showToast('Approved audio is unavailable. Use the visible text response.');
   } finally {
-    ttsLoading = false; render();
+    ttsLoading = false; if (voiceReply) voiceStatus = 'Response complete. Ask another short map command.'; render();
   }
 }
 

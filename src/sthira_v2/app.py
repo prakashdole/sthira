@@ -15,7 +15,7 @@ from sthira_v2.contracts import ArrivalResponse
 from sthira_v2.local_voice import LocalVoiceUnavailable, asr_runtime, tts_runtime
 from sthira_v2.speech_stt import INDIC_CONFORMER_MODEL, IndicConformerAdapter, STTArtifactGate, STTState
 from sthira_v2.package_service import OperationalPackageService, PackageAuthorizationError
-from sthira_v2.voice_map import interpret_voice_map_command
+from sthira_v2.voice_map import approved_spoken_responses, interpret_voice_map_command
 from sthira_v2.azure_openai import AzureOpenAIResponses
 
 router = APIRouter(prefix="/api/v2", tags=["v2-runtime"])
@@ -146,13 +146,8 @@ def transcribe_voice(request: VoiceTranscriptionRequest) -> dict[str, object]:
 
 @router.post("/voice/speech", tags=["v2-voice"])
 def synthesize_voice(request: VoiceSynthesisRequest) -> Response:
-    language_key = {"en-IN": "EN", "ml-IN": "ML"}.get(request.language)
-    if language_key is None:
-        raise HTTPException(status_code=422, detail="language is not configured for local speech")
-    scenario = json.loads(_DEMO_SCENARIO.read_text(encoding="utf-8"))
-    approved_text = scenario["instruction"].get(language_key)
-    if request.text != approved_text:
-        raise HTTPException(status_code=422, detail="only the current approved scenario instruction may be synthesized")
+    if request.text not in approved_spoken_responses():
+        raise HTTPException(status_code=422, detail="only allow-listed synthetic guidance may be synthesized")
     try:
         audio = tts_runtime().synthesize_wav(request.text)
     except LocalVoiceUnavailable as exc:
