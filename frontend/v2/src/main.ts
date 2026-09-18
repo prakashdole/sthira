@@ -1,413 +1,388 @@
 import './styles.css';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { Map, setWorkerUrl } from 'maplibre-gl';
-import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
-import scenario from './scenario.json';
-import { executeMapActions, type MapAction, type Panel } from './mapActions';
+import { Map, Popup } from 'maplibre-gl';
+import mapData from './mapData.json';
+import { words, type Language } from './i18n';
 import '@fontsource/noto-sans/400.css';
 import '@fontsource/noto-sans/600.css';
 import '@fontsource/noto-sans/700.css';
 import '@fontsource/noto-sans-malayalam/400.css';
-import '@fontsource/noto-sans-malayalam/600.css';
 import '@fontsource/noto-sans-malayalam/700.css';
 import '@fontsource/noto-sans-devanagari/400.css';
-import '@fontsource/noto-sans-devanagari/600.css';
 import '@fontsource/noto-sans-devanagari/700.css';
 
-setWorkerUrl(maplibreWorkerUrl);
+type RuntimeState = 'checking' | 'demo' | 'blocked' | 'offline';
+type ChatMessage = { role: 'USER' | 'ASSISTANT'; text: string };
+type MapAction = 'NONE' | 'FOCUS_SHELTER' | 'SHOW_ROUTE' | 'SHOW_HAZARD' | 'OPEN_DIRECTIONS' | 'OPEN_RESCUE' | 'CONFIRM_ARRIVAL';
+type ChatResponse = { reply: string; map_action: MapAction; suggestions: string[]; source_status: 'SYNTHETIC_DEMO' };
+type VoiceStatus = { data?: { ready?: boolean; supported_languages?: string[] } };
 
-type Language = 'EN' | 'ML' | 'HI';
-
-const copy = {
-  EN: {
-    lang: 'English', demo: 'SYNTHETIC DEMO · NO LIVE FEED', alert: 'SYNTHETIC EXERCISE · FLOOD', hazard: 'FLOOD EXERCISE', live: 'Synthetic · 12 Sep 2026',
-    headline: 'Move to Synthetic Ward 8 School', summary: 'This synthetic flood exercise marks a demo red zone. Use only the stored demo route.',
-    steps: ['Follow the stored synthetic route shown below.', 'Do not treat basemap streets as emergency guidance.', 'Take medicines & ID in a real emergency.'], shelter: 'Synthetic Ward 8 School',
-    open: 'OPEN · SYNTHETIC DEMO', deadline: 'Deadline', assigned: 'Assigned destination', routeMetric: 'Route status', deadlineValue: 'Synthetic exercise ends 6:00 PM', assignedValue: 'Synthetic Ward 8 School', routeValue: 'Stored synthetic route',
-    start: 'START SAFE ROUTE', call: 'CALL 112', listen: 'Listen', isl: 'ISL Video', directions: 'Step-by-step directions', details: 'View alert details',
-    source: 'SYNTHETIC_DEMO · local scenario package · 12 Sep 2026', mapNote: 'SYNTHETIC DEMO · satellite imagery is visual context only, not live hazard data', mapAria: 'Synthetic map showing red zone, citizen position, stored route, and safe zones',
-    voice: 'Voice Control', voiceOpen: 'Open Voice Map Control', voiceTitle: 'Voice-to-text control', voiceBody: 'Approved short commands will move the map when IndicConformer is connected.', voicePending: 'Model connection pending', listenStart: 'START LISTENING', listenStop: 'STOP LISTENING', transcript: 'Transcript appears here',
-    close: 'Close', drawer: 'Expand guidance', collapse: 'Collapse guidance', arrivalTitle: 'Have you arrived at the synthetic assigned zone?', arrivalBody: 'This demo does not change capacity or confirm arrival.', yes: 'YES, I HAVE ARRIVED', no: 'NO, I NEED HELP',
-    offline: 'OFFLINE · LAST VALID SYNTHETIC DATA', online: 'SYNTHETIC DEMO · NO LIVE FEED', detailsTitle: 'Alert details', detailsBody: 'Synthetic data only. This is not an active government alert.', issued: 'Scenario date 12 Sep 2026 · issued 4:00 PM', expires: 'Synthetic exercise expires 12 Sep 2026 · 6:00 PM', detailsClose: 'Close alert details',
-  },
-  ML: {
-    lang: 'മലയാളം', demo: 'സിന്തറ്റിക് ഡെമോ · ലൈവ് ഫീഡ് ഇല്ല', alert: 'സിന്തറ്റിക് പരിശീലനം · വെള്ളപ്പൊക്കം', hazard: 'പരിശീലന വെള്ളപ്പൊക്കം', live: 'സിന്തറ്റിക് · 12 സെപ്റ്റംബർ 2026',
-    headline: 'സിന്തറ്റിക് വാർഡ് 8 സ്കൂളിലേക്ക് നീങ്ങുക', summary: 'ഇത് ഒരു സിന്തറ്റിക് വെള്ളപ്പൊക്ക പരിശീലനമാണ്. സംഭരിച്ച ഡെമോ മാർഗ്ഗം മാത്രം കാണിക്കുന്നു.',
-    steps: ['താഴെ കാണുന്ന സിന്തറ്റിക് മാർഗ്ഗം പിന്തുടരുക.', 'ബേസ്മാപ്പ് റോഡുകളെ അടിയന്തര നിർദ്ദേശമായി കാണരുത്.', 'യഥാർത്ഥ അടിയന്തരാവസ്ഥയിൽ മരുന്നുകളും തിരിച്ചറിയൽ രേഖകളും എടുക്കുക.'], shelter: 'സിന്തറ്റിക് വാർഡ് 8 സ്കൂൾ',
-    open: 'തുറന്നിരിക്കുന്നു · ഡെമോ ശേഷി', deadline: 'അവസാന സമയം', assigned: 'നിയോഗിച്ച കേന്ദ്രം', routeMetric: 'ദൂരം / ഘട്ടങ്ങൾ', deadlineValue: 'പുറപ്പെടുക: വൈകിട്ട് 6:00', assignedValue: 'വാർഡ് 8 സർക്കാർ സ്കൂൾ', routeValue: 'സംഭരിച്ച ഡെമോ മാർഗ്ഗം',
-    start: 'സുരക്ഷിത മാർഗ്ഗം തുടങ്ങുക', call: '112 വിളിക്കുക', listen: 'കേൾക്കുക', isl: 'ISL വീഡിയോ', directions: 'ഘട്ടംഘട്ടമായ നിർദ്ദേശങ്ങൾ', details: 'മുന്നറിയിപ്പ് വിവരങ്ങൾ',
-    source: 'SYNTHETIC_DEMO · പ്രാദേശിക സീനാരിയോ പാക്കേജ്', mapNote: 'സിന്തറ്റിക് ഡെമോ · ഉപഗ്രഹ ദൃശ്യം പശ്ചാത്തലം മാത്രം, ലൈവ് അപകട ഡാറ്റയല്ല', mapAria: 'സിന്തറ്റിക് ചുവപ്പ് മേഖല, പൗരന്റെ സ്ഥാനം, സംഭരിച്ച മാർഗ്ഗം, സുരക്ഷിത മേഖലകൾ കാണിക്കുന്ന മാപ്പ്',
-    voice: 'വോയ്സ് നിയന്ത്രണം', voiceOpen: 'വോയ്സ് മാപ്പ് നിയന്ത്രണം തുറക്കുക', voiceTitle: 'വോയ്സ്-ടു-ടെക്സ്റ്റ് നിയന്ത്രണം', voiceBody: 'IndicConformer ബന്ധിപ്പിച്ചാൽ അംഗീകൃത ഹ്രസ്വ കമാൻഡുകൾ മാപ്പ് നീക്കും.', voicePending: 'മോഡൽ കണക്ഷൻ കാത്തിരിക്കുന്നു', listenStart: 'കേൾക്കാൻ തുടങ്ങുക', listenStop: 'കേൾക്കുന്നത് നിർത്തുക', transcript: 'ട്രാൻസ്‌ക്രിപ്റ്റ് ഇവിടെ കാണിക്കും',
-    close: 'അടയ്ക്കുക', drawer: 'മാർഗ്ഗനിർദ്ദേശം വികസിപ്പിക്കുക', collapse: 'മാർഗ്ഗനിർദ്ദേശം ചുരുക്കുക', arrivalTitle: 'സിന്തറ്റിക് വാർഡ് 8 സ്കൂളിൽ എത്തിയോ?', arrivalBody: 'ഈ സിന്തറ്റിക് ഡെമോയിൽ മാത്രം എത്തിച്ചേരൽ രേഖപ്പെടുത്തും.', yes: 'അതെ, എത്തി', no: 'ഇല്ല, സഹായം വേണം',
-    offline: 'ഓഫ്‌ലൈൻ · അവസാനത്തെ സാധുവായ ഡെമോ ഡാറ്റ', online: 'ഡെമോ ഫീഡ് സജീവം', detailsTitle: 'മുന്നറിയിപ്പ് വിവരങ്ങൾ', detailsBody: 'സിന്തറ്റിക് ഡാറ്റ മാത്രം. ഇത് സജീവ സർക്കാർ മുന്നറിയിപ്പല്ല.', issued: 'നൽകിയത് 11 സെപ്റ്റംബർ 2026 · വൈകിട്ട് 4:00', expires: 'കാലാവധി 11 സെപ്റ്റംബർ 2026 · വൈകിട്ട് 6:00', detailsClose: 'മുന്നറിയിപ്പ് അടയ്ക്കുക',
-  },
-  HI: {
-    lang: 'हिन्दी', demo: 'सिंथेटिक डेमो · लाइव फीड नहीं', alert: 'सिंथेटिक अभ्यास · बाढ़', hazard: 'अभ्यास बाढ़', live: 'सिंथेटिक · 12 सितम्बर 2026',
-    headline: 'सिंथेटिक वार्ड 8 स्कूल जाएं', summary: 'यह एक सिंथेटिक बाढ़ अभ्यास है। केवल संग्रहीत डेमो मार्ग दिखाया गया है.',
-    steps: ['नीचे दिखाए सिंथेटिक मार्ग का पालन करें।', 'बेसमैप की सड़कों को आपातकालीन निर्देश न मानें।', 'वास्तविक आपातकाल में दवाइयां और पहचान पत्र साथ लें।'], shelter: 'सिंथेटिक वार्ड 8 स्कूल',
-    open: 'खुला · सिंथेटिक डेमो', deadline: 'समय सीमा', assigned: 'निर्धारित गंतव्य', routeMetric: 'मार्ग स्थिति', deadlineValue: 'सिंथेटिक अभ्यास समाप्ति: शाम 6:00', assignedValue: 'सिंथेटिक वार्ड 8 स्कूल', routeValue: 'संग्रहीत सिंथेटिक मार्ग',
-    start: 'सुरक्षित मार्ग शुरू करें', call: '112 पर कॉल करें', listen: 'सुनें', isl: 'ISL वीडियो', directions: 'चरण-दर-चरण निर्देश', details: 'अलर्ट विवरण',
-    source: 'SYNTHETIC_DEMO · स्थानीय परिदृश्य पैकेज', mapNote: 'सिंथेटिक डेमो · उपग्रह दृश्य केवल पृष्ठभूमि है, लाइव खतरा डेटा नहीं', mapAria: 'सिंथेटिक लाल क्षेत्र, नागरिक स्थान, संग्रहीत मार्ग और सुरक्षित क्षेत्र दिखाने वाला मानचित्र',
-    voice: 'वॉयस कंट्रोल', voiceOpen: 'वॉयस मैप कंट्रोल खोलें', voiceTitle: 'वॉयस-टू-टेक्स्ट कंट्रोल', voiceBody: 'IndicConformer जुड़ने पर अनुमोदित छोटे कमांड मानचित्र को स्थानांतरित करेंगे.', voicePending: 'मॉडल कनेक्शन लंबित', listenStart: 'सुनना शुरू करें', listenStop: 'सुनना बंद करें', transcript: 'ट्रांसक्रिप्ट यहां दिखाई देगा',
-    close: 'बंद करें', drawer: 'मार्गदर्शन खोलें', collapse: 'मार्गदर्शन बंद करें', arrivalTitle: 'क्या आप सिंथेटिक वार्ड 8 स्कूल पहुंच गए?', arrivalBody: 'यह केवल सिंथेटिक डेमो में आगमन दर्ज करता है.', yes: 'हां, मैं पहुंच गया', no: 'नहीं, मदद चाहिए',
-    offline: 'ऑफलाइन · अंतिम मान्य डेमो डेटा', online: 'डेमो फीड सक्रिय', detailsTitle: 'अलर्ट विवरण', detailsBody: 'केवल सिंथेटिक डेटा। यह सक्रिय सरकारी अलर्ट नहीं है.', issued: 'जारी 12 सितम्बर 2026 · शाम 4:00', expires: 'समाप्ति 12 सितम्बर 2026 · शाम 6:00', detailsClose: 'अलर्ट विवरण बंद करें',
-  },
-} as const;
+const icons: Record<string, string> = {
+  arrow: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+  mic: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/></svg>',
+  locate: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
+  route: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h3a3 3 0 0 0 3-3V9a3 3 0 0 1 3-3"/></svg>',
+  volume: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5ZM15 9a5 5 0 0 1 0 6M18 6a9 9 0 0 1 0 12"/></svg>',
+  close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>',
+  info: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></svg>',
+};
 
 let language: Language = 'EN';
+let runtime: RuntimeState = navigator.onLine ? 'checking' : 'offline';
+let runtimeDetail: 'blocked' | 'responding' | 'disconnected' = 'blocked';
+let map: Map | null = null;
+let mapAnimationFrame: number | null = null;
+let hasRendered = false;
+let redZonesVisible = false;
+let relocationZonesVisible = false;
+let pendingZoneFocus: 'RED' | 'RELOCATION' | null = null;
 let voiceOpen = false;
 let voiceListening = false;
-let drawerExpanded = true;
-let arrivalOpen = false;
-let detailsOpen = false;
+let voiceTranscript = '';
+let voiceFeedbackKey: Exclude<keyof typeof words.EN, 'suggestions'> = 'micPrivacy';
+let mediaRecorder: MediaRecorder | null = null;
+let mediaStream: MediaStream | null = null;
+let recordingStartedAt = 0;
+let localAsrReady = false;
+let chatPending = false;
+let chatError = '';
+let pendingMapAction: MapAction = 'NONE';
+let chatSuggestions: string[] = [...words.EN.suggestions];
+let chatMessages: ChatMessage[] = [{ role: 'ASSISTANT', text: words.EN.welcome }];
+const chatSessionId = globalThis.crypto?.randomUUID?.() || `browser-${Date.now()}`;
 let routeStarted = false;
-let isOffline = !navigator.onLine;
-let map: Map | null = null;
-let mapView = { center: [78.9629, 20.5937] as [number, number], zoom: 3.5, bearing: 0, pitch: 0 };
+let directionsOpen = false;
+let detailsOpen = false;
+let arrivalOpen = false;
+let assistanceOpen = false;
 let partySize = 1;
 let arrivalSuccess = false;
-let assistanceOpen = false;
-let directionsOpen = false;
-let listenOpen = false;
-let islOpen = false;
-let layersOpen = false;
-let showHazard = true;
-let showRoute = true;
-let showShelters = true;
-let pitched = false;
-let callOpen = false;
-let ttsAudio: HTMLAudioElement | null = null;
-let ttsLoading = false;
-let voiceRecorder: MediaRecorder | null = null;
-let voiceStream: MediaStream | null = null;
-let voiceTranscript = '';
-let voiceStatus = 'Ready — choose Hindi or Malayalam, then start listening.';
-let voiceReply = '';
-let developerTranscript = '';
-let assignmentState: 'UNASSIGNED' | 'RESERVED' | 'ARRIVED' = 'UNASSIGNED';
-let scenarioState: 'LOADING' | 'READY' | 'NO_ACTIVE' | 'ERROR' = 'LOADING';
-const API_BASE = window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
 
-async function loadScenario(): Promise<void> {
-  scenarioState = 'LOADING';
-  render();
-  try {
-    const response = await fetch(`${API_BASE}/api/v2/demo/scenario`, { headers: { Accept: 'application/json' } });
-    if (!response.ok) throw new Error(`scenario request failed: ${response.status}`);
-    const body = await response.json() as { data?: unknown; source_status?: unknown };
-    const data = body.data as Record<string, unknown> | undefined;
-    if (body.source_status !== 'SYNTHETIC_DEMO' || !data || data.evidence_class !== 'SYNTHETIC_DEMO' || !data.disclaimer || typeof data.expires_at !== 'string' || !data.alert || !Array.isArray(data.red_zones) || !Array.isArray(data.safe_zones) || !Array.isArray(data.routes)) throw new Error('scenario provenance or shape invalid');
-    Object.assign(scenario as object, data);
-    localStorage.setItem('sthira-v2-last-valid-scenario', JSON.stringify({ saved_at: new Date().toISOString(), data }));
-    scenarioState = (data.alert as { active?: boolean }).active === false ? 'NO_ACTIVE' : 'READY';
-  } catch {
-    const cached = !navigator.onLine ? localStorage.getItem('sthira-v2-last-valid-scenario') : null;
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached) as { data?: Record<string, unknown> };
-        if (parsed.data?.evidence_class === 'SYNTHETIC_DEMO' && typeof parsed.data.expires_at === 'string' && Date.parse(parsed.data.expires_at) > Date.now()) {
-          Object.assign(scenario as object, parsed.data);
-          isOffline = true;
-          scenarioState = (parsed.data.alert as { active?: boolean } | undefined)?.active === false ? 'NO_ACTIVE' : 'READY';
-          render();
-          return;
-        }
-      } catch {
-        localStorage.removeItem('sthira-v2-last-valid-scenario');
-      }
-    }
-    scenarioState = 'ERROR';
-  }
-  render();
+function runtimeCopy() {
+  const t = words[language];
+  if (runtime === 'offline') return t.offline;
+  if (runtime === 'blocked' || runtimeDetail === 'blocked') return t.blocked;
+  if (runtimeDetail === 'disconnected') return t.localDisconnected;
+  if (runtime === 'demo') return t.responding;
+  return t.checking;
 }
 
-async function reserveDemoAssignment(): Promise<void> {
-  try {
-    const response = await fetch(`${API_BASE}/api/v2/assignments`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ assignment_id: 'ui-demo-assignment', alert_id: scenario.alert.id, citizen_session_id: 'synthetic-ui-session-001', idempotency_key: 'ui-demo-assignment-key', party_size: partySize }),
-    });
-    if (!response.ok) throw new Error('assignment unavailable');
-    const body = await response.json() as { data?: { state?: string } };
-    if (body.data?.state !== 'RESERVED' && body.data?.state !== 'ARRIVED') throw new Error('assignment state invalid');
-    assignmentState = body.data.state as 'RESERVED' | 'ARRIVED';
-  } catch {
-    assignmentState = 'UNASSIGNED';
-    showToast('Synthetic assignment unavailable; no capacity claim was made.');
-  }
-}
-
-async function confirmDemoArrival(responseValue: 'YES' | 'NO'): Promise<void> {
-  try {
-    const response = await fetch(`${API_BASE}/api/v2/assignments/ui-demo-assignment/arrival-confirmations`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ response: responseValue, idempotency_key: `ui-demo-arrival-${responseValue.toLowerCase()}` }),
-    });
-    if (!response.ok) throw new Error('arrival unavailable');
-    const body = await response.json() as { data?: { state?: string } };
-    if (responseValue === 'YES' && body.data?.state === 'ARRIVED') assignmentState = 'ARRIVED';
-    showToast(responseValue === 'YES' ? 'Arrival recorded in the synthetic ledger.' : 'No arrival or capacity change was recorded.');
-  } catch {
-    showToast('Arrival service unavailable; no capacity claim was made.');
-  }
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
 }
 
 function render() {
-  if (scenarioState !== 'READY') {
-    const message = scenarioState === 'LOADING' ? 'Verifying the versioned synthetic scenario package.' : scenarioState === 'NO_ACTIVE' ? 'There is no active synthetic alert. No route, safe zone, or capacity guidance is available.' : 'The scenario package could not be verified. No alert, route, safe zone, or capacity guidance is being shown.';
-    document.querySelector<HTMLDivElement>('#app')!.innerHTML = `<main class="scenario-gate" role="status" aria-live="polite"><p class="eyebrow">Sthira v2 · SYNTHETIC_DEMO</p><h1>${scenarioState === 'LOADING' ? 'Loading demo guidance…' : scenarioState === 'NO_ACTIVE' ? 'No active alert' : 'Demo guidance unavailable'}</h1><p>${message}</p>${scenarioState === 'ERROR' ? '<button type="button" data-action="retry-scenario">Retry scenario load</button>' : ''}</main>`;
-    document.querySelector<HTMLButtonElement>('[data-action="retry-scenario"]')?.addEventListener('click', () => void loadScenario());
-    return;
-  }
-  const t = copy[language];
-  if (map) {
-    const center = map.getCenter();
-    mapView = { center: [center.lng, center.lat], zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() };
-    map.remove();
-    map = null;
-  }
+  const t = words[language];
+  if (mapAnimationFrame !== null) cancelAnimationFrame(mapAnimationFrame);
+  mapAnimationFrame = null;
+  map?.remove();
+  document.documentElement.lang = language === 'ML' ? 'ml' : language === 'HI' ? 'hi' : 'en';
   document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-    <div class="app-shell tactical-shell ${drawerExpanded ? 'drawer-expanded' : 'drawer-collapsed'}">
-      <div class="tactical-map" role="img" aria-label="${t.mapAria}"><div id="map-canvas" aria-hidden="true"></div><div class="map-controls" aria-label="Map controls"><button type="button" aria-label="Zoom in" data-action="zoom-in">+</button><button type="button" aria-label="Zoom out" data-action="zoom-out">−</button></div><div class="map-action-pill"><button type="button" data-action="recenter">Recenter</button><button type="button" data-action="directions">Turn-by-turn list</button><button type="button" data-action="voice">Voice control</button></div>
-      </div>
-      <header class="tactical-topbar">
-        <a class="wordmark" href="/" aria-label="Sthira home"><span class="wordmark-mark">S</span><span>Sthira <small>v2</small></span></a>
-        <div class="topbar-center"><span class="heartbeat"><i></i>${isOffline ? t.offline : t.demo}</span></div>
-        <div class="topbar-actions"><button class="voice-control ${voiceListening ? 'is-listening' : ''}" type="button" aria-label="${t.voiceOpen}" aria-expanded="${voiceOpen}" data-action="voice"><span class="mic-icon">●</span><span>${t.voice}</span></button><div class="language-switcher" role="group" aria-label="Language"><button class="language-choice ${language === 'EN' ? 'is-selected' : ''}" data-language="EN" type="button">EN</button><button class="language-choice ${language === 'ML' ? 'is-selected' : ''}" data-language="ML" type="button">ML</button><button class="language-choice ${language === 'HI' ? 'is-selected' : ''}" data-language="HI" type="button">HI</button></div></div>
+    <div class="app-shell ${hasRendered ? '' : 'is-entering'}">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="${t.brandHome}"><span class="brand-mark">സ്</span><span><strong>Sthira</strong><small>${t.tagline}</small></span></a>
+        <div class="system-state system-state--${runtime}"><i></i><span>${runtimeCopy()}</span></div>
+        <div class="top-actions">
+          <button class="voice-launch ${voiceListening ? 'is-listening' : ''}" type="button" data-action="voice-open" aria-expanded="${voiceOpen}">${icons.mic}<span>${t.voice}</span></button>
+          <div class="language-switcher" role="group" aria-label="${t.chooseLanguage}">${(['EN', 'ML', 'HI'] as Language[]).map((code) => `<button class="${language === code ? 'is-active' : ''}" type="button" data-language="${code}" aria-pressed="${language === code}">${code}</button>`).join('')}</div>
+        </div>
       </header>
-      <main class="tactical-main">
-        <section class="floating-drawer civic-drawer" data-testid="emergency-card" aria-labelledby="alert-title">
-          <button class="drawer-handle" type="button" aria-expanded="${drawerExpanded}" aria-label="${drawerExpanded ? t.collapse : t.drawer}" data-action="drawer"><span></span></button>
-          <div class="drawer-scroll">
-            <div class="official-strip">SYNTHETIC EXERCISE · NOT OFFICIAL GUIDANCE <span>${t.live} · SYNTHETIC_DEMO</span></div>
-            <div class="urgent-header"><span class="critical-badge"><i></i>${t.alert}</span><button class="detail-trigger" type="button" data-action="details" aria-label="${t.details}">ⓘ</button><h1 id="alert-title">${t.headline}</h1><p class="summary">${t.summary}</p></div>
-            <article class="civic-destination"><div><p class="overline">WHERE TO GO · SYNTHETIC ASSIGNMENT</p><h2>Synthetic Ward 8 School</h2><span class="open-badge">✓ OPEN · SYNTHETIC DEMO</span></div><strong>Stored<br /><small>route · demo value</small></strong></article>
-            <button class="start-button civic-start ${routeStarted ? 'is-started' : ''}" type="button" data-testid="start-route" data-action="route"><span>${routeStarted ? '✓' : '➜'}</span>${routeStarted ? 'ROUTE ACTIVE' : 'START STEP-BY-STEP EVACUATION ROUTE'}</button>
-            <ul class="civic-directives">${t.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('')}</ul>
-            <div class="utility-row"><button type="button" data-action="listen">🔊 ${t.listen}</button><button type="button" data-action="isl">✋ ${t.isl}</button><button type="button" data-action="directions">☷ ${t.directions}</button></div>
-            <button class="arrival-trigger" data-testid="arrival-confirmation" type="button" data-action="arrival-open">I HAVE REACHED THE SHELTER</button>
-            <a class="rescue-link" data-testid="call-112" href="tel:112">Need emergency help? <strong>Call 112</strong></a>
-          </div>
+      <main class="map-workspace">
+        <section class="guidance-panel" data-testid="emergency-card" aria-labelledby="alert-title">
+          <div class="authority-line"><span>${t.exerciseAlert}</span><button type="button" data-action="details">${icons.info} ${t.sourceDetails}</button></div>
+          <div class="severity"><i aria-hidden="true">!</i><span>${t.severeWarning}</span><time>${t.updated}</time></div>
+          <h1 id="alert-title">${t.leave}</h1><p class="lede">${t.summary}</p>
+          <article class="destination"><div><span class="destination-label">${t.destinationLabel}</span><h2>${t.destinationName}</h2><p>${t.destinationMeta}</p></div><div class="distance"><strong>${t.distance}</strong><span>${t.duration}</span></div></article>
+          <button class="primary-action ${routeStarted ? 'is-success' : ''}" data-testid="start-route" type="button" data-action="route">${icons.route}<span>${routeStarted ? t.routeActive : t.startRoute}</span>${icons.arrow}</button>
+          <ol class="instructions"><li><span>1</span><p><strong>${t.instruction1Title}</strong> ${t.instruction1Body}</p></li><li><span>2</span><p>${t.instruction2}</p></li><li><span>3</span><p>${t.instruction3}</p></li></ol>
+          <div class="quick-actions"><button type="button" data-action="directions">${icons.route}<span>${t.directions}</span></button><button type="button" data-action="listen">${icons.volume}<span>${t.listen}</span></button><button type="button" data-action="voice-open">${icons.mic}<span>${t.askByVoice}</span></button></div>
+          <button class="arrival-action" data-testid="arrival-confirmation" type="button" data-action="arrival-open">${t.arrived}</button>
+          <a class="rescue-action" data-testid="call-112" href="tel:112"><span>${t.trapped}</span><strong>${t.rescue}</strong></a>
+        </section>
+        <section class="map-surface" aria-label="${t.mapAria}">
+          <div id="map-canvas"></div>
+          <div class="map-toolbar" aria-label="${t.mapTools}"><button type="button" data-action="recenter">${icons.locate}<span>${t.myLocation}</span></button><button type="button" data-action="map-route">${icons.route}<span>${t.fullRoute}</span></button></div>
+          <div class="layer-switcher" aria-label="${t.mapLayers}"><button class="zone-toggle zone-toggle--danger ${redZonesVisible ? 'is-active' : ''}" type="button" data-action="toggle-red-zones" aria-pressed="${redZonesVisible}"><i></i><span>${t.redZones}</span></button><button class="zone-toggle zone-toggle--relocation ${relocationZonesVisible ? 'is-active' : ''}" type="button" data-action="toggle-relocation-zones" aria-pressed="${relocationZonesVisible}"><i></i><span>${t.relocationZones}</span></button></div>
+          <div class="map-key"><span class="${redZonesVisible ? '' : 'is-muted'}"><i class="hazard-key"></i>${t.redZone}</span><span><i class="route-key"></i>${t.approvedRoute}</span><span class="${relocationZonesVisible ? '' : 'is-muted'}"><i class="relocation-key"></i>${t.relocationZone}</span><span><i class="shelter-key"></i>${t.safeShelter}</span></div>
+          <div class="map-disclaimer">${t.imagery} <a href="https://www.esri.com/" target="_blank" rel="noreferrer">© Esri</a>, ${t.overlays}</div>
         </section>
       </main>
-      <div class="map-legend-floating context-widget"><span><i class="legend-crimson"></i> Synthetic hazard area · Ward 12</span><span><i class="legend-cobalt"></i> Stored demo route</span><span><i class="legend-mint"></i> Synthetic assignment</span></div>
-      <footer class="tactical-footer"><span>${t.mapNote}</span><button type="button" data-action="details">${t.details}</button></footer>
+      <aside class="voice-console ${voiceOpen ? 'is-open' : ''}" role="dialog" aria-modal="false" aria-labelledby="voice-title" ${voiceOpen ? '' : 'hidden'}>
+        <div class="voice-head"><div><span>${t.assistant}</span><h2 id="voice-title">${t.askSituation}</h2></div><button class="icon-button" type="button" data-action="voice-close" aria-label="${t.closeAssistant}">${icons.close}</button></div>
+        <div class="voice-stage ${voiceListening ? 'is-listening' : ''}"><div class="voice-orb" aria-hidden="true">${icons.mic}<i></i><i></i><i></i></div><div><strong>${voiceListening ? t.listening : chatPending ? t.checkingGuidance : t.ready}</strong><span>${voiceListening ? t.speakNaturally : t[voiceFeedbackKey]}</span></div></div>
+        <div class="chat-thread" aria-live="polite" aria-busy="${chatPending}">${chatMessages.map((message, index) => `<article class="chat-message chat-message--${message.role.toLowerCase()}"><span>${message.role === 'USER' ? t.you : 'Sthira'}</span><p>${escapeHtml(message.text)}</p>${message.role === 'ASSISTANT' ? `<button type="button" data-speak-message="${index}" aria-label="${t.readAloud}">${icons.volume}<span>${t.listen}</span></button>` : ''}</article>`).join('')}${chatPending ? `<div class="chat-thinking"><i></i><i></i><i></i><span>${t.checkingExercise}</span></div>` : ''}</div>
+        ${chatError ? `<p class="chat-error" role="alert">${escapeHtml(chatError)}</p>` : ''}
+        <div class="voice-suggestions" aria-label="${t.suggestedQuestions}">${chatSuggestions.map((suggestion) => `<button type="button" data-command="${escapeHtml(suggestion)}">${escapeHtml(suggestion)}</button>`).join('')}</div>
+        <form class="command-form" data-command-form><label for="command-input">${t.askText}</label><div><input id="command-input" name="command" autocomplete="off" placeholder="${t.askPlaceholder}" ${chatPending ? 'disabled' : ''}/><button type="submit" ${chatPending ? 'disabled' : ''}>${t.send}</button></div></form>
+        <button class="listen-button ${voiceListening ? 'is-listening' : ''}" type="button" data-action="voice-listen" aria-pressed="${voiceListening}">${icons.mic}<span>${voiceListening ? t.stopListening : t.startListening}</span></button>
+        <p class="voice-boundary"><strong>${t.voiceBoundaryLabel}</strong> ${t.voiceBoundary}</p>
+      </aside>
+      ${directionsOpen ? `<aside class="side-sheet" aria-labelledby="directions-title"><div class="sheet-head"><div><span>${t.routeKicker}</span><h2 id="directions-title">${t.routeTitle}</h2></div><button class="icon-button" data-action="directions-close" aria-label="${t.closeDirections}">${icons.close}</button></div><ol><li><b>1</b><p>${t.routeStep1}<small>${t.routeStep1Note}</small></p></li><li><b>2</b><p>${t.routeStep2}<small>${t.routeStep2Note}</small></p></li><li><b>3</b><p>${t.routeStep3}<small>${t.routeStep3Note}</small></p></li></ol></aside>` : ''}
+      ${detailsOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.sourceFreshness}</span><h2>${t.alertDetails}</h2></div><button class="icon-button" data-action="details-close" aria-label="${t.closeDetails}">${icons.close}</button></div><p>${t.demoNotice}</p><dl><div><dt>${t.authorityFormat}</dt><dd>NDMA SACHET / CAP</dd></div><div><dt>${t.issued}</dt><dd>11 Sep 2026, 4:00 PM</dd></div><div><dt>${t.expires}</dt><dd>11 Sep 2026, 6:00 PM</dd></div><div><dt>${t.backend}</dt><dd>${runtimeCopy()}</dd></div></dl></dialog>` : ''}
+      ${arrivalOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.arrivalCheck}</span><h2>${t.arrivedSafely}</h2></div><button class="icon-button" data-action="arrival-close" aria-label="${t.closeArrival}">${icons.close}</button></div>${arrivalSuccess ? `<div class="success-message">${t.arrivalRecorded}</div>` : `<p>${t.confirmParty}</p><div class="stepper"><button type="button" data-action="party-minus" aria-label="${t.decreaseParty}">-</button><strong>${partySize} ${partySize === 1 ? t.person : t.people}</strong><button type="button" data-action="party-plus" aria-label="${t.increaseParty}">+</button></div><div class="modal-actions"><button class="primary-action" type="button" data-action="arrival-yes">${t.weArrived}</button><button class="secondary-action" type="button" data-action="arrival-no">${t.needHelp}</button></div>`}</dialog>` : ''}
+      ${assistanceOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.emergencyAssistance}</span><h2>${t.call112Question}</h2></div><button class="icon-button" data-action="assist-close" aria-label="${t.close}">${icons.close}</button></div><p>${t.assistNotice}</p><a class="primary-action" href="tel:112">${t.call112Now}</a></dialog>` : ''}
       <div class="toast" role="status" aria-live="polite" hidden></div>
-      <dialog class="tactical-dialog" aria-labelledby="details-title" ${detailsOpen ? 'open' : ''}><div class="dialog-top"><h2 id="details-title">${t.detailsTitle}</h2><button type="button" aria-label="${t.detailsClose}" data-action="details-close">×</button></div><p>${t.detailsBody}</p><dl><div><dt>${t.issued}</dt><dd>${t.source}</dd></div><div><dt>${t.expires}</dt></div></dl><button class="start-button" type="button" data-action="details-close">${t.detailsClose}</button></dialog>
-      <aside class="voice-panel ${voiceOpen ? 'is-open' : ''}" aria-labelledby="voice-title" ${voiceOpen ? '' : 'hidden'}><div class="dialog-top"><div><p class="overline">${t.voice}</p><h2 id="voice-title">Talk to the map</h2></div><button type="button" aria-label="${t.close}" data-action="voice-close">×</button></div><p>Speak a short command. The map responds and reads its approved synthetic answer back in your selected language.</p><div class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="voice-pending">● ${escapeHtml(voiceStatus)}</div><div class="voice-transcript" aria-live="polite"><span>Your request</span><strong>${escapeHtml(voiceTranscript || (voiceListening ? 'Listening…' : 'No command captured yet'))}</strong>${voiceReply ? `<span>Spoken response</span><strong>${escapeHtml(voiceReply)}</strong>` : ''}</div><div class="voice-chips"><button type="button" data-action="voice-safe">🎯 Focus Safe Zone</button><button type="button" data-action="voice-alert">⚠ Show Alert Area</button><button type="button" data-action="voice-route">🗺 Full Route</button><button type="button" data-action="voice-recenter">🔄 Recenter</button><button type="button" data-action="voice-repeat">🔊 Repeat Instruction</button></div><label class="developer-transcript"><span>Demo transcript</span><input type="text" maxlength="500" value="${escapeHtml(developerTranscript)}" placeholder="e.g. Show my safe zone" data-action="developer-transcript" /><button type="button" data-action="developer-transcript-run">Run on synthetic map</button></label><button class="voice-listen-button ${voiceListening ? 'is-listening' : ''}" type="button" aria-pressed="${voiceListening}" data-action="voice-listen">${voiceListening ? t.listenStop : t.listenStart}</button></aside>
-      <dialog class="arrival-dialog capability-dialog" aria-labelledby="arrival-title" ${arrivalOpen ? 'open' : ''}><div class="dialog-top"><div><span class="arrival-icon">?</span><h2 id="arrival-title">Have you and your party safely arrived?</h2></div><button type="button" aria-label="${t.close}" data-action="arrival-close">×</button></div><p>Synthetic assignment · ${assignmentState === 'RESERVED' ? 'reservation recorded' : assignmentState === 'ARRIVED' ? 'arrival recorded' : 'reservation pending'}</p>${arrivalSuccess ? '<div class="success-state">✓ Arrival recorded in this demo. No live capacity was changed.</div>' : `<div class="party-stepper"><button type="button" data-action="party-minus" aria-label="Decrease party size">−</button><strong>${partySize} ${partySize === 1 ? 'Person' : 'People'}</strong><button type="button" data-action="party-plus" aria-label="Increase party size">+</button></div><div class="arrival-actions"><button class="arrived-button" type="button" data-action="arrival-yes">YES, WE HAVE ARRIVED</button><button class="help-button" type="button" data-action="arrival-no">NO, NEED ASSISTANCE</button></div>`}</dialog>
-      <dialog class="arrival-dialog capability-dialog" aria-labelledby="assist-title" ${assistanceOpen ? 'open' : ''}><div class="dialog-top"><h2 id="assist-title">Need assistance?</h2><button type="button" aria-label="${t.close}" data-action="assist-close">×</button></div><p>No reservation or capacity event will be created. Use the device dialler for emergency help.</p><a class="call-button" href="tel:112">☎ CALL 112</a></dialog>
-      <dialog class="arrival-dialog capability-dialog" aria-labelledby="call-title" ${callOpen ? 'open' : ''}><div class="dialog-top"><h2 id="call-title">Call emergency services?</h2><button type="button" aria-label="${t.close}" data-action="call-close">×</button></div><p>Sthira will open your device dialler for 112. It will not place a silent call or claim dispatch.</p><div class="arrival-actions"><a class="call-button" data-action="call-confirm" href="tel:112">☎ CALL 112</a><button class="help-button" type="button" data-action="call-close">CANCEL</button></div></dialog>
-      <aside class="directions-sheet ${directionsOpen ? 'is-open' : ''}" ${directionsOpen ? '' : 'hidden'}><div class="dialog-top"><div><p class="overline">STORED SYNTHETIC ROUTE · DEMO VALUE</p><h2>Red-zone marker to Synthetic Ward 8 School</h2></div><button type="button" aria-label="${t.close}" data-action="directions-close">×</button></div><ol class="landmark-list"><li><b>1</b><span>Start at the synthetic citizen marker.<small>Use only the displayed demo route.</small></span></li><li><b>2</b><span>Follow the stored route line.<small>Do not treat map streets as emergency guidance.</small></span></li><li><b>3</b><span>Arrive at Synthetic Ward 8 School.<small>This is a fictional demo destination.</small></span></li></ol><div class="sheet-actions"><button type="button" data-action="offline-card">📥 Save Offline Route Card</button><button type="button" data-action="accessibility">♿ Accessibility Notes</button></div></aside>
-      <aside class="assist-sheet ${listenOpen ? 'is-open' : ''}" ${listenOpen ? '' : 'hidden'}><div class="dialog-top"><h2>Listen · local TTS</h2><button type="button" aria-label="${t.close}" data-action="listen-close">×</button></div><p>${language === 'HI' ? 'Hindi audio is not approved in this synthetic package. Use the visible text guidance.' : 'Play the current approved synthetic instruction. Text remains available at all times.'}</p><div class="audio-player"><button type="button" aria-label="Play approved instruction" ${language === 'HI' || ttsLoading ? 'disabled' : ''} data-action="audio-toggle">${ttsLoading ? '…' : '▶'}</button><span>${scenario.instruction[language === 'ML' ? 'ML' : 'EN']}</span><button type="button" aria-label="Repeat approved instruction" ${language === 'HI' || ttsLoading ? 'disabled' : ''} data-action="audio-repeat">↻</button></div></aside>
-      <aside class="assist-sheet isl-sheet ${islOpen ? 'is-open' : ''}" ${islOpen ? '' : 'hidden'}><div class="dialog-top"><h2>ISL guidance preview</h2><button type="button" aria-label="${t.close}" data-action="isl-close">×</button></div><div class="isl-video">ISL MEDIA PENDING APPROVAL<br /><small>Approved media and Deaf/ISL review are required.</small></div><p>Caption: Text instructions remain available as the accessible fallback.</p></aside>
-      ${layersOpen ? '<aside class="layers-panel"><strong>Map layers</strong><label><input type="checkbox" data-layer="hazard" checked /> Synthetic Red Zone</label><label><input type="checkbox" data-layer="route" checked /> Stored Demo Route</label><label><input type="checkbox" data-layer="shelters" checked /> Synthetic Safe Zones</label></aside>' : ''}
     </div>`;
-  bindInteractions();
-  initMap();
+  hasRendered = true;
+  bindInteractions(); initMap();
+  requestAnimationFrame(() => { const thread = document.querySelector<HTMLElement>('.chat-thread'); if (thread) thread.scrollTop = thread.scrollHeight; });
 }
 
+function mapColor(token: string) { return getComputedStyle(document.documentElement).getPropertyValue(token).trim(); }
 function initMap() {
-  const container = document.querySelector<HTMLElement>('#map-canvas');
-  if (!container) return;
-  map = new Map({
-    container,
-    center: mapView.center,
-    zoom: mapView.zoom,
-    bearing: mapView.bearing,
-    pitch: mapView.pitch,
-    attributionControl: { compact: false },
-    style: {
-      version: 8,
-      sources: {
-        satellite: {
-          type: 'raster',
-          tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-          tileSize: 256,
-          attribution: '© Esri, Maxar, Earthstar Geographics, and the GIS User Community',
-        },
-      },
-      layers: [{ id: 'satellite-imagery', type: 'raster', source: 'satellite' }],
-    },
-  });
+  const container = document.querySelector<HTMLElement>('#map-canvas'); if (!container) return;
+  const t = words[language];
+  map = new Map({ container, center: [76.112, 11.562], zoom: 13.4, attributionControl: false, style: { version: 8, sources: {
+    basemap: { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, attribution: 'Imagery © Esri' },
+    hazard: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: mapData.hazard }, properties: { label: t.hazardLabel, detail: t.hazardDetail } } },
+    relocation: { type: 'geojson', data: { type: 'FeatureCollection', features: [
+      { type: 'Feature', geometry: { type: 'Polygon', coordinates: mapData.relocationZones[0] }, properties: { label: t.relocation1Label, detail: t.relocation1Detail } },
+      { type: 'Feature', geometry: { type: 'Polygon', coordinates: mapData.relocationZones[1] }, properties: { label: t.relocation2Label, detail: t.relocation2Detail } },
+    ] } },
+    route: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: mapData.route }, properties: {} } },
+    roads: { type: 'geojson', data: { type: 'FeatureCollection', features: mapData.roads.map((coordinates) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates }, properties: {} })) } },
+    places: { type: 'geojson', data: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: mapData.user }, properties: { label: t.userMapLabel, kind: 'user' } }, { type: 'Feature', geometry: { type: 'Point', coordinates: mapData.shelter }, properties: { label: t.shelterMapLabel, kind: 'shelter' } }] } },
+  }, layers: [
+    { id: 'background', type: 'background', paint: { 'background-color': mapColor('--map-color-surface') } },
+    { id: 'basemap', type: 'raster', source: 'basemap', paint: { 'raster-opacity': 0.92, 'raster-saturation': -0.12, 'raster-contrast': 0.14, 'raster-brightness-max': 0.82 } },
+    { id: 'roads', type: 'line', source: 'roads', paint: { 'line-color': mapColor('--map-color-paper'), 'line-width': 1.5, 'line-opacity': 0.32 } },
+    { id: 'hazard-band', type: 'line', source: 'hazard', layout: { visibility: redZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-danger'), 'line-width': 16, 'line-blur': 5, 'line-opacity': 0, 'line-opacity-transition': { duration: motionDuration() } } },
+    { id: 'hazard-fill', type: 'fill', source: 'hazard', layout: { visibility: redZonesVisible ? 'visible' : 'none' }, paint: { 'fill-color': mapColor('--map-color-danger'), 'fill-opacity': 0, 'fill-opacity-transition': { duration: motionDuration() } } },
+    { id: 'hazard-edge', type: 'line', source: 'hazard', layout: { visibility: redZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-danger'), 'line-width': 2.5, 'line-opacity': 0, 'line-opacity-transition': { duration: motionDuration() } } },
+    { id: 'relocation-band', type: 'line', source: 'relocation', layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-success'), 'line-width': 16, 'line-blur': 5, 'line-opacity': 0, 'line-opacity-transition': { duration: motionDuration() } } },
+    { id: 'relocation-fill', type: 'fill', source: 'relocation', layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'fill-color': mapColor('--map-color-success'), 'fill-opacity': 0, 'fill-opacity-transition': { duration: motionDuration() } } },
+    { id: 'relocation-edge', type: 'line', source: 'relocation', layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-success'), 'line-width': 2.5, 'line-opacity': 0, 'line-opacity-transition': { duration: motionDuration() } } },
+    { id: 'route-casing', type: 'line', source: 'route', paint: { 'line-color': mapColor('--map-color-paper'), 'line-width': 9, 'line-opacity': 0.9 } },
+    { id: 'approved-route', type: 'line', source: 'route', paint: { 'line-color': mapColor('--map-color-accent'), 'line-width': 5, 'line-opacity': 0.98 } },
+    { id: 'route-motion', type: 'line', source: 'route', paint: { 'line-color': mapColor('--map-color-paper'), 'line-width': 2, 'line-opacity': routeStarted ? 0.9 : 0, 'line-dasharray': [0.2, 2.4, 1.6] } },
+    { id: 'shelter-pulse', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'shelter'], paint: { 'circle-radius': 15, 'circle-color': mapColor('--map-color-success'), 'circle-opacity': 0.24 } },
+    { id: 'place-points', type: 'circle', source: 'places', paint: { 'circle-radius': 8, 'circle-color': mapColor('--map-color-accent'), 'circle-stroke-color': mapColor('--map-color-paper'), 'circle-stroke-width': 3 } },
+    { id: 'place-labels', type: 'symbol', source: 'places', layout: { 'text-field': ['get', 'label'], 'text-size': 13, 'text-offset': [0, 1.5], 'text-anchor': 'top' }, paint: { 'text-color': mapColor('--map-color-paper'), 'text-halo-color': mapColor('--map-color-surface'), 'text-halo-width': 2 } },
+  ] } });
   map.once('load', () => {
-    if (!map) return;
-    map.addSource('red-zones', { type: 'geojson', data: { type: 'FeatureCollection', features: scenario.red_zones.map((item) => ({ type: 'Feature', id: item.id, properties: { id: item.id }, geometry: item.geometry })) } as never });
-    map.addSource('safe-zones', { type: 'geojson', data: { type: 'FeatureCollection', features: scenario.safe_zones.map((item) => ({ type: 'Feature', id: item.id, properties: { id: item.id, assigned: item.assigned }, geometry: item.geometry })) } as never });
-    map.addSource('routes', { type: 'geojson', data: { type: 'FeatureCollection', features: scenario.routes.map((item) => ({ type: 'Feature', id: item.id, properties: { id: item.id }, geometry: item.geometry })) } as never });
-    map.addSource('my-location', { type: 'geojson', data: { type: 'Feature', id: scenario.citizen_location.id, properties: {}, geometry: scenario.citizen_location.geometry } as never });
-    map.addLayer({ id: 'red-zones-fill', type: 'fill', source: 'red-zones', paint: { 'fill-color': '#dc2626', 'fill-opacity': 0.32 } });
-    map.addLayer({ id: 'red-zones-border', type: 'line', source: 'red-zones', paint: { 'line-color': '#fecaca', 'line-width': 3 } });
-    map.addLayer({ id: 'safe-zones', type: 'circle', source: 'safe-zones', paint: { 'circle-color': ['case', ['get', 'assigned'], '#34d399', '#93c5fd'], 'circle-radius': 9, 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 } });
-    map.addLayer({ id: 'routes', type: 'line', source: 'routes', paint: { 'line-color': '#fbbf24', 'line-width': 5, 'line-opacity': 0.95 } });
-    map.addLayer({ id: 'my-location', type: 'circle', source: 'my-location', paint: { 'circle-color': '#2563eb', 'circle-radius': 8, 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 3 } });
-    map.resize();
+    map?.resize();
+    if (routeStarted) focusRoute();
+    revealMapLayers();
+    applyPendingMapAction();
+    startMapAnimation();
+    map?.on('mouseenter', 'place-points', () => { if (map) map.getCanvas().style.cursor = 'pointer'; });
+    map?.on('mouseleave', 'place-points', () => { if (map) map.getCanvas().style.cursor = ''; });
+    ([['hazard-fill', 0.34, 0.44], ['relocation-fill', 0.26, 0.36]] as const).forEach(([layer, restingOpacity, hoverOpacity]) => {
+      map?.on('mouseenter', layer, () => {
+        if (!map) return;
+        map.getCanvas().style.cursor = 'pointer';
+        map.setPaintProperty(layer, 'fill-opacity', hoverOpacity);
+        map.setPaintProperty(layer.replace('fill', 'edge'), 'line-width', 3.5);
+      });
+      map?.on('mouseleave', layer, () => {
+        if (!map) return;
+        map.getCanvas().style.cursor = '';
+        map.setPaintProperty(layer, 'fill-opacity', restingOpacity);
+        map.setPaintProperty(layer.replace('fill', 'edge'), 'line-width', 2.5);
+      });
+    });
+    map?.on('click', 'place-points', (event) => {
+      const feature = event.features?.[0];
+      const coordinates = feature?.geometry.type === 'Point' ? feature.geometry.coordinates as [number, number] : null;
+      if (!map || !coordinates) return;
+      new Popup({ offset: 14, closeButton: false }).setLngLat(coordinates).setText(String(feature?.properties?.label || t.mapLocation)).addTo(map);
+    });
+    ['hazard-fill', 'relocation-fill'].forEach((layer) => map?.on('click', layer, (event) => {
+      const feature = event.features?.[0];
+      const center = event.lngLat;
+      if (!map || !feature) return;
+      new Popup({ offset: 8 }).setLngLat(center).setHTML(`<strong>${escapeHtml(String(feature.properties?.label || t.exerciseZone))}</strong><p>${escapeHtml(String(feature.properties?.detail || t.overlayDetail))}</p>`).addTo(map);
+    }));
   });
-  map.on('error', () => showToast('Satellite imagery unavailable. Synthetic overlays and text guidance remain available.'));
-  const observer = new ResizeObserver(() => map?.resize());
-  observer.observe(container);
+}
+
+function motionDuration() { return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 900; }
+function focusRoute() { map?.fitBounds(mapData.routeBounds as [[number, number], [number, number]], { padding: 90, duration: motionDuration() }); }
+function revealMapLayers() {
+  if (!map) return;
+  const show = () => {
+    if (redZonesVisible) { map?.setPaintProperty('hazard-band', 'line-opacity', 0.2); map?.setPaintProperty('hazard-fill', 'fill-opacity', 0.34); map?.setPaintProperty('hazard-edge', 'line-opacity', 0.92); }
+    if (relocationZonesVisible) { map?.setPaintProperty('relocation-band', 'line-opacity', 0.2); map?.setPaintProperty('relocation-fill', 'fill-opacity', 0.26); map?.setPaintProperty('relocation-edge', 'line-opacity', 0.92); }
+  };
+  if (motionDuration() === 0) show(); else requestAnimationFrame(show);
+}
+function startMapAnimation() {
+  if (!map || !routeStarted || motionDuration() === 0) return;
+  const dashFrames = [[0.2, 2.4, 1.6], [0.7, 2.4, 1.1], [1.2, 2.4, 0.6], [1.7, 2.4, 0.1]];
+  let frame = 0;
+  const animate = () => {
+    if (!map || !map.isStyleLoaded()) return;
+    map.setPaintProperty('route-motion', 'line-dasharray', dashFrames[Math.floor(frame / 12) % dashFrames.length]);
+    frame += 1;
+    mapAnimationFrame = requestAnimationFrame(animate);
+  };
+  mapAnimationFrame = requestAnimationFrame(animate);
+}
+function speakText(text: string) { if (!('speechSynthesis' in window)) return; window.speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = language === 'ML' ? 'ml-IN' : language === 'HI' ? 'hi-IN' : 'en-IN'; window.speechSynthesis.speak(u); }
+function speakInstruction() { speakText(words[language].summary); }
+
+function speechLanguage() { return language === 'ML' ? 'ml-IN' : language === 'HI' ? 'hi-IN' : 'en-IN'; }
+
+async function blobToBase64(blob: Blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+async function transcribeLocally(blob: Blob, durationSeconds: number) {
+  voiceFeedbackKey = 'transcribing'; render();
+  try {
+    const response = await fetch('/api/v2/voice/transcriptions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        audio_base64: await blobToBase64(blob),
+        language: speechLanguage(),
+        duration_seconds: Math.min(30, Math.max(0.1, durationSeconds)),
+        media_type: blob.type.split(';')[0] || 'audio/webm',
+      }),
+    });
+    if (!response.ok) throw new Error(`Transcription service returned ${response.status}`);
+    const result = await response.json() as { data?: { text?: string } };
+    const transcript = result.data?.text?.trim();
+    if (!transcript) throw new Error('Transcription was empty');
+    voiceTranscript = transcript;
+    await sendChat(transcript, true);
+  } catch {
+    voiceListening = false;
+    voiceFeedbackKey = 'recognitionUnavailable';
+    render();
+  }
+}
+
+async function toggleLocalRecording() {
+  if (voiceListening && mediaRecorder) {
+    mediaRecorder.stop();
+    return;
+  }
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+    const chunks: Blob[] = [];
+    mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
+    mediaRecorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+    mediaRecorder.onstop = () => {
+      const duration = (Date.now() - recordingStartedAt) / 1000;
+      const recording = new Blob(chunks, { type: mimeType });
+      mediaStream?.getTracks().forEach((track) => track.stop());
+      mediaStream = null; mediaRecorder = null; voiceListening = false;
+      void transcribeLocally(recording, duration);
+    };
+    recordingStartedAt = Date.now();
+    voiceListening = true; voiceFeedbackKey = 'recording'; render();
+    mediaRecorder.start();
+    window.setTimeout(() => { if (mediaRecorder?.state === 'recording') mediaRecorder.stop(); }, 30_000);
+  } catch {
+    voiceListening = false; voiceFeedbackKey = 'micStopped'; render();
+  }
+}
+
+function applyChatAction(action: MapAction) {
+  pendingMapAction = action;
+  if (action === 'SHOW_HAZARD') redZonesVisible = true;
+  if (action === 'SHOW_ROUTE' || action === 'OPEN_DIRECTIONS') routeStarted = true;
+  if (action === 'OPEN_DIRECTIONS') directionsOpen = true;
+  if (action === 'OPEN_RESCUE') assistanceOpen = true;
+  if (action === 'CONFIRM_ARRIVAL') { arrivalSuccess = false; arrivalOpen = true; }
+}
+
+function applyPendingMapAction() {
+  const action = pendingMapAction;
+  pendingMapAction = 'NONE';
+  if (action === 'FOCUS_SHELTER') map?.easeTo({ center: mapData.shelter as [number, number], zoom: 15, duration: motionDuration() });
+  if (action === 'SHOW_ROUTE' || action === 'OPEN_DIRECTIONS') focusRoute();
+  if (action === 'SHOW_HAZARD') map?.fitBounds(mapData.hazardBounds as [[number, number], [number, number]], { padding: 80, duration: motionDuration() });
+  if (pendingZoneFocus === 'RED') map?.fitBounds(mapData.hazardBounds as [[number, number], [number, number]], { padding: 70, duration: motionDuration() });
+  if (pendingZoneFocus === 'RELOCATION') map?.fitBounds(mapData.relocationBounds as [[number, number], [number, number]], { padding: 70, duration: motionDuration() });
+  pendingZoneFocus = null;
+}
+
+async function sendChat(raw: string, readReply = false) {
+  const text = raw.trim();
+  voiceTranscript = text;
+  if (!text || chatPending) { if (!text) voiceFeedbackKey = 'askFirst'; render(); return; }
+  chatMessages.push({ role: 'USER', text });
+  chatPending = true; chatError = ''; voiceFeedbackKey = 'checkingBackend'; render();
+  try {
+    const response = await fetch('/api/v2/guidance/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session_id: chatSessionId, language, messages: chatMessages.slice(-20) }) });
+    if (!response.ok) throw new Error(`Guidance service returned ${response.status}`);
+    const result = await response.json() as ChatResponse;
+    chatMessages.push({ role: 'ASSISTANT', text: result.reply });
+    chatSuggestions = result.suggestions;
+    voiceFeedbackKey = 'responseReady';
+    applyChatAction(result.map_action);
+    chatPending = false; render();
+    if (readReply) speakText(result.reply);
+  } catch {
+    chatPending = false;
+    chatError = words[language].assistantUnavailable;
+    voiceFeedbackKey = 'backendUnavailable';
+    render();
+  }
+}
+
+function toggleListening() {
+  if (language === 'EN' || !localAsrReady) { voiceFeedbackKey = 'recognitionUnavailable'; render(); return; }
+  void toggleLocalRecording();
 }
 
 function bindInteractions() {
-  document.querySelectorAll<HTMLButtonElement>('[data-language]').forEach((button) => button.addEventListener('click', () => { language = button.dataset.language as Language; render(); }));
-  document.querySelector<HTMLButtonElement>('[data-action="drawer"]')?.addEventListener('click', () => { drawerExpanded = !drawerExpanded; render(); });
-  document.querySelectorAll<HTMLButtonElement>('[data-action="voice"]').forEach((button) => button.addEventListener('click', () => { voiceOpen = true; render(); document.querySelector<HTMLButtonElement>('[data-action="voice-listen"]')?.focus(); }));
-  document.querySelector<HTMLButtonElement>('[data-action="voice-close"]')?.addEventListener('click', () => { stopVoiceCapture(); voiceOpen = false; render(); });
-  document.querySelector<HTMLButtonElement>('[data-action="voice-listen"]')?.addEventListener('click', () => { if (voiceListening) stopVoiceCapture(); else void startVoiceCapture(); });
-  document.querySelector<HTMLInputElement>('[data-action="developer-transcript"]')?.addEventListener('input', (event) => { developerTranscript = (event.currentTarget as HTMLInputElement).value; });
-  document.querySelector<HTMLButtonElement>('[data-action="developer-transcript-run"]')?.addEventListener('click', () => {
-    const transcript = developerTranscript.trim();
-    if (!transcript) { voiceTranscript = 'Enter a short approved map command first.'; render(); return; }
-    voiceTranscript = transcript;
-    void executeTranscriptMapAction(transcript, 1);
+  document.querySelectorAll<HTMLButtonElement>('[data-language]').forEach((b) => b.addEventListener('click', () => {
+    const nextLanguage = b.dataset.language as Language;
+    if (chatMessages.length === 1 && chatMessages[0].role === 'ASSISTANT') chatMessages = [{ role: 'ASSISTANT', text: words[nextLanguage].welcome }];
+    language = nextLanguage;
+    chatSuggestions = [...words[language].suggestions];
+    chatError = '';
+    voiceFeedbackKey = 'micPrivacy';
     render();
+  }));
+  document.querySelectorAll<HTMLButtonElement>('[data-action="voice-open"]').forEach((b) => b.addEventListener('click', () => { voiceOpen = true; render(); document.querySelector<HTMLInputElement>('#command-input')?.focus(); }));
+  document.querySelector<HTMLButtonElement>('[data-action="voice-close"]')?.addEventListener('click', () => {
+    if (mediaRecorder?.state === 'recording') mediaRecorder.stop();
+    voiceListening = false; voiceOpen = false; render();
   });
-  document.querySelector<HTMLButtonElement>('[data-action="route"]')?.addEventListener('click', () => { routeStarted = true; void reserveDemoAssignment(); render(); window.setTimeout(() => { arrivalOpen = true; render(); }, 700); });
+  document.querySelector<HTMLButtonElement>('[data-action="voice-listen"]')?.addEventListener('click', toggleListening);
+  document.querySelectorAll<HTMLButtonElement>('[data-command]').forEach((b) => b.addEventListener('click', () => void sendChat(b.dataset.command || '')));
+  document.querySelectorAll<HTMLButtonElement>('[data-speak-message]').forEach((b) => b.addEventListener('click', () => { const message = chatMessages[Number(b.dataset.speakMessage)]; if (message) speakText(message.text); }));
+  document.querySelector<HTMLFormElement>('[data-command-form]')?.addEventListener('submit', (e) => { e.preventDefault(); void sendChat(String(new FormData(e.currentTarget as HTMLFormElement).get('command') || '')); });
+  document.querySelector<HTMLButtonElement>('[data-action="route"]')?.addEventListener('click', () => { routeStarted = true; directionsOpen = true; render(); focusRoute(); });
+  document.querySelector<HTMLButtonElement>('[data-action="map-route"]')?.addEventListener('click', focusRoute);
+  document.querySelector<HTMLButtonElement>('[data-action="recenter"]')?.addEventListener('click', () => map?.easeTo({ center: mapData.user as [number, number], zoom: 15, duration: motionDuration() }));
+  document.querySelector<HTMLButtonElement>('[data-action="toggle-red-zones"]')?.addEventListener('click', () => { redZonesVisible = !redZonesVisible; pendingZoneFocus = redZonesVisible ? 'RED' : null; render(); });
+  document.querySelector<HTMLButtonElement>('[data-action="toggle-relocation-zones"]')?.addEventListener('click', () => { relocationZonesVisible = !relocationZonesVisible; pendingZoneFocus = relocationZonesVisible ? 'RELOCATION' : null; render(); });
+  document.querySelectorAll<HTMLButtonElement>('[data-action="directions"]').forEach((b) => b.addEventListener('click', () => { directionsOpen = true; render(); }));
+  document.querySelector<HTMLButtonElement>('[data-action="directions-close"]')?.addEventListener('click', () => { directionsOpen = false; render(); });
+  document.querySelector<HTMLButtonElement>('[data-action="listen"]')?.addEventListener('click', speakInstruction);
+  document.querySelector<HTMLButtonElement>('[data-action="details"]')?.addEventListener('click', () => { detailsOpen = true; render(); });
+  document.querySelector<HTMLButtonElement>('[data-action="details-close"]')?.addEventListener('click', () => { detailsOpen = false; render(); });
   document.querySelector<HTMLButtonElement>('[data-action="arrival-open"]')?.addEventListener('click', () => { arrivalSuccess = false; arrivalOpen = true; render(); });
+  document.querySelector<HTMLButtonElement>('[data-action="arrival-close"]')?.addEventListener('click', () => { arrivalOpen = false; render(); });
   document.querySelector<HTMLButtonElement>('[data-action="party-minus"]')?.addEventListener('click', () => { partySize = Math.max(1, partySize - 1); render(); });
   document.querySelector<HTMLButtonElement>('[data-action="party-plus"]')?.addEventListener('click', () => { partySize = Math.min(10, partySize + 1); render(); });
-  document.querySelector<HTMLButtonElement>('[data-action="arrival-close"]')?.addEventListener('click', () => { arrivalOpen = false; render(); });
+  document.querySelector<HTMLButtonElement>('[data-action="arrival-yes"]')?.addEventListener('click', () => { arrivalSuccess = true; render(); });
+  document.querySelector<HTMLButtonElement>('[data-action="arrival-no"]')?.addEventListener('click', () => { arrivalOpen = false; assistanceOpen = true; render(); });
   document.querySelector<HTMLButtonElement>('[data-action="assist-close"]')?.addEventListener('click', () => { assistanceOpen = false; render(); });
-  document.querySelectorAll<HTMLAnchorElement>('a[href="tel:112"]:not([data-action="call-confirm"])').forEach((button) => button.addEventListener('click', (event) => { event.preventDefault(); callOpen = true; render(); }));
-  document.querySelectorAll<HTMLButtonElement>('[data-action="call-close"]').forEach((button) => button.addEventListener('click', () => { callOpen = false; render(); }));
-  document.querySelector<HTMLButtonElement>('[data-action="directions"]')?.addEventListener('click', () => { drawerExpanded = true; render(); showToast('Step-by-step directions are shown in the text-first drawer.'); });
-  document.querySelector<HTMLButtonElement>('[data-action="directions"]')?.addEventListener('click', () => { directionsOpen = true; render(); });
-  document.querySelector<HTMLButtonElement>('[data-action="directions-close"]')?.addEventListener('click', () => { directionsOpen = false; render(); });
-  document.querySelectorAll<HTMLButtonElement>('[data-action="details"]').forEach((button) => button.addEventListener('click', () => { detailsOpen = true; render(); }));
-  document.querySelectorAll<HTMLButtonElement>('[data-action="details-close"]').forEach((button) => button.addEventListener('click', () => { detailsOpen = false; render(); }));
-  document.querySelector<HTMLButtonElement>('[data-action="listen"]')?.addEventListener('click', () => { listenOpen = true; render(); });
-  document.querySelector<HTMLButtonElement>('[data-action="listen-close"]')?.addEventListener('click', () => { listenOpen = false; render(); });
-  document.querySelectorAll<HTMLButtonElement>('[data-action="audio-toggle"], [data-action="audio-repeat"]').forEach((button) => button.addEventListener('click', () => void playApprovedInstruction()));
-  document.querySelector<HTMLButtonElement>('[data-action="isl"]')?.addEventListener('click', () => { islOpen = true; render(); });
-  document.querySelector<HTMLButtonElement>('[data-action="isl-close"]')?.addEventListener('click', () => { islOpen = false; render(); });
-  document.querySelector<HTMLButtonElement>('[data-action="offline-card"]')?.addEventListener('click', () => showToast('Offline route card preview saved locally in this demo.'));
-  document.querySelector<HTMLButtonElement>('[data-action="accessibility"]')?.addEventListener('click', () => showToast('North Gate has a wheelchair ramp in this synthetic package.'));
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const runMap = (actions: MapAction[]) => {
-    showToast('Interpreting request…');
-    window.setTimeout(() => {
-      const ok = map ? executeMapActions(map, { schema_version: '1.0', status: 'OK', actions }, reducedMotion, (panel: Panel) => { if (panel === 'EMERGENCY_CALL_CONFIRMATION') { callOpen = true; render(); } else showToast(`${panel.replaceAll('_', ' ')} opened.`); }) : false;
-      showToast(ok ? 'Map updated from the synthetic scenario.' : 'Request rejected; no map action was taken.');
-    }, reducedMotion ? 0 : 120);
-  };
-  document.querySelector<HTMLButtonElement>('[data-action="route"]')?.addEventListener('click', () => runMap([{ type: 'SET_LAYER_VISIBILITY', layer: 'ROUTES', visible: true }, { type: 'FIT_FEATURES', target_ids: ['SZ-DEMO-01', 'ROUTE-DEMO-01'] }, { type: 'OPEN_PANEL', panel: 'ROUTE_GUIDANCE', target_id: 'ROUTE-DEMO-01' }]));
-  document.querySelector<HTMLButtonElement>('[data-action="recenter"]')?.addEventListener('click', () => runMap([{ type: 'RECENTER', view_id: 'DEMO_OVERVIEW' }]));
-  document.querySelector<HTMLButtonElement>('[data-action="pitch"]')?.addEventListener('click', () => { pitched = !pitched; map?.easeTo({ pitch: pitched ? 45 : 0, duration: 600 }); render(); });
-  document.querySelector<HTMLButtonElement>('[data-action="layers"]')?.addEventListener('click', () => { layersOpen = !layersOpen; render(); });
-  document.querySelectorAll<HTMLInputElement>('[data-layer]').forEach((input) => input.addEventListener('change', () => { const layer = input.dataset.layer; if (layer === 'hazard') showHazard = input.checked; if (layer === 'route') showRoute = input.checked; if (layer === 'shelters') showShelters = input.checked; const mapLayer = layer === 'hazard' ? 'red-zones-fill' : layer === 'route' ? 'routes' : 'safe-zones'; if (map?.getLayer(mapLayer)) map.setLayoutProperty(mapLayer, 'visibility', input.checked ? 'visible' : 'none'); }));
-  document.querySelectorAll<HTMLButtonElement>('[data-action^="voice-"]').forEach((button) => button.addEventListener('click', () => { const action = button.dataset.action; if (action === 'voice-safe') runMap([{ type: 'SET_LAYER_VISIBILITY', layer: 'SAFE_ZONES', visible: true }, { type: 'FOCUS_FEATURE', target_id: 'SZ-DEMO-01' }, { type: 'OPEN_PANEL', panel: 'SAFE_ZONE_DETAILS', target_id: 'SZ-DEMO-01' }]); if (action === 'voice-alert') runMap([{ type: 'SET_LAYER_VISIBILITY', layer: 'RED_ZONES', visible: true }, { type: 'FOCUS_FEATURE', target_id: 'RZ-DEMO-01' }, { type: 'OPEN_PANEL', panel: 'ALERT_DETAILS', target_id: 'RZ-DEMO-01' }]); if (action === 'voice-route') runMap([{ type: 'SET_LAYER_VISIBILITY', layer: 'ROUTES', visible: true }, { type: 'FIT_FEATURES', target_ids: ['SZ-DEMO-01', 'ROUTE-DEMO-01'] }, { type: 'OPEN_PANEL', panel: 'ROUTE_GUIDANCE', target_id: 'ROUTE-DEMO-01' }]); if (action === 'voice-recenter') runMap([{ type: 'RECENTER', view_id: 'DEMO_OVERVIEW' }]); if (action === 'voice-repeat') showToast(scenario.instruction[language === 'ML' ? 'ML' : 'EN']); }));
-  document.querySelectorAll<HTMLButtonElement>('[data-action="zoom-in"], [data-action="zoom-out"]').forEach((button) => button.addEventListener('click', () => runMap([{ type: 'ZOOM', direction: button.dataset.action === 'zoom-in' ? 'IN' : 'OUT', steps: 1 }])));
-  document.querySelector<HTMLButtonElement>('[data-action="arrival-close"]')?.addEventListener('click', () => { arrivalOpen = false; render(); });
-  document.querySelector<HTMLButtonElement>('[data-action="arrival-no"]')?.addEventListener('click', () => { arrivalOpen = false; void confirmDemoArrival('NO'); render(); });
-  document.querySelector<HTMLButtonElement>('[data-action="arrival-yes"]')?.addEventListener('click', () => { arrivalSuccess = true; arrivalOpen = false; void confirmDemoArrival('YES'); render(); });
+  document.querySelectorAll<HTMLAnchorElement>('a[href="tel:112"]').forEach((a) => a.addEventListener('click', (e) => { if (!assistanceOpen) { e.preventDefault(); assistanceOpen = true; render(); } }));
 }
 
-async function startVoiceCapture(): Promise<void> {
-  if (language === 'EN') {
-    voiceTranscript = 'Local speech recognition supports Hindi and Malayalam. Use the Demo transcript field or touch controls in English.';
-    voiceStatus = 'English speech input is unavailable with this downloaded model.';
-    render();
-    return;
-  }
+async function checkRuntime() {
+  if (!navigator.onLine) return;
   try {
-    voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mimeType = MediaRecorder.isTypeSupported('audio/ogg;codecs=opus') ? 'audio/ogg;codecs=opus' : 'audio/webm';
-    const chunks: Blob[] = [];
-    const startedAt = performance.now();
-    voiceRecorder = new MediaRecorder(voiceStream, { mimeType });
-    voiceRecorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
-    voiceRecorder.onstop = () => void submitVoiceCapture(new Blob(chunks, { type: mimeType }), (performance.now() - startedAt) / 1000);
-    voiceRecorder.start(); voiceListening = true; voiceTranscript = ''; voiceReply = ''; voiceStatus = 'Listening — tap Stop Listening when you finish speaking.'; render();
-  } catch {
-    voiceTranscript = 'Microphone permission was not granted. Use touch controls instead.'; voiceStatus = 'Microphone unavailable.'; voiceListening = false; render();
-  }
-}
-
-function stopVoiceCapture(): void {
-  voiceRecorder?.stop(); voiceStream?.getTracks().forEach((track) => track.stop());
-  voiceRecorder = null; voiceStream = null; voiceListening = false; voiceStatus = 'Understanding your request…'; render();
-}
-
-async function submitVoiceCapture(blob: Blob, durationSeconds: number): Promise<void> {
-  try {
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    let encoded = ''; for (const byte of bytes) encoded += String.fromCharCode(byte);
-    const response = await fetch(`${API_BASE}/api/v2/voice/transcriptions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ audio_base64: btoa(encoded), language: language === 'ML' ? 'ml-IN' : language === 'HI' ? 'hi-IN' : 'en-IN', duration_seconds: Math.min(30, Math.max(.1, durationSeconds)), media_type: blob.type.startsWith('audio/ogg') ? 'audio/ogg' : 'audio/webm' }) });
-    const body = await response.json() as { data?: { text?: string; confidence?: number } };
-    voiceTranscript = response.ok && body.data?.text ? body.data.text : 'Voice command could not be understood. Use touch controls instead.';
-    voiceStatus = response.ok && body.data?.text ? 'Command understood. Updating the map…' : 'I could not understand that command.';
-    if (response.ok && body.data?.text) void executeTranscriptMapAction(body.data.text, body.data.confidence ?? 0);
-  } catch { voiceTranscript = 'Voice command unavailable. Use touch controls instead.'; voiceStatus = 'Voice input is unavailable.'; }
+    const [statusResponse, readinessResponse, voiceResponse] = await Promise.all([fetch('/api/v2/status'), fetch('/api/v2/health/readiness'), fetch('/api/v2/voice/status')]);
+    const statusData = await statusResponse.json();
+    const voiceData = await voiceResponse.json() as VoiceStatus;
+    localAsrReady = Boolean(voiceData.data?.ready);
+    runtime = readinessResponse.ok ? 'demo' : 'blocked'; runtimeDetail = statusData?.source_status === 'NO_LIVE_GOVERNMENT_SOURCE_CONFIGURED' ? 'blocked' : 'responding';
+  } catch { runtime = 'demo'; runtimeDetail = 'disconnected'; }
   render();
 }
 
-async function executeTranscriptMapAction(transcript: string, confidence: number): Promise<void> {
-  if (!map) return;
-  try {
-    showToast('Interpreting request…');
-    const response = await fetch(`${API_BASE}/api/v2/voice/commands`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transcript, language: language === 'ML' ? 'ml-IN' : language === 'HI' ? 'hi-IN' : 'en-IN', confidence }),
-    });
-    const body = await response.json() as { data?: { screen_response?: unknown; spoken_response?: unknown; language?: unknown } };
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const moved = response.ok && executeMapActions(map, body.data, reducedMotion, (panel: Panel) => {
-      if (panel === 'EMERGENCY_CALL_CONFIRMATION') { callOpen = true; render(); }
-      else showToast(`${panel.replaceAll('_', ' ')} opened.`);
-    }, (newLanguage) => {
-      language = newLanguage === 'ml-IN' ? 'ML' : newLanguage === 'hi-IN' ? 'HI' : 'EN';
-    });
-    if (!moved) { voiceTranscript = 'Command was rejected. Use touch controls instead.'; voiceStatus = 'No map action was taken.'; }
-    const screenResponse = typeof body.data?.screen_response === 'string' ? body.data.screen_response : null;
-    const spokenResponse = typeof body.data?.spoken_response === 'string' ? body.data.spoken_response : null;
-    const responseLanguage = body.data?.language === 'ml-IN' || body.data?.language === 'hi-IN' ? body.data.language : 'en-IN';
-    if (moved && screenResponse) showToast(screenResponse);
-    if (moved && spokenResponse) { voiceReply = spokenResponse; voiceStatus = 'Replying in your selected language…'; void playVoiceResponse(spokenResponse, responseLanguage); }
-  } catch {
-    voiceTranscript = 'Voice map control is unavailable. Use touch controls instead.'; voiceStatus = 'Voice map control is unavailable.';
-  }
-  render();
-}
-
-async function playApprovedInstruction(): Promise<void> {
-  if (language === 'HI') return;
-  const key = language === 'ML' ? 'ML' : 'EN';
-  await playVoiceResponse(scenario.instruction[key], language === 'ML' ? 'ml-IN' : 'en-IN');
-}
-
-async function playVoiceResponse(text: string, responseLanguage: 'en-IN' | 'hi-IN' | 'ml-IN'): Promise<void> {
-  if (ttsLoading) return;
-  ttsLoading = true; render();
-  try {
-    const response = await fetch(`${API_BASE}/api/v2/voice/speech`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, language: responseLanguage, idempotency_key: crypto.randomUUID() }) });
-    if (!response.ok) throw new Error('speech synthesis unavailable');
-    ttsAudio?.pause();
-    ttsAudio = new Audio(URL.createObjectURL(await response.blob()));
-    await ttsAudio.play();
-  } catch {
-    voiceStatus = 'Text response is ready; voice playback is unavailable.'; showToast('Approved audio is unavailable. Use the visible text response.');
-  } finally {
-    ttsLoading = false; if (voiceReply) voiceStatus = 'Response complete. Ask another short map command.'; render();
-  }
-}
-
-function showToast(message: string) {
-  const toast = document.querySelector<HTMLDivElement>('.toast');
-  if (!toast) return;
-  toast.textContent = message; toast.hidden = false; window.setTimeout(() => { toast.hidden = true; }, 3600);
-}
-
-function escapeHtml(value: string): string {
-  const entities: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' };
-  return value.replace(/[&<>'"]/g, (character) => entities[character] ?? character);
-}
-
-render();
-window.addEventListener('online', () => { isOffline = false; render(); });
-window.addEventListener('offline', () => { isOffline = true; render(); });
-void loadScenario();
-if ('serviceWorker' in navigator) {
-  const serviceWorkerPath = window.location.pathname.startsWith('/v2') ? '/v2/sw.js' : '/sw.js';
-  void navigator.serviceWorker.register(serviceWorkerPath, { scope: window.location.pathname.startsWith('/v2') ? '/v2/' : '/' });
-}
+render(); void checkRuntime();
+window.addEventListener('online', () => { runtime = 'checking'; void checkRuntime(); });
+window.addEventListener('offline', () => { runtime = 'offline'; render(); });

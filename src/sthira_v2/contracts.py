@@ -412,6 +412,41 @@ class CitizenSession(ContractModel):
         return self
 
 
+class MapAction(StrEnum):
+    NONE = "NONE"
+    FOCUS_SHELTER = "FOCUS_SHELTER"
+    SHOW_ROUTE = "SHOW_ROUTE"
+    SHOW_HAZARD = "SHOW_HAZARD"
+    OPEN_DIRECTIONS = "OPEN_DIRECTIONS"
+    OPEN_RESCUE = "OPEN_RESCUE"
+    CONFIRM_ARRIVAL = "CONFIRM_ARRIVAL"
+
+
+class ChatMessage(ContractModel):
+    role: Literal["USER", "ASSISTANT"]
+    text: str = Field(min_length=1, max_length=2_000)
+
+
+class ChatRequest(ContractModel):
+    session_id: Identifier = Field(min_length=8, max_length=200)
+    language: Literal["EN", "ML", "HI"] = "EN"
+    messages: list[ChatMessage] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def last_message_is_from_user(self) -> "ChatRequest":
+        if self.messages[-1].role != "USER":
+            raise ValueError("the last chat message must be from the user")
+        return self
+
+
+class ChatResponse(ContractModel):
+    reply: str = Field(min_length=1, max_length=2_000)
+    map_action: MapAction = MapAction.NONE
+    suggestions: tuple[str, ...] = Field(min_length=1, max_length=3)
+    source_status: Literal["SYNTHETIC_DEMO"] = "SYNTHETIC_DEMO"
+    provider: Literal["LOCAL_GUIDANCE"] = "LOCAL_GUIDANCE"
+
+
 class AssignmentState(StrEnum):
     CREATED = "CREATED"
     RESERVED = "RESERVED"
