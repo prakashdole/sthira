@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "sthira"
 version = "2.0.0.dev0"
 description = "Sthira: Citizen emergency guidance over authorized government disaster data"
-readme = "prd.md"
+readme = "plan/prd.md"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.110.0",

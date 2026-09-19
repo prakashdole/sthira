@@ -2,7 +2,7 @@
 
 The demo profile is synthetic only. It must not be changed to `SHADOW`, `PILOT`,
 or `PRODUCTION` without the source, database, authentication, security,
-language, accessibility, and government-ownership gates recorded in `prompt.md`.
+language, accessibility, and government-ownership gates recorded in `../plan/prompt.md`.
 
 ## Hackathon local presentation
 

@@ -8,14 +8,14 @@ The active baseline is v2. Prior permanent-relocation, land, candidate-site, sch
 
 ## Mandatory reading order
 
-1. `prd.md`
-2. `rules.md`
-3. `trd.md`
-4. `architecture.md`
-5. `source-register.md`
-6. `decisions.md`
-7. `open-decisions.md`
-8. `phases.md` and `plan.md`
+1. `plan/prd.md`
+2. `plan/rules.md`
+3. `plan/trd.md`
+4. `plan/architecture.md`
+5. `plan/source-register.md`
+6. `plan/decisions.md`
+7. `plan/open-decisions.md`
+8. `plan/phases.md` and `plan/plan.md`
 
 ## Standing engineering rules
 
@@ -38,8 +38,8 @@ The active baseline is v2. Prior permanent-relocation, land, candidate-site, sch
 - Maintain demo/shadow/pilot/production isolation and unmistakable synthetic labels.
 - Use simple architecture and existing language/framework capabilities before adding services/dependencies.
 - Add tests before or with behavior, especially for CAP updates/cancels, stale data, capacity races, retries, prohibited voice commands, offline flow, and accessibility.
-- Record material technical/product decisions in `decisions.md`; never bury policy assumptions in code.
-- Do not close `open-decisions.md` without named-owner evidence.
+- Record material technical/product decisions in `plan/decisions.md`; never bury policy assumptions in code.
+- Do not close `plan/open-decisions.md` without named-owner evidence.
 - Do not modify any `.txt` file unless explicitly asked.
 
 ## Definition of honest completion

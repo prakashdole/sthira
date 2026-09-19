@@ -9,7 +9,7 @@
 - [x] Define explicit arrival and capacity semantics.
 - [x] Mark geofence arrival as future-only.
 - [x] Rewrite every Markdown file and leave text files untouched.
-- [x] Add the end-to-end autonomous phase prompts in `prompt.md`.
+- [x] Add the end-to-end autonomous phase prompts in `../plan/prompt.md`.
 
 ## Code migration — not started
 
@@ -86,7 +86,7 @@
 
 ## Live pilot blockers
 
-- [ ] Close applicable items in `open-decisions.md`.
+- [ ] Close applicable items in `../plan/open-decisions.md`.
 - [ ] Obtain government permissions and operational samples.
 - [ ] Obtain DDMA/KSDMA safe-zone, route, capacity, allocation, and update SOP.
 - [ ] Establish 24×7 government operational ownership and manual fallback.
