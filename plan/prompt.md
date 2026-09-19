@@ -29,7 +29,7 @@ Status vocabulary: NOT_STARTED, IN_PROGRESS, BLOCKED_EXTERNAL, DONE. Evidence ap
 | P0 | Reconcile scope and freeze migration evidence | None | DONE | Baseline frozen at `ce6adca`; see "P0 baseline evidence" below |
 | P1 | Go foundation and executable contracts | P0 | DONE | Go 1.27.1 pinned; bounded `/api/v3` slice in `backend/`; see "P1 completion record" below |
 | P2 | Government-data contracts and scenario ingestion | P1 | PARTIAL | Infra DONE (capfeed/opkg/sourceact/catalogue/context-resolver); catalogue acceptance BLOCKED on O01 user data; see "P2 completion record" below |
-| P3 | Durable storage, authorization and ledger foundation | P1 + P2 contract slice | NOT_STARTED | None for new implementation |
+| P3 | Durable storage, authorization and ledger foundation | P1 + P2 contract slice | IN_PROGRESS | Checkpoint A DONE; storage layer + migration written; real-DB verification BLOCKED_EXTERNAL (no PostgreSQL/PostGIS, sandbox denies driver fetch); see "P3 Checkpoint B record" below |
 | P4 | Destination choice and immediate/temporary stays | P2 + P3 | NOT_STARTED | None for new implementation |
 | P5 | Offline package and map-delivery protocol | P2 + P3 | NOT_STARTED | None for new implementation |
 | P6 | Regional ASR, constrained middle model and TTS | P1 + P4 + P5 | NOT_STARTED | None for new implementation |
@@ -282,6 +282,62 @@ Next eligible step: P3 Checkpoint B — durable storage/authorization/ledger.
   PostgreSQL/PostGIS is NOT installed and the sandbox blocks network egress
   (no Homebrew, no Go module fetch for a Postgres driver), so real-DB
   verification is BLOCKED_EXTERNAL; see the P3 record when written.
+```
+
+## P3 Checkpoint B record (2026-09-19) — durable storage foundation
+
+```text
+Phase / status: P3 Checkpoint B — durable storage, authorization and ledger
+  foundation — IN_PROGRESS. Storage layer and migration written and compile/
+  unit-verified offline; real PostgreSQL/PostGIS verification BLOCKED_EXTERNAL.
+Starting and checked revision: CLEAN branch at 2814e04 (Checkpoint A record).
+Scope completed and changed files:
+  - backend/migrations/0001_p3_foundation.sql — additive migration: sources,
+    source_authorizations (activation requires recorded evidence, not just an
+    enum advance), source_artifacts, packages (with supersession), versioned
+    zone/route/facility facts (PostGIS geography SRID 4326, wrong-SRID rejected
+    by the type), sessions (CITIZEN / jurisdiction-scoped OPERATOR),
+    facility_inventory (reserved<=capacity conservation CHECK), reservations
+    (RESERVED/ARRIVED/DEPARTED/CANCELLED/EXPIRED), scoped idempotency_keys
+    (payload-hash bound, lost-response replay), append-only audit_events with a
+    sha256 hash chain, outbox_events, schema_migrations. DOWN section documented.
+  - backend/internal/store/ — database/sql layer over a DBTX seam so SQL and
+    transaction scope are concrete without a live DB:
+    store.go (InTx atomic change+audit+outbox; execConditional translates zero
+    RowsAffected into ErrVersionConflict/ErrNotFound — real optimistic
+    concurrency via UPDATE...WHERE version=$expected, never a mutex);
+    source.go (transitions gated on HasAuthorization evidence);
+    audit.go (ChainAuditor hash chain + VerifyChain for restore/consistency);
+    idempotency.go (Begin/Complete/Fail/Sweep, payload-conflict and in-progress
+    distinction); reservation.go (atomic inventory conservation, EnsureInventory
+    first-insert path); readiness.go (probes DB ping + migration revision,
+    distinguishes DB/app readiness from operational source readiness, redacts
+    DSN detail). Open() documents the blocked pgx wiring explicitly.
+Tests/commands, environment and results:
+  - Go 1.27.1 (GOCACHE=$TMPDIR): gofmt clean, go vet clean, go build ./... ok.
+  - go test ./internal/store ./internal/sourceact ./internal/opkg
+    ./internal/catalogue ./internal/contracts ./internal/capfeed
+    ./internal/httpjson — all ok. store has unit tests for the pure hash-chain
+    computation only (deterministic, field-sensitive, chain-linked).
+  - internal/httpserver tests FAIL in this environment with
+    "bind: operation not permitted" — the sandbox blocks socket bind; this is
+    pre-existing and unrelated to the store change (httptest cannot open a port).
+Commit(s) (CLEAN branch): 53acd93.
+Unresolved internal work: none for the offline-deliverable slice.
+External dependency, owner and exact evidence needed (BLOCKED_EXTERNAL):
+  Real-DB verification cannot run here. Needed: PostgreSQL 15+ with PostGIS 3.x
+  and the pgx/v5 driver. The sandbox denies network egress (proxy.golang.org
+  Forbidden, Homebrew denied) and socket bind, and no Docker is present. The
+  bundled provisioning/verify command is supplied to the user separately; once
+  a DSN is available the steps are: apply 0001_p3_foundation.sql to a fresh
+  instance, fetch pgx, then run the migration/concurrency/restart/restore/
+  authorization tests the mandate lists (fresh-migration apply, PostGIS SRID
+  constraint, competing processes for last spaces, stale-version conflict,
+  duplicate idempotency keys, crash-after-commit retry, restart persistence,
+  cross-session/jurisdiction denial, backup restore, unavailable-DB readiness).
+  P3 is NOT DONE until those pass on the real database.
+Next eligible step: provision PostgreSQL/PostGIS + pgx (user-run command), then
+  execute the real-DB verification suite. P4 stay workflows remain out of scope.
 ```
 
 ## Required completion record
