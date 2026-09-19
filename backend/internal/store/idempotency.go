@@ -25,14 +25,20 @@ var ErrInProgress = errors.New("store: idempotency key in progress")
 // the same payload. It returns ErrPayloadConflict for a reused key with a
 // different payload, and ErrInProgress when a matching IN_PROGRESS row exists.
 func (IdempotencyStore) Begin(ctx context.Context, db DBTX, scope, operation, key, payloadHash string, expiresAt time.Time) (result []byte, replay bool, err error) {
-	// Try to claim the key. On conflict, inspect the existing row.
-	_, err = db.ExecContext(ctx, `
+	// Try to claim the key. RowsAffected==1 means we just inserted the
+	// IN_PROGRESS row, so the key is ours: return replay=false without reading
+	// back our own row (which would misread as a concurrent in-progress key).
+	// RowsAffected==0 means the key already exists; inspect that row.
+	res, err := db.ExecContext(ctx, `
 		INSERT INTO idempotency_keys (scope, operation, idem_key, payload_hash, state, expires_at)
 		VALUES ($1, $2, $3, $4, 'IN_PROGRESS', $5)
 		ON CONFLICT (scope, operation, idem_key) DO NOTHING`,
 		scope, operation, key, payloadHash, expiresAt)
 	if err != nil {
 		return nil, false, err
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 1 {
+		return nil, false, nil
 	}
 
 	var existingHash, state string

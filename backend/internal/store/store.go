@@ -22,6 +22,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
+
+	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
 )
 
 // ErrVersionConflict is returned when an atomic conditional update matched no
@@ -50,20 +53,27 @@ type Store struct {
 // caller (see Open for the intended pgx wiring).
 func New(db *sql.DB) *Store { return &Store{db: db} }
 
-// Open is where the pgx stdlib driver is registered and a pool opened.
-//
-// Blocked: pgx is not in the module cache and the sandbox denies module fetch,
-// so this cannot be compiled or exercised here. The intended wiring is:
-//
-//	import _ "github.com/jackc/pgx/v5/stdlib"
-//	db, err := sql.Open("pgx", dsn)
-//
-// with the pool tuned (max open/idle, conn max lifetime) and a startup Ping.
-// Provided as the documented seam so the blocked dependency is explicit rather
-// than hidden behind an in-memory stand-in.
+// Open registers the pgx stdlib driver (imported above) and opens a connection
+// pool against the given PostgreSQL DSN. The pool is tuned conservatively and a
+// startup Ping verifies connectivity before the store is handed out, so a bad
+// DSN fails fast at boot rather than on first use.
 func Open(dsn string) (*Store, error) {
-	return nil, errors.New("store: pgx driver unavailable in this build; " +
-		"provision PostgreSQL/PostGIS and fetch github.com/jackc/pgx/v5 (BLOCKED_EXTERNAL)")
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("store: open pgx: %w", err)
+	}
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("store: ping: %w", err)
+	}
+	return &Store{db: db}, nil
 }
 
 // InTx runs fn inside a single database transaction. State change, audit event
