@@ -93,6 +93,23 @@ type Gap struct {
 	Detail string
 }
 
+// Acceptance thresholds for launch (T13): a catalogue is structurally valid
+// when its records are well-formed, but launch acceptance additionally requires
+// enough selected states and enough sourced scenarios per state. These are
+// distinct concerns: Validate reports structure and data gaps; AssessLaunch
+// reports whether the validated catalogue meets the launch bar. Missing user
+// data is always a Gap, never invented and never a structural error.
+const (
+	// MinLaunchStates is the lower bound of the 10–15 selected-state target.
+	MinLaunchStates = 10
+	// MaxLaunchStates is the upper bound of the 10–15 selected-state target.
+	MaxLaunchStates = 15
+	// MinScenariosPerState is the per-state sourced-scenario floor (2–3 cases).
+	MinScenariosPerState = 2
+	// MaxScenariosPerState is the per-state sourced-scenario ceiling (2–3 cases).
+	MaxScenariosPerState = 3
+)
+
 // Validation is the result of validating a manifest.
 type Validation struct {
 	// StateCodes are the validated state codes, sorted.
@@ -101,6 +118,8 @@ type Validation struct {
 	ScenarioCount int
 	// HistoricalCount is the number of validated historical events.
 	HistoricalCount int
+	// ScenariosByState records the validated scenario count per state code.
+	ScenariosByState map[string]int
 	// Gaps lists missing/blocked items the catalogue cannot satisfy. A non-empty
 	// Gaps means acceptance is blocked even though structure validated.
 	Gaps []Gap
@@ -118,7 +137,7 @@ func Validate(m *Manifest) (*Validation, error) {
 		return nil, fail("catalogue_version must be a positive integer")
 	}
 
-	v := &Validation{}
+	v := &Validation{ScenariosByState: map[string]int{}}
 	eventIndex := map[string]HistoricalEvent{}
 	for _, ev := range m.HistoricalEvents {
 		if ev.EventID == "" || ev.State == "" || ev.Kind == "" || ev.SourceRef == "" {
@@ -132,6 +151,7 @@ func Validate(m *Manifest) (*Validation, error) {
 	v.HistoricalCount = len(m.HistoricalEvents)
 
 	stateSeen := map[string]bool{}
+	scenarioSeen := map[string]string{} // scenario_id -> owning state code
 	for _, st := range m.States {
 		if st.StateCode == "" || st.Name == "" {
 			return nil, fail("state requires state_code and name")
@@ -155,6 +175,10 @@ func Validate(m *Manifest) (*Validation, error) {
 			if sc.ScenarioID == "" {
 				return nil, fail("state %q has a scenario with an empty scenario_id", st.StateCode)
 			}
+			if owner, dup := scenarioSeen[sc.ScenarioID]; dup {
+				return nil, fail("duplicate scenario id %q (states %q and %q)", sc.ScenarioID, owner, st.StateCode)
+			}
+			scenarioSeen[sc.ScenarioID] = st.StateCode
 			if sc.State != st.StateCode {
 				return nil, fail("scenario %q state %q does not match owning state %q", sc.ScenarioID, sc.State, st.StateCode)
 			}
@@ -163,8 +187,14 @@ func Validate(m *Manifest) (*Validation, error) {
 				if sc.HistoricalEventID == "" {
 					return nil, fail("historical scenario %q must reference a historical_event_id", sc.ScenarioID)
 				}
-				if _, ok := eventIndex[sc.HistoricalEventID]; !ok {
+				ev, ok := eventIndex[sc.HistoricalEventID]
+				if !ok {
 					return nil, fail("historical scenario %q references unknown historical event %q", sc.ScenarioID, sc.HistoricalEventID)
+				}
+				// Historical event provenance stays with its owning state: a
+				// scenario may not borrow another state's event as its own evidence.
+				if ev.State != st.StateCode {
+					return nil, fail("historical scenario %q in state %q references event %q owned by state %q", sc.ScenarioID, st.StateCode, ev.EventID, ev.State)
 				}
 			case EvidenceSynthetic:
 				if sc.HistoricalEventID != "" {
@@ -177,6 +207,7 @@ func Validate(m *Manifest) (*Validation, error) {
 				return nil, fail("scenario %q exercise_time must be RFC 3339", sc.ScenarioID)
 			}
 			v.ScenarioCount++
+			v.ScenariosByState[st.StateCode]++
 		}
 	}
 	sort.Strings(v.StateCodes)
@@ -185,6 +216,42 @@ func Validate(m *Manifest) (*Validation, error) {
 		v.Gaps = append(v.Gaps, Gap{Kind: "MISSING_STATE", Detail: "no states supplied"})
 	}
 	return v, nil
+}
+
+// AssessLaunch evaluates a structurally validated catalogue against the launch
+// bar (T13): enough selected states and 2–3 sourced scenarios per state. It
+// reports shortfalls as Gaps; it never invents missing states or scenarios, and
+// it does not require completed P6 language benchmarks to store a draft. A
+// catalogue can be structurally valid yet not launch-ready.
+func (v *Validation) AssessLaunch() *Validation {
+	if v == nil {
+		return &Validation{Gaps: []Gap{{Kind: "MISSING_STATE", Detail: "no validated catalogue"}}}
+	}
+	out := *v
+	out.Gaps = append([]Gap{}, v.Gaps...)
+
+	n := len(v.StateCodes)
+	if n < MinLaunchStates {
+		out.Gaps = append(out.Gaps, Gap{
+			Kind:   "INSUFFICIENT_STATES",
+			Detail: fail("%d selected states is below the launch minimum of %d", n, MinLaunchStates).Error(),
+		})
+	} else if n > MaxLaunchStates {
+		out.Gaps = append(out.Gaps, Gap{
+			Kind:   "EXCESS_STATES",
+			Detail: fail("%d selected states exceeds the launch maximum of %d", n, MaxLaunchStates).Error(),
+		})
+	}
+	for _, code := range v.StateCodes {
+		count := v.ScenariosByState[code]
+		if count < MinScenariosPerState {
+			out.Gaps = append(out.Gaps, Gap{
+				Kind:   "INSUFFICIENT_SCENARIOS",
+				Detail: fail("state %s has %d scenarios; launch requires %d-%d sourced cases per state", code, count, MinScenariosPerState, MaxScenariosPerState).Error(),
+			})
+		}
+	}
+	return &out
 }
 
 // Acceptable reports whether the catalogue is complete enough to accept: it
