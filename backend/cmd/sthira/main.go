@@ -29,14 +29,22 @@ func main() {
 	// /health/ready correctly reports BLOCKED (503) rather than a false READY.
 	opts := []httpserver.Option{httpserver.WithLogger(logger)}
 
-	// Optional demo context for manual smoke testing only. It loads the golden
-	// fixture IDs as the active context so a valid proposal validates. It is
-	// never enabled by default and is visibly non-operational.
+	// Optional demo context for manual smoke testing only. It wires a static
+	// server-side snapshot resolver with the golden fixture IDs so a valid
+	// proposal validates against a server-resolved context. It is never enabled
+	// by default and is visibly non-operational. Without it the voice-commands
+	// endpoint fails closed (503).
 	if os.Getenv("STHIRA_DEMO_CONTEXT") == "1" {
-		opts = append(opts, httpserver.WithKnownIDs(
-			"PLACE-DEMO-1", "PLACE-DEMO-2", "FACILITY-DEMO-1", "FACILITY-DEMO-2",
-		))
-		logger.Warn("demo context enabled: synthetic known IDs loaded (non-operational)")
+		opts = append(opts, httpserver.WithContextResolver(httpserver.StaticContextResolver(httpserver.ContextSnapshot{
+			DataVersion:  "demo-1",
+			Jurisdiction: "DEMO",
+			KnownIDs: map[string]bool{
+				"PLACE-DEMO-1": true, "PLACE-DEMO-2": true,
+				"FACILITY-DEMO-1": true, "FACILITY-DEMO-2": true,
+			},
+			EnabledLanguages: map[string]bool{"en-IN": true, "hi-IN": true, "ml-IN": true},
+		})))
+		logger.Warn("demo context enabled: static server-side snapshot resolver (non-operational)")
 	}
 
 	srv := httpserver.New(cfg, opts...)

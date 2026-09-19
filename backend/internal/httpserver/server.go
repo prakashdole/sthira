@@ -23,19 +23,50 @@ type ReadinessProber interface {
 	Probe(ctx context.Context) error
 }
 
+// ContextSnapshot is the authoritative server-side context a middle-model
+// proposal is validated against. It is resolved per request from server state,
+// never from client-echoed request/data-version values.
+type ContextSnapshot struct {
+	// DataVersion is the server's current snapshot version.
+	DataVersion string
+	// Jurisdiction is the resolved jurisdiction for the active context.
+	Jurisdiction string
+	// KnownIDs is the set of IDs present in the active context.
+	KnownIDs map[string]bool
+	// EnabledLanguages is the enabled language set for the active context.
+	EnabledLanguages map[string]bool
+}
+
+// ContextResolver resolves the authoritative snapshot for one request. It is
+// the seam where P4 will bind a real source snapshot; until one is wired the
+// voice-commands endpoint fails closed rather than trusting client echoes.
+type ContextResolver interface {
+	// Resolve returns the current snapshot, or an error if no authoritative
+	// context is available. The error text is redacted before the response.
+	Resolve(ctx context.Context) (ContextSnapshot, error)
+}
+
 // Server is the bounded /api/v3 HTTP boundary.
 type Server struct {
 	cfg       Config
 	prober    ReadinessProber
+	resolver  ContextResolver
 	logger    *slog.Logger
 	httpSrv   *http.Server
 	startedAt time.Time
-	// enabledLanguages is the set of enabled context languages for the
-	// middle-model validator. It is configuration, not a model claim.
-	enabledLanguages map[string]bool
-	// knownIDs is the active-context ID set for the fixture slice. A real
-	// implementation resolves this per request from the source snapshot.
-	knownIDs map[string]bool
+}
+
+// StaticContextResolver returns a ContextResolver that always serves the same
+// snapshot. It is for the demo/test slice only; P4 binds a real source
+// snapshot resolver.
+func StaticContextResolver(snap ContextSnapshot) ContextResolver {
+	return staticResolver{snap: snap}
+}
+
+type staticResolver struct{ snap ContextSnapshot }
+
+func (s staticResolver) Resolve(ctx context.Context) (ContextSnapshot, error) {
+	return s.snap, nil
 }
 
 // Option customizes a Server.
@@ -45,28 +76,13 @@ type Option func(*Server)
 // BLOCKED (never READY), which is the safe default.
 func WithProber(p ReadinessProber) Option { return func(s *Server) { s.prober = p } }
 
+// WithContextResolver sets the server-side snapshot resolver for the
+// voice-commands boundary. Without one, that endpoint fails closed (503) rather
+// than trusting client-echoed request/data-version values.
+func WithContextResolver(r ContextResolver) Option { return func(s *Server) { s.resolver = r } }
+
 // WithLogger sets the structured logger.
 func WithLogger(l *slog.Logger) Option { return func(s *Server) { s.logger = l } }
-
-// WithEnabledLanguages sets the enabled context languages for validation.
-func WithEnabledLanguages(langs ...string) Option {
-	return func(s *Server) {
-		s.enabledLanguages = map[string]bool{}
-		for _, l := range langs {
-			s.enabledLanguages[l] = true
-		}
-	}
-}
-
-// WithKnownIDs sets the active-context ID set used by the fixture validator.
-func WithKnownIDs(ids ...string) Option {
-	return func(s *Server) {
-		s.knownIDs = map[string]bool{}
-		for _, id := range ids {
-			s.knownIDs[id] = true
-		}
-	}
-}
 
 // New builds a Server with bounded timeouts and the frozen route set.
 func New(cfg Config, opts ...Option) *Server {
@@ -74,10 +90,6 @@ func New(cfg Config, opts ...Option) *Server {
 		cfg:       cfg,
 		logger:    slog.Default(),
 		startedAt: time.Now().UTC(),
-		enabledLanguages: map[string]bool{
-			"en-IN": true, "hi-IN": true, "ml-IN": true,
-		},
-		knownIDs: map[string]bool{},
 	}
 	for _, o := range opts {
 		o(s)

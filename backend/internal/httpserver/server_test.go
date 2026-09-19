@@ -14,10 +14,19 @@ import (
 	"sthira/backend/internal/contracts"
 )
 
-// newTestServer returns a server with no prober (readiness must be BLOCKED).
+// demoSnapshot is the server-resolved context for the voice-commands tests.
+var demoSnapshot = ContextSnapshot{
+	DataVersion:      "EXERCISE-7",
+	Jurisdiction:     "DEMO",
+	KnownIDs:         map[string]bool{"PLACE-DEMO-1": true, "FACILITY-DEMO-1": true, "FACILITY-DEMO-2": true},
+	EnabledLanguages: map[string]bool{"en-IN": true, "hi-IN": true, "ml-IN": true},
+}
+
+// newTestServer returns a server with no prober (readiness must be BLOCKED)
+// and a static server-side context resolver for the voice-commands boundary.
 func newTestServer() *Server {
 	return New(DefaultConfig("127.0.0.1:0"),
-		WithKnownIDs("PLACE-DEMO-1", "FACILITY-DEMO-1", "FACILITY-DEMO-2"),
+		WithContextResolver(StaticContextResolver(demoSnapshot)),
 	)
 }
 
@@ -201,6 +210,37 @@ func TestVoiceCommandsRejectsProhibitedAction(t *testing.T) {
 	env := decodeEnvelope(t, rec)
 	if len(env.Errors) == 0 || env.Errors[0].Code != contracts.ErrValidation {
 		t.Fatalf("want %s, got %+v", contracts.ErrValidation, env.Errors)
+	}
+}
+
+func TestVoiceCommandsFailsClosedWithoutResolver(t *testing.T) {
+	// No resolver wired: the endpoint must fail closed (503), never validate
+	// against client-echoed request/data-version values.
+	s := New(DefaultConfig("127.0.0.1:0"))
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	rec := do(t, srv, http.MethodPost, "/api/v3/voice/commands", "application/json", validCommandBody())
+	if rec.code != http.StatusServiceUnavailable {
+		t.Fatalf("no resolver = %d, want 503 (fail closed)", rec.code)
+	}
+	env := decodeEnvelope(t, rec)
+	if env.Data != nil || len(env.Errors) == 0 {
+		t.Fatalf("fail-closed must report an error, not data: %+v", env)
+	}
+}
+
+func TestVoiceCommandsRejectsStaleDataVersion(t *testing.T) {
+	srv := httptest.NewServer(newTestServer().Handler())
+	defer srv.Close()
+	// Client echoes a data_version that does not match the server snapshot.
+	body := strings.Replace(validCommandBody(), "EXERCISE-7", "STALE-0", -1)
+	rec := do(t, srv, http.MethodPost, "/api/v3/voice/commands", "application/json", body)
+	if rec.code != http.StatusConflict {
+		t.Fatalf("stale data_version = %d, want 409", rec.code)
+	}
+	env := decodeEnvelope(t, rec)
+	if len(env.Errors) == 0 || env.Errors[0].Code != contracts.ErrStaleVersion {
+		t.Fatalf("want %s, got %+v", contracts.ErrStaleVersion, env.Errors)
 	}
 }
 
