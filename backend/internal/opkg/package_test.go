@@ -32,6 +32,7 @@ func validPackage() *Package {
 				FromZoneID:   "RZ-1",
 				ToSafeZoneID: "SZ-1",
 				Approval:     ApprovalSynthetic,
+				Mode:         ModeFoot,
 				Geometry:     []byte(`{"type":"LineString","coordinates":[[76.0,11.4],[76.5,11.5]]}`),
 			},
 		},
@@ -253,4 +254,99 @@ func TestValidateInstructionLanguageRequired(t *testing.T) {
 	p.Instructions[0].Language = ""
 	recompute(p)
 	validateErr(t, p, "instruction language is required")
+}
+
+// --- A5: persisted-model fields (route mode/verification/validity, zone role,
+// temporary-stay policy) ---
+
+func TestValidateRouteModeRequired(t *testing.T) {
+	p := validPackage()
+	p.ApprovedRoutes[0].Mode = ""
+	recompute(p)
+	validateErr(t, p, "mode is required")
+}
+
+func TestValidateRouteModeKnown(t *testing.T) {
+	p := validPackage()
+	p.ApprovedRoutes[0].Mode = "TELEPORT"
+	recompute(p)
+	validateErr(t, p, "known mode")
+}
+
+func TestValidateRouteVerificationPair(t *testing.T) {
+	p := validPackage()
+	p.ApprovedRoutes[0].VerifiedBy = "operator-1" // verified_at missing
+	recompute(p)
+	validateErr(t, p, "both verified_by and verified_at")
+}
+
+func TestValidateRouteValidityWindowOrdered(t *testing.T) {
+	p := validPackage()
+	p.ApprovedRoutes[0].ValidFrom = "2026-09-13T04:00:00Z"
+	p.ApprovedRoutes[0].ValidUntil = "2026-09-12T04:00:00Z" // before from
+	recompute(p)
+	validateErr(t, p, "valid_until must be after valid_from")
+}
+
+func TestValidateRouteValidityWellFormed(t *testing.T) {
+	p := validPackage()
+	p.ApprovedRoutes[0].VerifiedBy = "operator-1"
+	p.ApprovedRoutes[0].VerifiedAt = "2026-09-12T05:00:00Z"
+	p.ApprovedRoutes[0].ValidFrom = "2026-09-12T04:00:00Z"
+	p.ApprovedRoutes[0].ValidUntil = "2026-09-13T04:00:00Z"
+	recompute(p)
+	validateOK(t, p)
+}
+
+func TestValidateZoneRoleKnown(t *testing.T) {
+	p := validPackage()
+	p.SafeZones[0].Role = "CASTLE"
+	recompute(p)
+	validateErr(t, p, "invalid role")
+}
+
+func TestValidateZoneRoleAccepted(t *testing.T) {
+	p := validPackage()
+	p.SafeZones[0].Role = RoleTempAccom
+	recompute(p)
+	validateOK(t, p)
+}
+
+func TestValidatePolicyTemporaryStayBounds(t *testing.T) {
+	p := validPackage()
+	min, max := 30, 7 // inverted
+	p.Policy.TemporaryStayMinDays = &min
+	p.Policy.TemporaryStayMaxDays = &max
+	recompute(p)
+	validateErr(t, p, "must not exceed")
+}
+
+func TestValidatePolicyTemporaryStayPaired(t *testing.T) {
+	p := validPackage()
+	min := 7
+	p.Policy.TemporaryStayMinDays = &min // max missing
+	recompute(p)
+	validateErr(t, p, "set together")
+}
+
+func TestValidatePolicyReservationExpiryPositive(t *testing.T) {
+	p := validPackage()
+	zero := 0
+	p.Policy.ReservationExpirySeconds = &zero
+	recompute(p)
+	validateErr(t, p, "must be positive")
+}
+
+func TestValidatePolicyWellFormed(t *testing.T) {
+	p := validPackage()
+	min, max := 7, 30
+	exp := 900
+	walk, transfer := false, true
+	p.Policy.TemporaryStayMinDays = &min
+	p.Policy.TemporaryStayMaxDays = &max
+	p.Policy.ReservationExpirySeconds = &exp
+	p.Policy.AllowWalkIns = &walk
+	p.Policy.AllowTransfers = &transfer
+	recompute(p)
+	validateOK(t, p)
 }

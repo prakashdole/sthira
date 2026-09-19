@@ -8,6 +8,13 @@
 // Signature validity is checked separately and is distinct from signer
 // authorization — a valid signature from an unauthorized key is rejected by
 // the caller's authorization policy, not by this validator.
+//
+// Structural validity is not operational authority. A package that passes
+// Validate is merely well-formed and internally consistent. Whether it is
+// current (within its effective/expiry window and not superseded), authenticated
+// (signature valid under a pinned key), and authorized (signer permitted for
+// this jurisdiction, source OPERATIONAL) are separate checks layered by the
+// caller and by P3 persistence; this validator answers only the first.
 package opkg
 
 import (
@@ -57,6 +64,25 @@ const (
 	ZonePublished ZoneStatus = "PUBLISHED"
 )
 
+// ZoneRole is a zone's designated function (trd.md zone/facility boundary).
+type ZoneRole string
+
+const (
+	RoleAssembly  ZoneRole = "ASSEMBLY"
+	RoleShelter   ZoneRole = "EMERGENCY_SHELTER"
+	RoleTempAccom ZoneRole = "TEMPORARY_ACCOMMODATION"
+)
+
+// RouteMode is the travel mode a route is verified for. Routes are
+// mode-specific; a route verified for one mode is not valid for another.
+type RouteMode string
+
+const (
+	ModeFoot      RouteMode = "FOOT"
+	ModeVehicle   RouteMode = "VEHICLE"
+	ModeAmbulance RouteMode = "AMBULANCE"
+)
+
 // Signature carries detached signature metadata. Value validity is verified by
 // an injected Verifier; authorization of the key is a separate concern.
 type Signature struct {
@@ -83,21 +109,39 @@ type Alert struct {
 	Identifier string `json:"identifier"`
 }
 
-// Zone is a red (hazard) or safe (destination) zone.
+// Zone is a red (hazard) or safe (destination) zone. Role designates the zone's
+// function (assembly, emergency shelter, temporary accommodation); a safe zone
+// that supports temporary stays must say so via its role.
 type Zone struct {
 	ID       string     `json:"id"`
 	Capacity *int       `json:"capacity,omitempty"`
 	Location []float64  `json:"location,omitempty"`
 	Status   ZoneStatus `json:"status,omitempty"`
+	// Role is optional at the contract boundary; when present it must be a known
+	// role. Absent means the role is unknown, never assumed.
+	Role ZoneRole `json:"role,omitempty"`
 }
 
-// Route is an approved path from a red zone to a safe zone.
+// Route is an approved path from a red zone to a safe zone. Routes are
+// mode-specific, versioned and time-bounded (R10): Mode, the verification
+// actor/time, and the validity window are part of the persisted record P3
+// stores. Candidate/unverified routes cannot pass operational gates.
 type Route struct {
 	ID           string          `json:"id"`
 	FromZoneID   string          `json:"from_zone_id"`
 	ToSafeZoneID string          `json:"to_safe_zone_id"`
 	Approval     RouteApproval   `json:"approval"`
 	Geometry     json.RawMessage `json:"geometry"`
+	// Mode is the travel mode the route is verified for. Required.
+	Mode RouteMode `json:"mode"`
+	// VerifiedBy / VerifiedAt record who verified the route and when. Optional
+	// at the contract boundary; absent means unverified (candidate) status.
+	VerifiedBy string `json:"verified_by,omitempty"`
+	VerifiedAt string `json:"verified_at,omitempty"`
+	// ValidFrom / ValidUntil bound the route's operational validity window.
+	// Both RFC 3339 when present; ValidUntil must be after ValidFrom.
+	ValidFrom  string `json:"valid_from,omitempty"`
+	ValidUntil string `json:"valid_until,omitempty"`
 }
 
 // InstructionAsset is a localized instruction artifact.
@@ -114,8 +158,21 @@ type Facility struct {
 
 // AllocationPolicy orders safe-zone selection. It must explicitly order every
 // safe zone; a missing or partial order is a validation failure, not a default.
+// It also carries the government-owned stay/reservation rules P3 persists
+// (trd.md policy boundary). No field is inferred; absent stays unknown.
 type AllocationPolicy struct {
 	Order []string `json:"order"`
+	// ReservationExpirySeconds is how long an unconfirmed hold lives before it
+	// expires. Optional; absent means no policy-supplied expiry is known.
+	ReservationExpirySeconds *int `json:"reservation_expiry_seconds,omitempty"`
+	// Temporary-stay bounds in days (R15: 7-30). Both must be present together
+	// when either is, and Min must be <= Max.
+	TemporaryStayMinDays *int `json:"temporary_stay_min_days,omitempty"`
+	TemporaryStayMaxDays *int `json:"temporary_stay_max_days,omitempty"`
+	// AllowWalkIns / AllowTransfers are explicit policy switches. Optional;
+	// absent means the policy does not authorize them by default.
+	AllowWalkIns   *bool `json:"allow_walk_ins,omitempty"`
+	AllowTransfers *bool `json:"allow_transfers,omitempty"`
 }
 
 // EmergencyContact is an official dialler target.
@@ -294,6 +351,11 @@ func Validate(pkg *Package, expectedJurisdiction string, requireSignature bool, 
 		default:
 			return nil, fail("safe-zone %q invalid status %q", z.ID, z.Status)
 		}
+		switch z.Role {
+		case "", RoleAssembly, RoleShelter, RoleTempAccom:
+		default:
+			return nil, fail("safe-zone %q invalid role %q", z.ID, z.Role)
+		}
 	}
 	for _, r := range pkg.ApprovedRoutes {
 		if !redSet[r.FromZoneID] {
@@ -305,9 +367,44 @@ func Validate(pkg *Package, expectedJurisdiction string, requireSignature bool, 
 		if r.Approval != ApprovalSynthetic && r.Approval != ApprovalOperational {
 			return nil, fail("route %q approval is not authorized", r.ID)
 		}
+		switch r.Mode {
+		case ModeFoot, ModeVehicle, ModeAmbulance:
+		default:
+			return nil, fail("route %q mode is required and must be a known mode", r.ID)
+		}
 		if err := validateRouteGeometry(r.Geometry); err != nil {
 			return nil, fail("route %q %v", r.ID, err)
 		}
+		// Verification and validity window are optional but must be well-formed
+		// when present; a verified route records actor and time together.
+		if (r.VerifiedBy == "") != (r.VerifiedAt == "") {
+			return nil, fail("route %q verification requires both verified_by and verified_at", r.ID)
+		}
+		if r.VerifiedAt != "" {
+			if _, err := parseTime("verified_at", r.VerifiedAt); err != nil {
+				return nil, fail("route %q %v", r.ID, err)
+			}
+		}
+		if (r.ValidFrom == "") != (r.ValidUntil == "") {
+			return nil, fail("route %q validity requires both valid_from and valid_until", r.ID)
+		}
+		if r.ValidFrom != "" {
+			from, err := parseTime("valid_from", r.ValidFrom)
+			if err != nil {
+				return nil, fail("route %q %v", r.ID, err)
+			}
+			until, err := parseTime("valid_until", r.ValidUntil)
+			if err != nil {
+				return nil, fail("route %q %v", r.ID, err)
+			}
+			if !until.After(from) {
+				return nil, fail("route %q valid_until must be after valid_from", r.ID)
+			}
+		}
+	}
+
+	if err := validatePolicy(pkg.Policy); err != nil {
+		return nil, err
 	}
 
 	languages := make([]string, 0, len(pkg.Instructions))
@@ -407,6 +504,27 @@ func writeCanonical(buf *bytes.Buffer, v any) {
 		b, _ := json.Marshal(t)
 		buf.Write(b)
 	}
+}
+
+// validatePolicy checks the optional government-owned stay/reservation policy
+// fields. Each is optional; when present it must be internally consistent. No
+// default is inferred for an absent field.
+func validatePolicy(p AllocationPolicy) error {
+	if p.ReservationExpirySeconds != nil && *p.ReservationExpirySeconds <= 0 {
+		return fail("reservation_expiry_seconds must be positive")
+	}
+	if (p.TemporaryStayMinDays == nil) != (p.TemporaryStayMaxDays == nil) {
+		return fail("temporary_stay_min_days and temporary_stay_max_days must be set together")
+	}
+	if p.TemporaryStayMinDays != nil {
+		if *p.TemporaryStayMinDays < 1 || *p.TemporaryStayMaxDays < 1 {
+			return fail("temporary stay bounds must be positive")
+		}
+		if *p.TemporaryStayMinDays > *p.TemporaryStayMaxDays {
+			return fail("temporary_stay_min_days must not exceed temporary_stay_max_days")
+		}
+	}
+	return nil
 }
 
 func validateLocation(loc []float64) error {
