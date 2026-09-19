@@ -1,0 +1,1 @@
+{"schema_version":"3.0","request_id":"REQ-DEMO-1","data_version":"EXERCISE-7","status":"OK","intent":"OPEN_CONFIRMATION","language":"en-IN","actions":[{"type":"DIAL_112","target_id":"112"}],"speech_key":null,"clarification_ids":[],"evidence_ids":[]}

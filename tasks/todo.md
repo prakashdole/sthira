@@ -1,5 +1,15 @@
 # Sthira v2 Migration Checklist
 
+> **Historical Python/hackathon tracker — superseded 2026-09-19.** This file
+> records the completed Python reference application and the old hackathon
+> workflow as evidence only. It is **not** the active backlog. The active
+> engineering sequence is the Go/mobile phase ledger in
+> [`../plan/prompt.md`](../plan/prompt.md) (P0–P12); the governing plan is
+> [`../plan/plan.md`](../plan/plan.md). Completed items below are historical
+> evidence for the Python reference app under `src/`; they do not satisfy any
+> Go, mobile or live-operation gate. Unchecked items below are superseded by
+> the Go phases and remain here only as a record of what the Python app lacked.
+
 ## Documentation pivot
 
 - [x] Replace permanent-relocation product scope with citizen emergency guidance.
@@ -11,7 +21,11 @@
 - [x] Rewrite every Markdown file and leave text files untouched.
 - [x] Add the end-to-end autonomous phase prompts in `../plan/prompt.md`.
 
-## Code migration — not started
+## Code migration — Python reference app (historical)
+
+The sections below track the Python reference application, not the Go product
+backend. They are retained as evidence of what was built and verified in
+Python.
 
 ### Phase 0 — repository pivot and safety baseline
 
@@ -24,7 +38,7 @@
 - [x] Preserve all legacy tests and .txt files.
 - [ ] Add repeatable CI workflow and full v2 application shell in Phase 1.
 
-### Phase 1 — v2 foundation and contracts
+### Phase 1 — v2 foundation and contracts (Python reference)
 
 - [x] Add strict Pydantic v2 contracts and legal state transitions.
 - [x] Add CAP alert, provenance, freshness, geometry, zone, route, instruction, session, assignment, arrival, and capacity models.
@@ -45,7 +59,7 @@
 - [x] Reset citizen UI to civic evacuation hierarchy: deadline first, destination second, one dominant route action, plain-language directives, human arrival copy, and rescue escalation.
 - [ ] Add database/migrations in Phase 2.
 
-### Phase 2 — persistence, audit, and operational states
+### Phase 2 — persistence, audit, and operational states (Python reference)
 
 - [x] Add SQLAlchemy 2 typed models and repositories for official fact versions, source artifacts/states, assignments, capacity events, and audit events.
 - [x] Add PostgreSQL/PostGIS-shaped Alembic migration scaffolding without embedded credentials.

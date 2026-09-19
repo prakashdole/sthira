@@ -27,7 +27,7 @@ Status vocabulary: NOT_STARTED, IN_PROGRESS, BLOCKED_EXTERNAL, DONE. Evidence ap
 | Phase | Name | Prerequisites | Status | Evidence / commit |
 | --- | --- | --- | --- | --- |
 | P0 | Reconcile scope and freeze migration evidence | None | DONE | Baseline frozen at `ce6adca`; see "P0 baseline evidence" below |
-| P1 | Go foundation and executable contracts | P0 | NOT_STARTED | None for new implementation |
+| P1 | Go foundation and executable contracts | P0 | DONE | Go 1.27.1 pinned; bounded `/api/v3` slice in `backend/`; see "P1 completion record" below |
 | P2 | Government-data contracts and scenario ingestion | P1 | NOT_STARTED | None for new implementation |
 | P3 | Durable storage, authorization and ledger foundation | P1 + P2 contract slice | NOT_STARTED | None for new implementation |
 | P4 | Destination choice and immediate/temporary stays | P2 + P3 | NOT_STARTED | None for new implementation |
@@ -46,7 +46,7 @@ Planning preparation: documents updated; not counted as P0 implementation. Repla
 
 Verified against starting commit `ce6adca093b2c6cd62baa01d0b90716290a82abd`. This is a snapshot of actual behavior, not a quality/security certification. Historical Python results are reference evidence only; they do not satisfy Go/mobile/live gates.
 
-**Scope reconciliation.** Root instructions (CLAUDE.md, GEMINI.md) and `tasks/todo.md` already reflect the 2026-09-19 pivot: Go product backend, Android+iPhone at launch, constrained middle model, immediate + 7–30 day temporary scope, route authority OPEN (O05). Preserved decisions: government owns operational truth; no hazard/safe-land prediction; one million total users (incident concurrency to be measured, P7); 10–15 demo states with regional languages, zones supplied later. No conflicting active hackathon TODOs remained to remove; completed Python items stay as historical evidence in `tasks/todo.md` and `plan/changes.md`.
+**Scope reconciliation.** Root instructions (CLAUDE.md, GEMINI.md) reflect the 2026-09-19 pivot: citizen emergency guidance over government data, no hazard/safe-land prediction, route authority OPEN (O05). The governing plan fixes Go as the product backend, Android+iPhone at launch, the constrained middle model, immediate + 7–30 day temporary scope, one million total users (incident concurrency to be measured, P7) and 10–15 demo states with regional languages (zones supplied later). At P0 the root instruction *content* was already aligned, but `tasks/todo.md` still presented the Python/hackathon workflow as the active tracker; that reconciliation gap was corrected in P1 by marking `tasks/todo.md` a historical Python tracker and pointing active tracking at this Go/mobile phase ledger. Completed Python items remain as historical evidence in `tasks/todo.md` and `plan/changes.md`; they do not satisfy Go/mobile/live gates.
 
 **Actual API inventory** — entry `src/sthira/api/app.py` (FastAPI title still "permanent relocation … Wayanad") mounts `sthira_v2` at `/api/v2` and adds CORS + `security_middleware`; `/ui` and `/v2` static mounts. 17 v2 routes, all synthetic/in-memory:
 
@@ -65,6 +65,52 @@ Verified against starting commit `ce6adca093b2c6cd62baa01d0b90716290a82abd`. Thi
 **Toolchain.** `.venv` Python 3.11.16, fastapi 0.141.1, pydantic 2.13.5, SQLAlchemy/geoalchemy2/alembic/psycopg present, pytest 9.1.1; node v26.8.1, npm 11.19.0. **Go toolchain: not installed** — P1 must pin and install a supported Go before any Go work. No GPU/model benchmark run.
 
 **Baseline checks (this revision, no paid calls, no data change).** `compileall src tests` exit 0. `pytest -q`: **258 passed, 1 failed** (259 total). Frontend `npm run build` exit 0 (chunk-size warning only). The one failure is `tests/test_v2_demo_scenario_api.py::test_active_alert_api_exposes_synthetic_provenance_and_raw_artifact`: bundled `fixtures/synthetic_cap_alert.xml` has `<expires>2026-09-13T04:00:00Z</expires>`, now in the past, so `alerts/active` returns empty and the test IndexErrors. Time-dependent fixture expiry, not a code regression; not repaired under P0 — fixture freshness semantics belong to P2. All `.txt` files verified untouched (staged + unstaged diffs contain no `.txt`).
+
+## P1 completion record (2026-09-19)
+
+```text
+Phase / status: P1 — Go foundation and executable contracts — DONE
+Starting and checked revision: CLEAN branch at merge 2bea1fc (P0 baseline ce6adca reconciled)
+Scope completed and changed files:
+  - P0 reconciliation gap closed: tasks/todo.md marked a historical Python
+    tracker (active tracking points here); the P0 scope-reconciliation
+    statement above corrected to describe the verified state.
+  - backend/go.mod (module sthira/backend, go 1.27.1)
+  - backend/cmd/sthira/main.go (entrypoint, graceful shutdown, optional
+    STHIRA_DEMO_CONTEXT for manual smoke only)
+  - backend/internal/contracts: envelope.go, errors.go, geometry.go, model.go
+    (frozen /api/v3 types, stable error codes, provenance/evidence/freshness,
+    GeoJSON lon/lat, constrained middle-model contract + independent validator)
+  - backend/internal/httpjson/decode.go (strict JSON: size/depth limits,
+    duplicate-key, unknown-field, trailing-data, malformed detection)
+  - backend/internal/httpserver: config.go, server.go, handlers.go (bounded
+    server, method/content-type enforcement, timeouts, cancellation, graceful
+    shutdown, separate liveness/readiness, readiness prober seam)
+  - backend/contracts/openapi.yaml (frozen contract for the implemented slice)
+  - backend/testdata/json/* and backend/testdata/model/* (golden fixtures)
+  - Tests: internal/httpjson/decode_test.go, internal/contracts/model_test.go,
+    internal/httpserver/server_test.go
+  - Makefile check-go/test-go targets; CI setup-go 1.27.1 (Python/frontend
+    checks preserved)
+Tests/commands, environment and results (Go 1.27.1 darwin/arm64, GOCACHE=$TMPDIR):
+  - gofmt -l . → clean
+  - go vet ./... → clean
+  - go build ./... → ok
+  - go test ./... -count=1 → ok (contracts, httpjson, httpserver); cmd has no tests
+  - Real HTTP smoke (go run ./cmd/sthira): /health/live=200; /health/ready=503
+    (BLOCKED, no false READY); valid proposal=200 with STHIRA_DEMO_CONTEXT=1 and
+    =422 fail-closed without it; duplicate key=400; prohibited action=422;
+    wrong method=405; oversized body=413 (unit test)
+Source/model/data/build versions used: Go 1.27.1 (Homebrew bottle, arm64);
+  standard library only; no external modules; no model/data sources.
+Commit(s): see P1 commit on CLEAN (reported in the phase reply)
+Unresolved internal work: known-IDs context is a fixture seam (per-request
+  source-snapshot resolution arrives in P2/P4); readiness prober is a seam with
+  no real dependencies yet; v2 compatibility strategy recorded in trd.md.
+External dependency, owner and exact evidence needed: none for P1. (Go install
+  required running outside the agent sandbox; now pinned.)
+Next eligible step: P2 — Government-data contracts and scenario ingestion.
+```
 
 ## Required completion record
 

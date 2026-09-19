@@ -1,0 +1,212 @@
+openapi: 3.0.3
+info:
+  title: Sthira /api/v3 boundary
+  version: 3.0.0
+  description: >-
+    Frozen P1 contract slice for the Go backend. This documents the implemented
+    health and middle-model validation boundary only. Destination, reservation,
+    package, place-resolution and speech endpoints are later phases (P2–P6) and
+    are intentionally absent. All operational facts carry source provenance,
+    evidence class and version; unknown is distinct from empty, zero or current.
+servers:
+  - url: /api/v3
+tags:
+  - name: health
+  - name: voice
+paths:
+  /health/live:
+    get:
+      tags: [health]
+      summary: Process liveness only
+      description: Never inspects dependencies and never claims readiness.
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+  /health/ready:
+    get:
+      tags: [health]
+      summary: Dependency and approved-source readiness
+      description: >-
+        Actively probes real dependencies. Without verified dependencies it
+        answers 503; it never reports READY from configuration presence alone.
+        Internal blocker reasons are redacted from the response.
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /voice/commands:
+    post:
+      tags: [voice]
+      summary: Validate a constrained middle-model proposal
+      description: >-
+        Accepts a typed chat/transcript command carrying a middle-model
+        proposal and independently validates it against the current server
+        snapshot and active-context IDs. Performs no write, call or capacity
+        mutation. Request bodies are bounded in size and depth; duplicate JSON
+        keys, unknown fields, trailing data and prohibited actions are rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VoiceCommandRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '413': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '422': { $ref: '#/components/responses/ErrorEnvelope' }
+components:
+  responses:
+    DataEnvelope:
+      description: Success envelope; exactly `data` is populated.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+    ErrorEnvelope:
+      description: Error envelope; exactly `errors` is populated.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+    MethodNotAllowed:
+      description: Method not allowed; `Allow` header names the permitted method.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+  schemas:
+    Envelope:
+      type: object
+      required: [request_id, schema_version, generated_at, data_version, source_status]
+      properties:
+        request_id: { type: string }
+        schema_version: { type: string, enum: ['3.0'] }
+        generated_at: { type: string, format: date-time, description: UTC }
+        data_version: { type: string }
+        source_status:
+          type: string
+          enum: [CURRENT, STALE, EXPIRED, UNAVAILABLE, UNKNOWN]
+        data: { description: Present on success only. }
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/APIError' }
+          description: Present on failure only.
+    APIError:
+      type: object
+      required: [code, message, correlation_id, retryable]
+      properties:
+        code:
+          type: string
+          description: >-
+            Stable machine-readable token, e.g. MALFORMED_JSON, DUPLICATE_KEY,
+            TRAILING_DATA, BODY_TOO_LARGE, DEPTH_EXCEEDED, UNKNOWN_FIELD,
+            INVALID_VALUE, VALIDATION_FAILED, METHOD_NOT_ALLOWED,
+            UNSUPPORTED_MEDIA_TYPE, AMBIGUOUS_PLACE, DATA_UNAVAILABLE,
+            STALE_VERSION, ROUTE_UNVERIFIED, CAPACITY_UNKNOWN,
+            CAPACITY_CONFLICT, IDEMPOTENCY_CONFLICT, LANGUAGE_UNSUPPORTED,
+            MODEL_UNAVAILABLE, FORBIDDEN, RATE_LIMITED, NOT_FOUND, INTERNAL.
+        message: { type: string }
+        field: { type: string }
+        correlation_id: { type: string }
+        retryable: { type: boolean }
+    VoiceCommandRequest:
+      type: object
+      required: [request_id, data_version, proposal]
+      additionalProperties: false
+      properties:
+        request_id: { type: string }
+        data_version: { type: string }
+        proposal: { $ref: '#/components/schemas/ModelOutput' }
+    ModelOutput:
+      type: object
+      description: >-
+        Exact middle-model output contract (STHIRA_INTERFACE_CONTROLLER_V3).
+        Independently validated against the current request, snapshot and known
+        IDs. A non-OK status carries null intent and no actions.
+      required:
+        - schema_version
+        - request_id
+        - data_version
+        - status
+        - intent
+        - language
+        - actions
+        - speech_key
+        - clarification_ids
+        - evidence_ids
+      additionalProperties: false
+      properties:
+        schema_version: { type: string, enum: ['3.0'] }
+        request_id: { type: string }
+        data_version: { type: string }
+        status:
+          type: string
+          enum: [OK, CLARIFY, UNSUPPORTED, DATA_UNAVAILABLE, ERROR]
+        intent:
+          nullable: true
+          type: string
+          enum:
+            - FOCUS_PLACE
+            - SHOW_ALERT_AREA
+            - LIST_DESTINATIONS
+            - PREVIEW_DESTINATION
+            - SHOW_ROUTE
+            - SHOW_MY_LOCATION
+            - ZOOM
+            - PAN
+            - RECENTER
+            - REPEAT_GUIDANCE
+            - CHANGE_LANGUAGE
+            - OPEN_CONFIRMATION
+        language: { type: string, description: Enabled context language tag. }
+        actions:
+          type: array
+          maxItems: 5
+          items: { $ref: '#/components/schemas/Action' }
+        speech_key:
+          nullable: true
+          type: string
+          description: Approved template key or null; never free-form speech.
+        clarification_ids:
+          type: array
+          maxItems: 3
+          items: { type: string }
+        evidence_ids:
+          type: array
+          items: { type: string }
+    Action:
+      type: object
+      description: >-
+        Strict tagged action. Only the fields legal for its `type` may be set;
+        extra fields are forbidden. SHOW_CHOICES carries the server-permitted
+        IDs in order (max 3). ZOOM/PAN steps are exactly 1.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum:
+            - FOCUS_FEATURE
+            - SHOW_CHOICES
+            - SHOW_ROUTE
+            - OPEN_PANEL
+            - ZOOM
+            - PAN
+            - RECENTER
+            - SET_LANGUAGE
+        target_id: { type: string }
+        target_ids:
+          type: array
+          maxItems: 3
+          items: { type: string }
+        route_id: { type: string }
+        panel:
+          type: string
+          enum:
+            - ALERT_DETAILS
+            - DESTINATION_PREVIEW
+            - ROUTE_STEPS
+            - RESERVATION_CONFIRMATION
+            - ARRIVAL_CONFIRMATION
+            - EMERGENCY_CALL_CONFIRMATION
+        direction: { type: string, description: IN/OUT for ZOOM; NORTH/SOUTH/EAST/WEST for PAN. }
+        steps: { type: integer, enum: [1] }
+        language: { type: string }

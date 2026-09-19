@@ -24,6 +24,9 @@
 | D18 | Accepted | This task changes plan Markdown only. Actual cleanup and Go implementation are later phases | User's final scope/cost instruction |
 | D19 | Proposed | Layered OSS assurance: Go native checks, Staticcheck/pprof/k6, vulnerability/secret scans, ZAP plus scoped Strix | P7/P9; Strix is not a security certificate |
 | D20 | Accepted | Frontend starts at measurable backend gate B, not a claimed 80–90% based on LOC | Operational definition of requested sequence |
+| D21 | Accepted | Go 1.27.1 pinned as the backend toolchain; stdlib-only P1 slice builds offline | P1; revisit on supported-release cadence |
+| D22 | Accepted | `/api/v3` contract slice frozen in `backend/contracts/openapi.yaml`; v2 kept only as reference for the old demo client during migration | P1; P10 retires v2 compatibility |
+| D23 | Accepted | Strict JSON boundary rejects duplicate keys, unknown fields, trailing data, oversized bodies and excess depth before typed decoding | P1; R05 trust boundary |
 
 ## Material changes from the previous plan
 
