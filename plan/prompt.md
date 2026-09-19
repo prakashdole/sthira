@@ -103,7 +103,7 @@ Tests/commands, environment and results (Go 1.27.1 darwin/arm64, GOCACHE=$TMPDIR
     wrong method=405; oversized body=413 (unit test)
 Source/model/data/build versions used: Go 1.27.1 (Homebrew bottle, arm64);
   standard library only; no external modules; no model/data sources.
-Commit(s): see P1 commit on CLEAN (reported in the phase reply)
+Commit(s): 796ff45081c8443b970ca760f7cdaa6fad62a05e (CLEAN branch)
 Unresolved internal work: known-IDs context is a fixture seam (per-request
   source-snapshot resolution arrives in P2/P4); readiness prober is a seam with
   no real dependencies yet; v2 compatibility strategy recorded in trd.md.
