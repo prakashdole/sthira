@@ -189,15 +189,19 @@ Python CAP-expiry resolution (Slice 2): the existing
   disabled, no assertion weakened. It passes.
 Python baseline drift (recorded honestly; sandbox/product-separate; NOT repaired
   under P2 Go scope): full suite is now 7 failed / 259 passed, not the 1-failure
-  baseline P0 recorded. All 7 failures are 401 auth-gating after collaborator
-  commit d1ce025 ("snapshot polished emergency guidance") rewrote
-  src/sthira/api/middleware.py and dropped /api/v2/alerts, /api/v2/demo and
-  /api/v2/operational-packages from PUBLIC_GET_PREFIXES. Affected:
-  test_v2_assignment_api, test_v2_cap (alert API), test_v2_demo_scenario_api
-  (x2), test_v2_nemotron, test_v2_operational_package_api,
-  test_v2_request_observability. This is a pre-existing Python middleware
-  regression, independent of the Go work; owner decision needed on whether the
-  v2 demo routes should be public or the tests should authenticate.
+  baseline P0 recorded. CORRECTION (P3 Checkpoint A): the seven failures are NOT
+  all authentication failures. Verified breakdown after collaborator commit
+  d1ce025 ("snapshot polished emergency guidance") rewrote
+  src/sthira/api/middleware.py AND deleted routes from src/sthira_v2/app.py:
+    - 5x 401 auth-gating (test_v2_assignment_api, test_v2_cap alert API,
+      test_v2_demo_scenario_api x2, test_v2_operational_package_api) after
+      d1ce025 dropped /api/v2/alerts, /api/v2/demo, /api/v2/operational-packages
+      and the assignment POST/GET exemptions from the public set.
+    - 1x 404: GET /api/v2/ai/provider/status (test_v2_nemotron) — d1ce025
+      deleted the route outright; not an auth failure.
+    - 1x missing X-Request-ID header (test_v2_request_observability) — d1ce025
+      removed the request-correlation middleware; not an auth failure.
+  Resolution is recorded in the P3 Checkpoint A completion record below.
 Unresolved internal work: catalogue has no user-supplied states/zones yet, so
   acceptance is blocked by O01; source activation and catalogue are in-memory
   (durable persistence is P3); voice-commands resolver is a static seam until
@@ -209,6 +213,75 @@ External dependency, owner and exact evidence needed: O01 — user/authority mus
   v2 demo routes needs an owner decision.
 Next eligible step: P3 — Durable storage, authorization and ledger foundation
   (P1 + P2 contract slice are satisfied).
+```
+
+## P3 Checkpoint A completion record (2026-09-19) — handoff correction
+
+```text
+Phase / status: P3 Checkpoint A — correct and complete the P2 handoff — DONE
+  (Python reference contract restored; Go contract reconciliation done).
+Starting and checked revision: CLEAN branch at 24bddf1 (P2 ledger record).
+Scope completed and changed files:
+  A1. Corrected the P2 evidence record above: the seven Python failures were
+      5x 401 + 1x 404 (deleted /ai/provider/status) + 1x missing X-Request-ID,
+      not seven authentication failures.
+  A2. Restored the Python reference contract broken by collaborator d1ce025:
+      - src/sthira/api/middleware.py — restored X-Request-ID correlation
+        (validated via sthira_v2.security.validate_public_identifier, safe
+        req- fallback on invalid), content-length bounding, and security
+        headers (X-Content-Type-Options, Referrer-Policy, X-Frame-Options) on
+        EVERY response including 401/413/503 errors. Public-read set covers
+        citizen guidance only: /api/v2/alerts/active, /demo/scenario,
+        /operational-packages/active, /ai/provider/status, /readiness,
+        /status, /health/readiness, /voice/status. Private reservations
+        (/api/v2/assignments) and operator source-health (/alerts/health,
+        /alerts/quarantine) require a verified session (R22); they are NOT
+        broadly exposed just to pass tests.
+      - src/sthira_v2/app.py — restored the routes d1ce025 deleted:
+        ai/provider/status, /readiness (compact compat), alerts/active,
+        alerts/health, alerts/quarantine, alerts/{id}, demo/scenario,
+        operational-packages/active, assignments POST/GET/arrival. Kept the
+        newer guidance/chat route. Verified the frontend demo client only
+        consumes chat/readiness/status/voice (all still public); no other
+        consumer breaks.
+  A3. Resolved the CAP-expiry API test with controlled test-time at the
+      service boundary: app.py now exposes a settable demo_clock and
+      reset_demo_alert_service(); tests inject a "now" inside the fixture
+      validity window (2026-09-12/13) and separately assert expired alerts are
+      excluded once the window passes. The fixture date was NOT moved and
+      expiry was NOT disabled. Expiry is terminal in a lifecycle service, so
+      the expiry assertion uses an isolated service, not the shared singleton.
+  A4. backend/internal/catalogue — separated structural validation from launch
+      acceptance. Validate() stays structural + data gaps; new AssessLaunch()
+      applies the T13 launch bar (10-15 states, 2-3 sourced scenarios/state).
+      Added structural regressions: duplicate scenario IDs across states and
+      cross-state historical references (a scenario may not borrow another
+      state's event). Missing user data stays an explicit Gap; a draft manifest
+      does not require completed P6 language benchmarks.
+  A5. backend/internal/opkg — reconciled the package contract with the
+      persisted model (trd.md domain boundaries): Route gains mode (required),
+      verified_by/verified_at (paired), valid_from/valid_until (paired,
+      ordered); Zone gains role; AllocationPolicy gains reservation_expiry,
+      temporary_stay min/max days (paired, ordered), allow_walk_ins,
+      allow_transfers. Documented that structural validity is distinct from
+      current/authenticated/authorized operational status.
+Tests/commands, environment and results:
+  - Python (.venv Python 3.11.16, pytest 9.1.1): full suite 267 passed
+    (was 7 failed / 259 passed at P2 handoff). No paid calls; no .txt changes.
+  - Go 1.27.1 (GOCACHE=$TMPDIR): gofmt clean, go vet clean, go build ok,
+    go test ./internal/catalogue ./internal/opkg -count=1 ok.
+Commit(s) (CLEAN branch):
+  324b019 restore Python reference contract (middleware + routes + CAP-expiry)
+  c522bd2 catalogue structural-vs-launch separation + regressions
+  cc7f4c0 package contract persisted-model reconciliation
+Unresolved internal work: none for Checkpoint A. The two parallel Python CAP
+  paths (cap.py vs xml_parser.py) still need consumer/evidence mapping before
+  dedup (deferred; not P3 scope).
+External dependency, owner and exact evidence needed: none for Checkpoint A.
+Next eligible step: P3 Checkpoint B — durable storage/authorization/ledger.
+  PostgreSQL/PostGIS is NOT installed and the sandbox blocks network egress
+  (no Homebrew, no Go module fetch for a Postgres driver), so real-DB
+  verification is BLOCKED_EXTERNAL; see the P3 record when written.
 ```
 
 ## Required completion record
