@@ -28,7 +28,7 @@ Status vocabulary: NOT_STARTED, IN_PROGRESS, BLOCKED_EXTERNAL, DONE. Evidence ap
 | --- | --- | --- | --- | --- |
 | P0 | Reconcile scope and freeze migration evidence | None | DONE | Baseline frozen at `ce6adca`; see "P0 baseline evidence" below |
 | P1 | Go foundation and executable contracts | P0 | DONE | Go 1.27.1 pinned; bounded `/api/v3` slice in `backend/`; see "P1 completion record" below |
-| P2 | Government-data contracts and scenario ingestion | P1 | NOT_STARTED | None for new implementation |
+| P2 | Government-data contracts and scenario ingestion | P1 | PARTIAL | Infra DONE (capfeed/opkg/sourceact/catalogue/context-resolver); catalogue acceptance BLOCKED on O01 user data; see "P2 completion record" below |
 | P3 | Durable storage, authorization and ledger foundation | P1 + P2 contract slice | NOT_STARTED | None for new implementation |
 | P4 | Destination choice and immediate/temporary stays | P2 + P3 | NOT_STARTED | None for new implementation |
 | P5 | Offline package and map-delivery protocol | P2 + P3 | NOT_STARTED | None for new implementation |
@@ -110,6 +110,105 @@ Unresolved internal work: known-IDs context is a fixture seam (per-request
 External dependency, owner and exact evidence needed: none for P1. (Go install
   required running outside the agent sandbox; now pinned.)
 Next eligible step: P2 — Government-data contracts and scenario ingestion.
+```
+
+## P2 completion record (2026-09-19)
+
+```text
+Phase / status: P2 — Government-data contracts and scenario ingestion —
+  INFRASTRUCTURE DONE; catalogue acceptance BLOCKED on O01 (missing user data).
+  Per the phase gate, missing user zones/reports prevent a full P2 scenario
+  acceptance claim, so P2 is not marked wholly DONE.
+Starting and checked revision: CLEAN branch at fceef6d (P1 796ff45 + 0761ae9).
+Scope completed and changed files (all new Go, stdlib-only, offline-buildable):
+  - backend/internal/capfeed/cap.go — bounded CAP 1.2 parse: 1 MiB limit,
+    explicit <!DOCTYPE/<!ENTITY rejection (Go encoding/xml tolerates a bare
+    DOCTYPE, so it is rejected by pre-check), malformed/empty/oversized
+    rejection, sender allow-list, RFC 3339 timezone-aware timestamps,
+    expires>effective, CAP lat,lon → GeoJSON lon,lat polygon conversion with
+    closure + CRS bounds, raw-artifact preservation + SHA-256 digest, and
+    Actual+Public operational distinction (Exercise/Test/System/Draft and
+    non-Public are never operational).
+  - backend/internal/capfeed/lifecycle.go — injected-clock lifecycle: dedup
+    (idempotent), Update→SUPERSEDED, Cancel→CANCELLED, unknown-reference and
+    out-of-order (stale) quarantine with safe reason codes, Expire() excludes
+    expired alerts from Active. Concurrent-safe.
+  - backend/internal/capfeed/transport.go — conditional retrieval over an
+    injectable Fetcher: 200 updates cache, 304 revalidates via stored ETag,
+    bounded retries with exponential backoff, per-attempt timeout, stale-cache
+    preservation (STALE_CACHE) or UNAVAILABLE when no cache; never fabricates.
+  - backend/internal/opkg/package.go — operational-package validation: evidence
+    class, version, jurisdiction, effective/expiry window, explicit
+    non-negative safe-zone capacity, CRS-bounded zone locations and LineString
+    route geometry, red/safe-zone cross-references, authorized route approval,
+    and an allocation policy that must explicitly order every safe zone.
+    Canonical checksum excludes checksum_sha256 and signature (integrity, not
+    authority); signature validity is verified by an injected Verifier and is
+    distinct from signer authorization. Self-consistent across marshal round-trip.
+  - backend/internal/sourceact/activation.go — source activation lifecycle
+    DISCOVERED→…→OPERATIONAL with legal-successor transitions, optimistic
+    version increments, per-transition audit; only OPERATIONAL may drive
+    guidance; SUSPENDED blocks; RETIRED is terminal. In-memory (preview/tests).
+  - backend/internal/catalogue/catalogue.go — canonical scenario catalogue
+    validator owned outside frontend source. Historical event evidence is kept
+    distinct from synthetic geometry/exercise time; historical scenarios must
+    reference a known evidence record, synthetic must not. Structural failures
+    are errors; missing user data (states, language evidence) is a blocking
+    Gap, never invented. frontend/v2/src/scenario.json remains a consumer until
+    deliberately migrated.
+  - backend/internal/httpserver/{server,handlers}.go + cmd/sthira/main.go —
+    closed the client-echo trust gap in handleVoiceCommands: authoritative data
+    version/jurisdiction/permitted IDs are now resolved per request via a
+    ContextResolver against server state; client-echoed request_id/data_version
+    are correlated, never trusted. No resolver → fail closed 503; stale client
+    data_version → 409. Removed dead knownIDs/enabledLanguages server fields;
+    demo smoke path uses a static server-side snapshot resolver.
+Tests/commands, environment and results (Go 1.27.1 darwin/arm64, GOCACHE=$TMPDIR):
+  - gofmt -l . → clean; go vet ./... → clean; go build ./... → ok
+  - go test (non-socket pkgs) -count=1 → ok: capfeed (30), opkg (24),
+    sourceact (13), catalogue (12), contracts, httpjson
+  - Bounded parser fuzz: go test -fuzz FuzzParse -fuzztime 15s → PASS
+    (~1.5M execs, no panic/hang; non-CAPError results rejected by invariant)
+  - Socket-bound HTTP suite run in user terminal (sandbox blocks bind):
+    go test ./internal/httpserver/ -v → 14 PASS incl.
+    TestVoiceCommandsFailsClosedWithoutResolver (503) and
+    TestVoiceCommandsRejectsStaleDataVersion (409)
+Source/model/data/build versions used: Go 1.27.1; standard library only; no
+  external modules; no model/data sources; no paid calls; no .txt changes.
+Commit(s) (CLEAN branch):
+  06537fd CAP ingestion/lifecycle/transport
+  9360178 operational-package validation
+  c0ec0c6 source activation lifecycle
+  b1eb86c scenario catalogue validator
+  fceef6d server-side context resolution (trust fix)
+Python CAP-expiry resolution (Slice 2): the existing
+  tests/test_v2_cap.py::test_lifecycle_deduplicates_updates_cancels_and_expires
+  already uses controlled test-time semantics — an injected mutable clock
+  (now[0] advanced +3h) drives expiry, with a separate assertion that expired
+  alerts are excluded from active(). No fixture date was moved, no expiry check
+  disabled, no assertion weakened. It passes.
+Python baseline drift (recorded honestly; sandbox/product-separate; NOT repaired
+  under P2 Go scope): full suite is now 7 failed / 259 passed, not the 1-failure
+  baseline P0 recorded. All 7 failures are 401 auth-gating after collaborator
+  commit d1ce025 ("snapshot polished emergency guidance") rewrote
+  src/sthira/api/middleware.py and dropped /api/v2/alerts, /api/v2/demo and
+  /api/v2/operational-packages from PUBLIC_GET_PREFIXES. Affected:
+  test_v2_assignment_api, test_v2_cap (alert API), test_v2_demo_scenario_api
+  (x2), test_v2_nemotron, test_v2_operational_package_api,
+  test_v2_request_observability. This is a pre-existing Python middleware
+  regression, independent of the Go work; owner decision needed on whether the
+  v2 demo routes should be public or the tests should authenticate.
+Unresolved internal work: catalogue has no user-supplied states/zones yet, so
+  acceptance is blocked by O01; source activation and catalogue are in-memory
+  (durable persistence is P3); voice-commands resolver is a static seam until
+  P4 binds a real source snapshot; the two parallel Python CAP paths
+  (cap.py vs xml_parser.py) still need consumer/evidence mapping before dedup.
+External dependency, owner and exact evidence needed: O01 — user/authority must
+  supply demo states, zones, routes, approvals and historical-event references
+  before catalogue acceptance can be claimed. Python middleware auth policy for
+  v2 demo routes needs an owner decision.
+Next eligible step: P3 — Durable storage, authorization and ledger foundation
+  (P1 + P2 contract slice are satisfied).
 ```
 
 ## Required completion record
