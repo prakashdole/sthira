@@ -1,0 +1,106 @@
+// Package store is the P3 durable persistence layer for the Go backend. It
+// owns SQL and transaction boundaries for sources/artifacts, versioned facts,
+// packages, sessions, reservations/inventory, idempotency and audit/outbox.
+//
+// Driver posture: the layer is written against database/sql via the small DBTX
+// seam so the SQL, transaction scope and optimistic-concurrency logic are
+// concrete and reviewable without a live database. The PostgreSQL driver
+// (pgx stdlib) is wired in Open(); fetching that driver requires network access
+// the build sandbox denies, so real-DB verification is BLOCKED_EXTERNAL. No
+// in-memory substitute is provided here: an in-memory green cannot satisfy the
+// PostgreSQL/PostGIS acceptance bar (trd.md T05, prompt.md P3).
+//
+// Optimistic concurrency: every mutable row carries a version. Mutations use an
+// atomic conditional UPDATE ... WHERE id = $1 AND version = $2 and inspect
+// RowsAffected; zero rows means a stale expected version (conflict) or a missing
+// row, never a silent success. Incrementing under an in-process mutex alone is
+// not acceptable; the conditional update is the real guard.
+package store
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+)
+
+// ErrVersionConflict is returned when an atomic conditional update matched no
+// row because the caller's expected version was stale.
+var ErrVersionConflict = errors.New("store: version conflict")
+
+// ErrNotFound is returned when the target row does not exist.
+var ErrNotFound = errors.New("store: not found")
+
+// DBTX is the minimal database/sql surface the layer needs, satisfied by both
+// *sql.DB and *sql.Tx. This keeps every repository method runnable inside or
+// outside an explicit transaction without duplicating SQL.
+type DBTX interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// Store is the durable persistence root. It wraps a *sql.DB and exposes
+// transaction-scoped work via InTx.
+type Store struct {
+	db *sql.DB
+}
+
+// New wraps an already-open *sql.DB. The driver must be registered by the
+// caller (see Open for the intended pgx wiring).
+func New(db *sql.DB) *Store { return &Store{db: db} }
+
+// Open is where the pgx stdlib driver is registered and a pool opened.
+//
+// Blocked: pgx is not in the module cache and the sandbox denies module fetch,
+// so this cannot be compiled or exercised here. The intended wiring is:
+//
+//	import _ "github.com/jackc/pgx/v5/stdlib"
+//	db, err := sql.Open("pgx", dsn)
+//
+// with the pool tuned (max open/idle, conn max lifetime) and a startup Ping.
+// Provided as the documented seam so the blocked dependency is explicit rather
+// than hidden behind an in-memory stand-in.
+func Open(dsn string) (*Store, error) {
+	return nil, errors.New("store: pgx driver unavailable in this build; " +
+		"provision PostgreSQL/PostGIS and fetch github.com/jackc/pgx/v5 (BLOCKED_EXTERNAL)")
+}
+
+// InTx runs fn inside a single database transaction. State change, audit event
+// and outbox record are written by the repositories using the same *sql.Tx, so
+// they commit or roll back atomically (T05). fn receives the Tx as a DBTX.
+func (s *Store) InTx(ctx context.Context, fn func(tx DBTX) error) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: begin tx: %w", err)
+	}
+	if err := fn(tx); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: commit: %w", err)
+	}
+	return nil
+}
+
+// execConditional runs an atomic conditional UPDATE/DELETE and translates zero
+// affected rows into ErrVersionConflict (or ErrNotFound when notFound is true).
+// This is the single guard every optimistic mutation routes through.
+func execConditional(ctx context.Context, db DBTX, notFound bool, query string, args ...any) error {
+	res, err := db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		if notFound {
+			return ErrNotFound
+		}
+		return ErrVersionConflict
+	}
+	return nil
+}
