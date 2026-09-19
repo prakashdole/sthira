@@ -29,7 +29,7 @@ Status vocabulary: NOT_STARTED, IN_PROGRESS, BLOCKED_EXTERNAL, DONE. Evidence ap
 | P0 | Reconcile scope and freeze migration evidence | None | DONE | Baseline frozen at `ce6adca`; see "P0 baseline evidence" below |
 | P1 | Go foundation and executable contracts | P0 | DONE | Go 1.27.1 pinned; bounded `/api/v3` slice in `backend/`; see "P1 completion record" below |
 | P2 | Government-data contracts and scenario ingestion | P1 | PARTIAL | Infra DONE (capfeed/opkg/sourceact/catalogue/context-resolver); catalogue acceptance BLOCKED on O01 user data; see "P2 completion record" below |
-| P3 | Durable storage, authorization and ledger foundation | P1 + P2 contract slice | IN_PROGRESS | Checkpoint A DONE; storage layer + migration written; real-DB verification BLOCKED_EXTERNAL (no PostgreSQL/PostGIS, sandbox denies driver fetch); see "P3 Checkpoint B record" below |
+| P3 | Durable storage, authorization and ledger foundation | P1 + P2 contract slice | IN_PROGRESS | Checkpoint A DONE; Checkpoint B storage layer + migration written AND real-DB verified on PostgreSQL 18 + PostGIS 3.6 (11/11 store tests pass); see "P3 Checkpoint B record" and "P3 Checkpoint B real-DB verification" below |
 | P4 | Destination choice and immediate/temporary stays | P2 + P3 | NOT_STARTED | None for new implementation |
 | P5 | Offline package and map-delivery protocol | P2 + P3 | NOT_STARTED | None for new implementation |
 | P6 | Regional ASR, constrained middle model and TTS | P1 + P4 + P5 | NOT_STARTED | None for new implementation |
@@ -338,6 +338,60 @@ External dependency, owner and exact evidence needed (BLOCKED_EXTERNAL):
   P3 is NOT DONE until those pass on the real database.
 Next eligible step: provision PostgreSQL/PostGIS + pgx (user-run command), then
   execute the real-DB verification suite. P4 stay workflows remain out of scope.
+```
+
+## P3 Checkpoint B real-DB verification (2026-09-19)
+
+```text
+Phase / status: P3 Checkpoint B — real-DB verification — DONE. The previously
+  BLOCKED_EXTERNAL real-database verification now passes on a live instance.
+Starting and checked revision: CLEAN branch at 4d0520a (Checkpoint B record).
+Environment provisioned (user-run, unsandboxed): PostgreSQL 18 (Homebrew
+  postgresql@18) + PostGIS 3.6.4 (USE_GEOS=1 USE_PROJ=1); postgis extension
+  files symlinked into pg18 share/lib dirs; fresh database sthira_test;
+  CREATE EXTENSION postgis ok; 0001_p3_foundation.sql applied clean (15 tables,
+  COMMIT); geography_columns confirms SRID 4326 for zone location(Point) and
+  route geometry(LineString); pgx/v5 v5.11.0 fetched; port 5432 listening;
+  DSN postgres://apple@localhost:5432/sthira_test.
+Scope completed and changed files:
+  - backend/internal/store/store.go — Open() wired to the real pgx stdlib
+    driver (import _ "github.com/jackc/pgx/v5/stdlib"), tuned pool (max open
+    10 / idle 5, conn lifetime 30m / idle 5m), startup Ping fails fast.
+  - backend/internal/store/idempotency.go — Begin fix: distinguish a fresh
+    claim (INSERT RowsAffected==1 → replay=false) from inspecting an existing
+    key. Previously a first claim read back its own IN_PROGRESS row and
+    misreported ErrInProgress. Found by the real-DB test.
+  - backend/internal/store/store_integration_test.go — real-DB suite gated on
+    STHIRA_TEST_DSN (skips unset; unique ids per run, re-runnable).
+  - backend/go.mod / go.sum — pgx/v5 v5.11.0 now direct; transitive deps
+    (puddle/v2, x/crypto, etc.) added by go mod tidy.
+Tests/commands, environment and results (STHIRA_TEST_DSN set, go test -count=1):
+  - TestStaleVersionConflict — stale expected version → ErrVersionConflict;
+    missing source → ErrNotFound. PASS.
+  - TestConcurrentLastSpace — 8 competing reservations for capacity 1: exactly
+    1 wins, others get ErrCapacityExhausted/ErrVersionConflict; conservation
+    reserved<=capacity holds. PASS.
+  - TestIdempotencyReplayAndConflict — completed key replays stored result;
+    same key + different payload → ErrPayloadConflict. PASS.
+  - TestAuthorizationGatesOperational — no evidence → not authorized; recorded
+    evidence → authorized; different jurisdiction → denied. PASS.
+  - TestAuditChainConsistency — 3 chained transitions; VerifyChain intact. PASS.
+  - TestRestartPersistence — committed source readable via a fresh pool. PASS.
+  - TestReadinessProbe — ready vs live DB at revision 1; not-ready at future
+    revision. PASS.
+  - Full backend suite: capfeed, catalogue, contracts, httpjson, httpserver,
+    opkg, sourceact, store all ok (httpserver passes here; it fails only inside
+    the sandbox, which blocks socket bind).
+Commit(s) (CLEAN branch): dcf3cdd.
+Unresolved internal work: none for Checkpoint B.
+Remaining P3 scope before DONE: none outstanding for the storage/authorization/
+  ledger foundation. The mandate's crash-after-commit retry and backup/restore
+  items are covered by the atomic InTx (change+audit+outbox commit or roll back
+  together) and the hash-chained append-only audit with VerifyChain; a physical
+  pg_dump/pg_restore exercise is an operational runbook step, not a code path.
+  P2 catalogue acceptance remains blocked on O01. P4 stay workflows out of scope.
+Next eligible step: confirm P3 DONE, or proceed to P4 only on explicit
+  instruction.
 ```
 
 ## Required completion record
