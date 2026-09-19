@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from sthira_v2.cap import AlertLifecycleService, CAPError, CAPHTTPAdapter, parse_cap
 from fastapi.testclient import TestClient
 from sthira.api.app import app
+from tests.authutil import authed_client
 
 
 NOW = datetime(2026, 9, 11, 12, tzinfo=timezone.utc)
@@ -98,9 +99,13 @@ def test_http_adapter_never_treats_invalid_first_refresh_as_success():
 
 
 def test_alert_api_exposes_synthetic_feed_health_and_provenance():
+    # /alerts/active is public citizen guidance; feed health and quarantine are
+    # operator source-health data and require an authenticated session (R22).
     client = TestClient(app)
     active = client.get("/api/v2/alerts/active")
     assert active.status_code == 200
     assert active.json()["source"] == "SYNTHETIC_DEMO"
-    assert client.get("/api/v2/alerts/health").json()["data"]["status"] == "SYNTHETIC_DEMO"
-    assert client.get("/api/v2/alerts/quarantine").json()["source_status"] == "SYNTHETIC_DEMO"
+
+    operator = authed_client()
+    assert operator.get("/api/v2/alerts/health").json()["data"]["status"] == "SYNTHETIC_DEMO"
+    assert operator.get("/api/v2/alerts/quarantine").json()["source_status"] == "SYNTHETIC_DEMO"

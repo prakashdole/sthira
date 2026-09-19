@@ -1,5 +1,9 @@
 """
-HTTP authentication and degraded-mode mutation guard (REM-001, REM-007, DEC-046).
+HTTP authentication, request correlation, and degraded-mode mutation guard
+(REM-001, REM-007, DEC-046).
+
+Access policy (R22): public citizen guidance needs no account; private
+reservations and operator/source-health actions require a verified session.
 """
 
 from starlette.requests import Request
@@ -7,6 +11,7 @@ from starlette.responses import JSONResponse
 
 from sthira.core.identity import parse_bearer, verify_access_token
 from sthira.modules.live_ops.service import degraded_mode_controller
+from sthira_v2.security import MAX_AUDIO_BYTES, MAX_REQUEST_BYTES, new_request_id, validate_public_identifier
 
 PUBLIC_EXACT = {
     "/",
@@ -19,11 +24,20 @@ PUBLIC_EXACT = {
 }
 PUBLIC_PREFIXES = ("/ui",)
 PUBLIC_POST = {"/api/v1/auth/login", "/api/v2/guidance/chat", "/api/v2/voice/transcriptions"}
+# Public citizen guidance: read-only, synthetic-demo-labelled, non-private.
+# Private reservations (/api/v2/assignments) and operator source-health
+# (/api/v2/alerts/health, /api/v2/alerts/quarantine) are NOT here: they require
+# a verified session (R22).
 PUBLIC_GET_PREFIXES = (
     "/api/v1/demo",
     "/api/v2/status",
+    "/api/v2/readiness",
     "/api/v2/health/readiness",
     "/api/v2/voice/status",
+    "/api/v2/ai/provider/status",
+    "/api/v2/alerts/active",
+    "/api/v2/demo",
+    "/api/v2/operational-packages/active",
     "/api/v1/localization",
     "/api/v1/reporting/public-projection",
     "/api/v1/reporting/public-transparency-projection",
@@ -55,11 +69,33 @@ async def security_middleware(request: Request, call_next):
     path = request.url.path
     method = request.method.upper()
 
+    incoming_request_id = request.headers.get("x-request-id")
+    try:
+        request_id = validate_public_identifier(incoming_request_id) if incoming_request_id else new_request_id()
+    except ValueError:
+        request_id = new_request_id()
+    request.state.request_id = request_id
+
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            limit = (MAX_AUDIO_BYTES * 4 // 3) + 1024 if path == "/api/v2/voice/transcriptions" else MAX_REQUEST_BYTES
+            if int(content_length) > limit:
+                response = JSONResponse(status_code=413, content={"detail": "request body exceeds limit"})
+                response.headers["X-Request-ID"] = request_id
+                return response
+        except ValueError:
+            response = JSONResponse(status_code=400, content={"detail": "invalid content-length"})
+            response.headers["X-Request-ID"] = request_id
+            return response
+
     if not _is_public(method, path):
         token = parse_bearer(request.headers.get("authorization"))
         user = verify_access_token(token) if token else None
         if user is None:
-            return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+            response = JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+            response.headers["X-Request-ID"] = request_id
+            return response
         request.state.user = user
     else:
         token = parse_bearer(request.headers.get("authorization"))
@@ -69,6 +105,13 @@ async def security_middleware(request: Request, call_next):
         try:
             degraded_mode_controller.assert_writes_allowed()
         except RuntimeError as exc:
-            return JSONResponse(status_code=503, content={"detail": str(exc)})
+            response = JSONResponse(status_code=503, content={"detail": str(exc)})
+            response.headers["X-Request-ID"] = request_id
+            return response
 
-    return await call_next(request)
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    return response

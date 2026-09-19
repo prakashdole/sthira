@@ -1,10 +1,10 @@
-from fastapi.testclient import TestClient
-
-from sthira.api.app import app
+from tests.authutil import authed_client
 
 
 def test_assignment_and_arrival_api_is_idempotent_and_demo_labeled():
-    client = TestClient(app)
+    # Assignments are private reservations (R22): they require an authenticated
+    # session; knowing an assignment ID alone is not authorization.
+    client = authed_client()
     request = {"assignment_id": "api-a1", "alert_id": "ALERT-DEMO-2026-09-12", "citizen_session_id": "synthetic-session-001", "idempotency_key": "assignment-key-1", "party_size": 2}
     first = client.post("/api/v2/assignments", json=request)
     repeated = client.post("/api/v2/assignments", json=request)
