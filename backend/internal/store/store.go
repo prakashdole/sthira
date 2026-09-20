@@ -31,6 +31,9 @@ import (
 // row because the caller's expected version was stale.
 var ErrVersionConflict = errors.New("store: version conflict")
 
+// ErrConflict is returned when an operation conflicts with an existing immutable record.
+var ErrConflict = errors.New("store: conflict")
+
 // ErrNotFound is returned when the target row does not exist.
 var ErrNotFound = errors.New("store: not found")
 

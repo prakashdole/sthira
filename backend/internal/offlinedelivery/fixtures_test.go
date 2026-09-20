@@ -42,6 +42,9 @@ type mockPublicationSource struct {
 	manifestCalls atomic.Int64
 	cardCalls     atomic.Int64
 	resourceCalls atomic.Int64
+
+	manifestErr error
+	cardErr     error
 }
 
 func newMockPublicationSource() *mockPublicationSource {
@@ -220,6 +223,9 @@ func (m *mockPublicationSource) GetManifest(ctx context.Context, jurisdiction st
 	m.manifestCalls.Add(1)
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.manifestErr != nil {
+		return nil, m.manifestErr
+	}
 	rec, ok := m.manifests[jurisdiction]
 	if !ok {
 		return nil, ErrNotFound
@@ -231,6 +237,9 @@ func (m *mockPublicationSource) GetCard(ctx context.Context, packageID string, v
 	m.cardCalls.Add(1)
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.cardErr != nil {
+		return nil, m.cardErr
+	}
 	rec, ok := m.cards[cardKey(packageID, version)]
 	if !ok {
 		return nil, ErrNotFound

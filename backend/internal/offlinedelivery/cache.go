@@ -3,6 +3,7 @@ package offlinedelivery
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -84,6 +85,31 @@ func (c *MemoryCache) InvalidateJurisdiction(jurisdiction string) {
 	delete(c.manifests, jurisdiction)
 }
 
+// InvalidateManifest clears any cached manifest for a jurisdiction.
+func (c *MemoryCache) InvalidateManifest(jurisdiction string) {
+	c.InvalidateJurisdiction(jurisdiction)
+}
+
+// InvalidateCard clears any cached card for a packageID and version.
+func (c *MemoryCache) InvalidateCard(packageID string, version int) {
+	key := fmt.Sprintf("%s:%d", packageID, version)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.cards, key)
+}
+
+// InvalidatePackage clears all cached card versions for a packageID.
+func (c *MemoryCache) InvalidatePackage(packageID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	prefix := packageID + ":"
+	for k := range c.cards {
+		if strings.HasPrefix(k, prefix) {
+			delete(c.cards, k)
+		}
+	}
+}
+
 type call[T any] struct {
 	wg  sync.WaitGroup
 	val T
@@ -139,6 +165,21 @@ func NewCachedSource(inner PublicationSource, cfg Config, now func() time.Time) 
 	}
 }
 
+// InvalidateManifest purges the cached manifest for a jurisdiction so upstream updates are immediately visible.
+func (s *CachedSource) InvalidateManifest(jurisdiction string) {
+	s.cache.InvalidateManifest(jurisdiction)
+}
+
+// InvalidateCard purges the cached card for a package and version.
+func (s *CachedSource) InvalidateCard(packageID string, version int) {
+	s.cache.InvalidateCard(packageID, version)
+}
+
+// InvalidatePackage purges all cached card versions for a package.
+func (s *CachedSource) InvalidatePackage(packageID string) {
+	s.cache.InvalidatePackage(packageID)
+}
+
 // GetManifest checks cache before calling upstream, coalescing concurrent misses.
 func (s *CachedSource) GetManifest(ctx context.Context, jurisdiction string) (*ManifestRecord, error) {
 	if rec, hit := s.cache.GetManifest(jurisdiction); hit {
@@ -152,7 +193,7 @@ func (s *CachedSource) GetManifest(ctx context.Context, jurisdiction string) (*M
 		if err != nil {
 			return nil, err
 		}
-		if rec != nil && s.cfg.ManifestCacheTTL > 0 {
+		if rec != nil && rec.SourceStatus == "CURRENT" && s.cfg.ManifestCacheTTL > 0 {
 			s.cache.PutManifest(jurisdiction, rec, s.cfg.ManifestCacheTTL)
 		}
 		return rec, nil
@@ -173,7 +214,7 @@ func (s *CachedSource) GetCard(ctx context.Context, packageID string, version in
 		if err != nil {
 			return nil, err
 		}
-		if rec != nil && s.cfg.CardCacheTTL > 0 {
+		if rec != nil && rec.SourceStatus == "CURRENT" && s.cfg.CardCacheTTL > 0 {
 			s.cache.PutCard(packageID, version, rec, s.cfg.CardCacheTTL)
 		}
 		return rec, nil
