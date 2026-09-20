@@ -198,6 +198,10 @@ paths:
         for the replacement stay (both on first success and on idempotent replay).
         The authenticated GET /reservations/{new_stay_id} provides the recovery
         path after restart or a lost response.
+        snapshot_version is REQUIRED for EXTEND and TRANSFER (those are
+        commitments that revalidate against the locked snapshot). For ARRIVE,
+        CANCEL, DEPART the snapshot_version may be omitted because no
+        commitment revalidation is required.
       security:
         - bearerAuth: []
       parameters:
@@ -218,7 +222,12 @@ paths:
                 new_end_date: { type: string, format: date }
                 new_facility_id: { type: string }
                 new_route_id: { type: string }
-                snapshot_version: { type: integer }
+                snapshot_version:
+                  type: integer
+                  description: >-
+                    Required for EXTEND and TRANSFER (snapshot_version > 0).
+                    Rejected with INVALID_VALUE if zero or missing for those
+                    commitment types.
       responses:
         '200': { $ref: '#/components/responses/DataEnvelope' }
         '400': { $ref: '#/components/responses/ErrorEnvelope' }

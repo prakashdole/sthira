@@ -93,15 +93,15 @@ func runRacing(t *testing.T, fns ...func() error) {
 // reservation releases the lock, proving the lock contention is real.
 //
 // Ordering protocol (no sleeps):
-//   1. reservation begins tx and acquires FOR UPDATE on the source row.
-//   2. reservation signals "holding-lock" (lockHeld barrier).
-//   3. quarantine begins tx and attempts the UPDATE; the UPDATE blocks
-//      because the source row is locked.
-//   4. observer polls pg_locks and signals when it sees the wait state.
-//   5. reservation verifies the source version was NOT bumped under its
-//      lock, commits its work, and signals "released".
-//   6. quarantine's UPDATE unblocks; it returns whatever the store says
-//      (here ErrVersionConflict, since its srcVersion is now stale).
+//  1. reservation begins tx and acquires FOR UPDATE on the source row.
+//  2. reservation signals "holding-lock" (lockHeld barrier).
+//  3. quarantine begins tx and attempts the UPDATE; the UPDATE blocks
+//     because the source row is locked.
+//  4. observer polls pg_locks and signals when it sees the wait state.
+//  5. reservation verifies the source version was NOT bumped under its
+//     lock, commits its work, and signals "released".
+//  6. quarantine's UPDATE unblocks; it returns whatever the store says
+//     (here ErrVersionConflict, since its srcVersion is now stale).
 func TestSourceLockBlocksWithdrawal(t *testing.T) {
 	s := testDB(t)
 	s2 := openSecondStore(t)
@@ -112,10 +112,10 @@ func TestSourceLockBlocksWithdrawal(t *testing.T) {
 	stays := NewStayStore(ChainAuditor{})
 	sources := NewSourceStore(ChainAuditor{})
 
-	lockHeld := make(chan struct{})          // commit has the source FOR UPDATE
-	quarantineIssued := make(chan struct{})  // quarantine tx has issued its UPDATE
+	lockHeld := make(chan struct{})           // commit has the source FOR UPDATE
+	quarantineIssued := make(chan struct{})   // quarantine tx has issued its UPDATE
 	quarantineObserved := make(chan struct{}) // observer confirms wait
-	commitRelease := make(chan struct{})     // commit transaction finished
+	commitRelease := make(chan struct{})      // commit transaction finished
 
 	var quarObservedWaiting atomic.Bool
 
@@ -212,17 +212,17 @@ func TestSourceLockBlocksWithdrawal(t *testing.T) {
 // succeeds against the new source version. No data corruption.
 //
 // Ordering protocol (no sleeps):
-//   1. commit begins tx and acquires FOR UPDATE on the source row.
-//   2. commit signals "lock-held" (lockHeld barrier).
-//   3. quarantine begins tx; in a goroutine issues its UPDATE (which
-//      blocks on the source row); signals "issued" (quarantineIssued).
-//   4. observer polls pg_stat_activity and signals "observed" when it
-//      sees the quarantine waiting on a Lock wait_event_type.
-//   5. commit verifies source version unchanged, commits, and signals
-//      "released".
-//   6. quarantine's UPDATE unblocks; its srcVersion is stale, so it
-//      returns ErrVersionConflict (the second-writer-sees-new-state
-//      contract).
+//  1. commit begins tx and acquires FOR UPDATE on the source row.
+//  2. commit signals "lock-held" (lockHeld barrier).
+//  3. quarantine begins tx; in a goroutine issues its UPDATE (which
+//     blocks on the source row); signals "issued" (quarantineIssued).
+//  4. observer polls pg_stat_activity and signals "observed" when it
+//     sees the quarantine waiting on a Lock wait_event_type.
+//  5. commit verifies source version unchanged, commits, and signals
+//     "released".
+//  6. quarantine's UPDATE unblocks; its srcVersion is stale, so it
+//     returns ErrVersionConflict (the second-writer-sees-new-state
+//     contract).
 func TestConcurrentBarrierCommitmentWins(t *testing.T) {
 	s := testDB(t)
 	s2 := openSecondStore(t)
@@ -322,16 +322,16 @@ func TestConcurrentBarrierCommitmentWins(t *testing.T) {
 // with ErrReservationContext. Capacity unchanged.
 //
 // Ordering protocol (no sleeps):
-//   1. quarantine begins tx and signals "in-tx" (inTx barrier).
-//   2. commit begins tx; signals "in-tx" (inTx barrier).
-//   3. quarantine issues its UPDATE; commits its lock acquisition via
-//      "withdrawal-locked" barrier.
-//   4. commit issues its SELECT FOR UPDATE; the observer confirms the
-//      commit is waiting; commit signals "commit-observer-saw-wait".
-//   5. quarantine waits for "commit-observed" barrier; then releases
-//      its tx by completing.
-//   6. commit's SELECT FOR UPDATE unblocks and reads the QUARANTINED
-//      state; it returns ErrReservationContext.
+//  1. quarantine begins tx and signals "in-tx" (inTx barrier).
+//  2. commit begins tx; signals "in-tx" (inTx barrier).
+//  3. quarantine issues its UPDATE; commits its lock acquisition via
+//     "withdrawal-locked" barrier.
+//  4. commit issues its SELECT FOR UPDATE; the observer confirms the
+//     commit is waiting; commit signals "commit-observer-saw-wait".
+//  5. quarantine waits for "commit-observed" barrier; then releases
+//     its tx by completing.
+//  6. commit's SELECT FOR UPDATE unblocks and reads the QUARANTINED
+//     state; it returns ErrReservationContext.
 func TestConcurrentBarrierWithdrawalWins(t *testing.T) {
 	s := testDB(t)
 	s2 := openSecondStore(t)
@@ -341,10 +341,10 @@ func TestConcurrentBarrierWithdrawalWins(t *testing.T) {
 	pkgID, facID, srcID, srcVersion := seedOperationalPackage(t, s, 5, start, end)
 	sources := NewSourceStore(ChainAuditor{})
 
-	withdrawalLocked := make(chan struct{})     // quarantine holds the source UPDATE lock
-	commitIssued := make(chan struct{})         // commit issued its SELECT FOR UPDATE
+	withdrawalLocked := make(chan struct{})      // quarantine holds the source UPDATE lock
+	commitIssued := make(chan struct{})          // commit issued its SELECT FOR UPDATE
 	commitObservedWaiting := make(chan struct{}) // observer confirms commit is in lock-wait
-	withdrawalRelease := make(chan struct{})    // quarantine completed
+	withdrawalRelease := make(chan struct{})     // quarantine completed
 
 	var quarObserved atomic.Bool
 

@@ -582,6 +582,84 @@ Next eligible step: P5 — offline package and map-delivery protocol is NOT
   resolved or explicitly accepted as an operational (not engineering) gap. No
   native frontend, no permanent relocation, no geofencing; .txt preserved.
 
+## P4 acceptance matrix (2026-09-20, second review)
+
+Compact acceptance matrix added per the bounded-corrections task. Each row
+is `requirement → implementation path → regression test → actual result`.
+Items marked **OPEN** are unfinished internal work; items marked
+**EXTERNAL** are blocked on a non-internal decision. Status is the
+documented state as of the latest commit, not a claim that the work is
+complete.
+
+| # | Requirement | Implementation | Regression test | Result |
+|---|------------|----------------|------------------|--------|
+| 1a | Route-required policy gate: missing route fails closed when policy requires | opkg.AllocationPolicy.RouteRequired; StayPolicy.RouteRequired; ErrRouteRequired; RevalidateReservationContext rejects before any capacity change | TestRouteRequiredPolicyRejectsMissingRoute | PASS (no writes; 409 ROUTE_UNVERIFIED) |
+| 1b | Synthetic gate is server-controlled (no caller header/body field opens it) | stay_handlers.handleGuidanceQuery hardcodes RouteGateOpen=false; X-Sthira-Synthetic-Route-Gate header and `route_gate_open` body field both ignored | TestHeaderCannotEnableSyntheticRoute; TestRequestBodyCannotEnableSyntheticRoute | PASS (both 200s report route_gate=false; no destination route_verified) |
+| 1c | Isolated synthetic HTTP exercise completes the intended flow | Direct store-level ChoiceQuerier with RouteGateOpen=true (the only seam that opens the gate) | TestValidIsolatedSyntheticFlowSucceeds | PASS (one RouteVerified destination under isolated gate) |
+| 1d | A valid route must match the selected destination | stay.RevalidateReservationContext joins `route_versions.to_safe_zone_id = facilities.safe_zone_id` | TestReservationRouteToWrongDestinationRejected; TestTransferWithOldDestinationRouteRejected | PASS (both rejected with 409; no writes) |
+| 1e | Closed/unavailable destinations and routes cannot create new commitments | RevalidateReservationContext reads zone_versions.status (OPEN/PUBLISHED allowed; CLOSED/FULL/etc rejected); route closure row checked | TestReservationClosedRouteRejected; TestUnavailableDestinationRejected | PASS (409; no writes) |
+| 2  | Transfer persists the validated replacement route | StayStore.Transfer takes `newRouteID *string`; the caller (handleStayEvent) passes `req.NewRouteID`; the replacement stay is persisted with `newRouteID`, never `st.RouteID` | TestTransferReturnsReplacementIDsAndRead (reads `stays.route_id` for the replacement); TestTransferRetryReturnsSameReplacementIDs | PASS |
+| 3  | Snapshot version mandatory where required | revalidateSnapshotVersion rejects expectedVersion <= 0 with snapshotStaleError; createReservationRequest rejects snapshot_version <= 0 at the boundary; handleStayEvent rejects <= 0 for EXTEND/TRANSFER | TestReservationRejectsZeroSnapshotVersion (explicit 0 and absent, both 400 INVALID_VALUE; no writes); TestExtendRejectsZeroSnapshotVersion (same on EXTEND) | PASS |
+| 4a | Concurrency evidence with real DB lock-wait observation (no sleeps) | concurrency_helpers_test.go: openObserverPool (third pool); pollUntilWaiting reads pg_stat_activity.wait_event_type='Lock' | TestSourceLockBlocksWithdrawal; TestConcurrentBarrierCommitmentWins; TestConcurrentBarrierWithdrawalWins | PASS |
+| 4b | Both orderings (commit-wins and withdrawal-wins) exercised deterministically | The two barrier protocols force one side's SQL to acquire the lock first; the observer confirms the OTHER side is in lock-wait state | TestConcurrentBarrierCommitmentWins (commit holds FOR UPDATE first; quarantine UPDATE blocked under lock); TestConcurrentBarrierWithdrawalWins (quarantine UPDATE first; commit SELECT FOR UPDATE blocked under lock) | PASS |
+| 4c | Removing the source lock causes the regression to fail for the intended reason | Demonstrated: deleting `FOR UPDATE OF s, p` from RevalidateReservationContext makes TestSourceLockBlocksWithdrawal / TestConcurrentBarrier* time out (observer never sees lock-wait). Implementation restored before commit. | (manual sanity check; not a Go test) | PASS for the demonstration |
+| 4d | Worker goroutine errors propagate to parent; no t.Fatalf inside goroutines | runRacing helper collects errors on a channel; t.Fatalf only on the main goroutine | All Test*Barrier* / TestSourceLock* | PASS |
+| 5a | Audit replay through real HTTP boundary (no error suppression) | audit_integration_test.go (httpserver package): real doAuthed over httptest.Server | TestRetrySameKeyNoDuplicateAuditOrCapacityReplay | PASS (same payload, 1 event, capacity unchanged, VerifyChain ok) |
+| 5b | Audit chain via VerifyChain (global ordering) | store.VerifyChain reads all events ordered by event_seq, recomputes prev/event hashes | TestChainInterleavingAcrossSubjects (interleaved A1,B1,A2,B2 across two stays; VerifyChain passes) | PASS |
+| 5c | Legitimate interleaving from different subjects | Two stays on separate facilities; event_seqs cross between them | TestChainInterleavingAcrossSubjects | PASS |
+| 5d | Audit identity scope: same key by distinct operators does not collide | auditEventID now includes actor (session_id); two distinct operator sessions with same key produce distinct EventIDs | TestTwoCorrectionsDistinctOperatorSessions | PASS |
+| 6a | Test isolation: per-test unique jurisdictions for context resolver tests | context_integration_test.go uses uniqueJTEST(); persisted resolver is jurisdiction-scoped (D36) | TestPersistedContextResolves; TestPersistedContextFailsClosedNoPackage; TestPersistedContextStaleClientVersion; TestPersistedContextUnknownIDRejected | PASS |
+| 6b | Test isolation: TestExpiryWorker robust against shared-DB pollution | Tick() returns a count over the WHOLE DB; the assertion is on THIS test's stay state (was: `n != 1`) | TestExpiryWorker | PASS |
+| 7  | All tests pass on the first run; no rerun required | `go test ./... -count=1` and `-count=3` both clean | full-suite run | PASS |
+
+### Overstated claims removed from prior records
+
+- **no-sleeps concurrency**: the previous "no sleeps" wording was inaccurate;
+  TestConcurrentWithdrawalAndCommitmentBarrier used `time.Sleep(10ms)` /
+  `time.Sleep(5ms)` to establish ordering. Replaced with channel-only
+  ordering + pg_stat_activity observation in commit `93135ae`.
+- **HTTP synthetic isolation**: the previous claim that the synthetic gate
+  was reachable only via the store API is now strengthened by
+  TestRequestBodyCannotEnableSyntheticRoute, which smuggles
+  `route_gate_open` / `route_gate` / `synthetic_route_gate` AND the header,
+  and verifies route_gate=false, no destination route_verified.
+- **complete route omission protection**: the previous wording described
+  "missing route → reserved-route validation" but did not enforce a
+  policy-driven `route_required=true`. Now enforced via the new
+  `opkg.AllocationPolicy.RouteRequired` / `StayPolicy.RouteRequired`
+  / `ErrRouteRequired` chain; dedicated test
+  `TestRouteRequiredPolicyRejectsMissingRoute`.
+- **successful replay proof**: the previous TestRetrySameKeyNoDuplicateAuditOrCapacity
+  discarded the operation result (`_ = stays.Extend(...)` with a comment
+  explaining why) and asserted only on audit-event count. Replaced with
+  TestRetrySameKeyNoDuplicateAuditOrCapacityReplay that exercises the
+  real HTTP boundary, asserts the replay returned the same stored
+  payload, asserts no duplicate event, and runs VerifyChain.
+- **P4 closure**: not claimed; P4 remains IN_PROGRESS until the external
+  operator-IdP blocker (O14) is resolved.
+
+### Internal work left for P4 closure
+
+None for the engineering scope of these bounded corrections. Each
+acceptance row above is exercised by a real-DB Go test against the
+shared `sthira_test` instance (PostgreSQL 18 + PostGIS 3.6,
+`STHIRA_TEST_DSN=postgres://apple@localhost:5432/sthira_test`). The
+single remaining OPEN item in the P4 record (the external operator-IdP
+decision, O14) is not engineering work.
+
+### External blockers (unchanged)
+
+- **O05** — route authority OPEN; operational routing stays disabled.
+  The synthetic route gate is reachable only via the isolated store API
+  (the ChoiceQuery.RouteGateOpen field, not exposed via HTTP), so the
+  P4 closure cannot enable operational routing on its own.
+- **O07** — stay policy OPEN; the existing synthetic allocation_policy
+  in test fixtures carries authoritative bounds (temporary_stay_min/max,
+  reservation_expiry_seconds, allow_transfers, route_required). Real
+  policy is still operator-supplied.
+- **O14** — operator IdP not selected; production issuance remains
+  fail-closed 503. The OperatorVerifier seam is the integration point.
+
 ## Required completion record
 
 ```text

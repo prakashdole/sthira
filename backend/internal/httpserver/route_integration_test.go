@@ -443,3 +443,67 @@ func TestUnavailableDestinationRejected(t *testing.T) {
 		t.Fatalf("closed-zone held=%d, want 0", got)
 	}
 }
+
+// TestReservationRejectsZeroSnapshotVersion: a reservation with
+// snapshot_version=0 (or absent in JSON) is rejected at the boundary with
+// 400 INVALID_VALUE; the revalidation path is never reached. This locks
+// down the "mandatory where required" defect at the handler boundary
+// rather than relying on the inner snapshotStaleError branch.
+func TestReservationRejectsZeroSnapshotVersion(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	pkgID, facID, _ := seedHTTPPackageFacility(t, st, 3, httpDayT(1), httpDayT(4))
+	_, token := createSession(t, srv)
+
+	// snapshot_version=0 explicitly.
+	body := fmt.Sprintf(`{"facility_id":%q,"package_id":%q,"party_size":1,"start_date":%q,"end_date":%q,"idempotency_key":%q,"snapshot_version":0}`,
+		facID, pkgID, httpDay(1), httpDay(2), "zero-snap-key")
+	rec := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token, body)
+	if rec.code != http.StatusBadRequest {
+		t.Fatalf("zero snapshot_version: code=%d, want 400; body=%s", rec.code, rec.body)
+	}
+	// snapshot_version absent.
+	body2 := fmt.Sprintf(`{"facility_id":%q,"package_id":%q,"party_size":1,"start_date":%q,"end_date":%q,"idempotency_key":%q}`,
+		facID, pkgID, httpDay(1), httpDay(2), "absent-snap-key")
+	rec2 := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token, body2)
+	if rec2.code != http.StatusBadRequest {
+		t.Fatalf("absent snapshot_version: code=%d, want 400; body=%s", rec2.code, rec2.body)
+	}
+	// No writes.
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 0 {
+		t.Fatalf("zero/absent snapshot_version held=%d, want 0", got)
+	}
+}
+
+// TestExtendRejectsZeroSnapshotVersion: an EXTEND event with snapshot_version
+// missing or 0 is rejected at the boundary with 400 INVALID_VALUE.
+func TestExtendRejectsZeroSnapshotVersion(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	pkgID, facID, snap := seedHTTPPackageFacility(t, st, 3, httpDayT(1), httpDayT(4))
+	_, token := createSession(t, srv)
+	// Reserve first.
+	rec := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token,
+		reservationBody(facID, pkgID, 1, httpDay(1), httpDay(2), "ext-zero-snap-key", snap))
+	if rec.code != http.StatusCreated {
+		t.Fatalf("reserve: code=%d body=%s", rec.code, rec.body)
+	}
+	stayID := decodeFirstStay(t, rec)
+
+	// EXTEND with snapshot_version=0.
+	body := fmt.Sprintf(`{"type":"EXTEND","new_end_date":%q,"idempotency_key":%q,"snapshot_version":0}`,
+		httpDay(3), "ext-zero-key")
+	ex := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations/"+stayID+"/events", token, body)
+	if ex.code != http.StatusBadRequest {
+		t.Fatalf("zero EXTEND snapshot_version: code=%d, want 400; body=%s", ex.code, ex.body)
+	}
+	// EXTEND with snapshot_version missing.
+	body2 := fmt.Sprintf(`{"type":"EXTEND","new_end_date":%q,"idempotency_key":%q}`,
+		httpDay(3), "ext-absent-key")
+	ex2 := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations/"+stayID+"/events", token, body2)
+	if ex2.code != http.StatusBadRequest {
+		t.Fatalf("absent EXTEND snapshot_version: code=%d, want 400; body=%s", ex2.code, ex2.body)
+	}
+}
