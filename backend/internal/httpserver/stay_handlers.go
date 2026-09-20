@@ -15,6 +15,7 @@ package httpserver
 // atomically with their audit/outbox records.
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -281,21 +282,40 @@ func (s *Server) handleCreateReservation(w http.ResponseWriter, r *http.Request)
 		if curVersion != req.SnapshotVersion {
 			return &snapshotStaleError{want: req.SnapshotVersion, got: curVersion}
 		}
-		// Persist the reservation record then the stay (held capacity).
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO reservations (reservation_id, session_id, facility_id, service_date, party_size, state, version, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,'RESERVED',1,$6,$6)`,
-			resID, sess.SessionID, req.FacilityID, start, req.PartySize, now); err != nil {
-			return err
-		}
 		var routeID *string
 		if req.RouteID != "" {
 			routeID = &req.RouteID
+		}
+		// Authoritative eligibility at commit: source OPERATIONAL + authorized,
+		// package effective/unexpired/not superseded, facility in package, route
+		// verified/valid/unclosed. Locks the package row so a concurrent
+		// quarantine/revocation serializes against this reservation.
+		_, pol, err := store.RevalidateReservationContext(ctx, tx, req.FacilityID, req.PackageID, routeID, now)
+		if err != nil {
+			return err
+		}
+		// Enforce the authoritative temporary-stay bounds before allocating or
+		// locking inventory; derive the hold expiry from policy + server time.
+		if err := store.CheckStayBounds(pol, start, end); err != nil {
+			return err
+		}
+		expiresAt, err := store.HoldExpiry(pol, now)
+		if err != nil {
+			return err
+		}
+		// Persist the reservation record then the stay (held capacity), with the
+		// policy-derived hold expiry stored atomically on both.
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO reservations (reservation_id, session_id, facility_id, service_date, party_size, state, version, created_at, updated_at, expires_at)
+			VALUES ($1,$2,$3,$4,$5,'RESERVED',1,$6,$6,$7)`,
+			resID, sess.SessionID, req.FacilityID, start, req.PartySize, now, expiresAt); err != nil {
+			return err
 		}
 		if err := stays.Reserve(ctx, tx, store.Stay{
 			StayID: stayID, ReservationID: resID, SessionID: sess.SessionID,
 			FacilityID: req.FacilityID, PartySize: req.PartySize,
 			StartDate: start, EndDate: end, PackageID: req.PackageID, RouteID: routeID,
+			ExpiresAt: &expiresAt,
 		}, now); err != nil {
 			return err
 		}
@@ -340,6 +360,16 @@ func (s *Server) writeReservationError(w http.ResponseWriter, r *http.Request, e
 		s.writeError(w, r, http.StatusConflict, contracts.ErrValidation, "invalid stay transition", "", false)
 	case errors.Is(err, store.ErrStayNotFound):
 		s.writeError(w, r, http.StatusNotFound, contracts.ErrNotFound, "stay not found", "", false)
+	case errors.Is(err, store.ErrReservationContext):
+		s.writeError(w, r, http.StatusConflict, contracts.ErrValidation, "reservation context is not currently operational (source/package/facility)", "package_id", false)
+	case errors.Is(err, store.ErrFacilityPackageMismatch):
+		s.writeError(w, r, http.StatusConflict, contracts.ErrValidation, "facility is not in the requested package", "facility_id", false)
+	case errors.Is(err, store.ErrRouteUnavailable):
+		s.writeError(w, r, http.StatusConflict, contracts.ErrRouteUnverified, "route is not verified and currently valid", "route_id", false)
+	case errors.Is(err, store.ErrNoStayPolicy):
+		s.writeError(w, r, http.StatusConflict, contracts.ErrValidation, "authoritative stay policy is missing a required field", "", false)
+	case errors.Is(err, store.ErrStayOutOfPolicy):
+		s.writeError(w, r, http.StatusConflict, contracts.ErrValidation, "stay dates outside the authoritative temporary-stay bounds", "end_date", false)
 	default:
 		s.writeError(w, r, http.StatusInternalServerError, contracts.ErrInternal, "reservation failed", "", true)
 	}
@@ -460,12 +490,50 @@ func (s *Server) handleStayEvent(w http.ResponseWriter, r *http.Request) {
 			if perr != nil {
 				return errInvalidEvent
 			}
+			// Extension creates a new commitment: revalidate the stay's context
+			// and enforce the authoritative temporary-stay bounds on the new
+			// interval before allocating the added dates.
+			pkgID, facID, routeID, cerr := stays.StayContext(ctx, tx, stayID)
+			if cerr != nil {
+				return cerr
+			}
+			_, pol, rerr := store.RevalidateReservationContext(ctx, tx, facID, pkgID, routeID, now)
+			if rerr != nil {
+				return rerr
+			}
+			st, gerr := getStayDates(ctx, tx, stayID)
+			if gerr != nil {
+				return gerr
+			}
+			if berr := store.CheckStayBounds(pol, st.StartDate, nd); berr != nil {
+				return berr
+			}
 			opErr = stays.Extend(ctx, tx, stayID, nd, now)
 		case "TRANSFER":
 			if req.NewFacilityID == "" {
 				return errInvalidEvent
 			}
-			opErr = stays.Transfer(ctx, tx, stayID, newID("STAY"), newID("RES"), req.NewFacilityID, now)
+			// Transfer creates a new commitment at a new facility: the policy must
+			// authorize transfers, and the new facility+package+route context must
+			// be currently operational before any capacity moves.
+			pkgID, _, routeID, cerr := stays.StayContext(ctx, tx, stayID)
+			if cerr != nil {
+				return cerr
+			}
+			_, pol, rerr := store.RevalidateReservationContext(ctx, tx, req.NewFacilityID, pkgID, routeID, now)
+			if rerr != nil {
+				return rerr
+			}
+			if pol.AllowTransfers == nil || !*pol.AllowTransfers {
+				return store.ErrStayOutOfPolicy
+			}
+			// Fresh hold deadline for the replacement stay, derived from the same
+			// authoritative policy; never copy the old stay's (possibly due) deadline.
+			newExp, herr := store.HoldExpiry(pol, now)
+			if herr != nil {
+				return herr
+			}
+			opErr = stays.Transfer(ctx, tx, stayID, newID("STAY"), newID("RES"), req.NewFacilityID, &newExp, now)
 		default:
 			return errInvalidEvent
 		}
@@ -500,6 +568,22 @@ func (s *Server) handleStayEvent(w http.ResponseWriter, r *http.Request) {
 
 var errNotOwner = errors.New("not the owning session")
 var errInvalidEvent = errors.New("invalid stay event")
+
+// stayDates holds a stay's current interval for bounds checks.
+type stayDates struct {
+	StartDate, EndDate time.Time
+}
+
+// getStayDates reads a stay's current half-open interval.
+func getStayDates(ctx context.Context, tx store.DBTX, stayID string) (stayDates, error) {
+	var d stayDates
+	err := tx.QueryRowContext(ctx, `SELECT start_date, end_date FROM stays WHERE stay_id = $1`, stayID).
+		Scan(&d.StartDate, &d.EndDate)
+	if err != nil {
+		return stayDates{}, store.ErrStayNotFound
+	}
+	return d, nil
+}
 
 func sha256Hex(s string) string {
 	h := sha256.Sum256([]byte(s))

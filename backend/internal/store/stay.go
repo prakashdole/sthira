@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -330,7 +331,7 @@ func (s *StayStore) Extend(ctx context.Context, db DBTX, stayID string, newEndDa
 // held first; only after the new stay is safely created is the old stay's space
 // released. A failed transfer (new facility full) returns ErrCapacityExhausted
 // and retains the original stay unchanged.
-func (s *StayStore) Transfer(ctx context.Context, db DBTX, stayID, newStayID, newReservationID, newFacilityID string, now time.Time) error {
+func (s *StayStore) Transfer(ctx context.Context, db DBTX, stayID, newStayID, newReservationID, newFacilityID string, newExpiresAt *time.Time, now time.Time) error {
 	st, err := s.getStayForUpdate(ctx, db, stayID)
 	if err != nil {
 		return err
@@ -360,13 +361,16 @@ func (s *StayStore) Transfer(ctx context.Context, db DBTX, stayID, newStayID, ne
 		newReservationID, st.SessionID, newFacilityID, st.StartDate, st.PartySize, now); err != nil {
 		return err
 	}
+	// The replacement stay gets a FRESH hold deadline, not the old one: copying a
+	// stale/expired deadline into the new stay would let an already-due hold
+	// persist. The caller derives the new deadline from authoritative policy.
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO stays (stay_id, reservation_id, session_id, facility_id, party_size,
 			start_date, end_date, state, package_id, route_id, transferred_from, version, created_at, updated_at, expires_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1,$12,$12,$13)`,
 		newStayID, newReservationID, st.SessionID, newFacilityID, st.PartySize,
 		st.StartDate, st.EndDate, string(StayReserved), st.PackageID, st.RouteID,
-		stayID, now, st.ExpiresAt); err != nil {
+		stayID, now, newExpiresAt); err != nil {
 		return err
 	}
 	// Release the old stay's space (held if RESERVED, occupied if ARRIVED).
@@ -389,6 +393,170 @@ func (s *StayStore) Transfer(ctx context.Context, db DBTX, stayID, newStayID, ne
 		return err
 	}
 	return s.record(ctx, db, newStayID, st.SessionID, "STAY_TRANSFER_IN", "", string(StayReserved), now)
+}
+
+// ErrReservationContext is returned when the reservation's authoritative
+// context (source state/authorization, package validity/supersession,
+// jurisdiction, facility membership) is not currently operational. A direct
+// reservation request is denied just as the resolved voice context is.
+var ErrReservationContext = errors.New("store: reservation context is not currently operational")
+
+// ErrFacilityPackageMismatch is returned when the facility does not belong to
+// the requested package.
+var ErrFacilityPackageMismatch = errors.New("store: facility is not in the requested package")
+
+// ErrRouteUnavailable is returned when a requested route is not verified,
+// currently valid and unclosed in the package. Operational routing stays
+// disabled while O05 is open; a route that cannot be verified blocks the
+// commitment that depends on it.
+var ErrRouteUnavailable = errors.New("store: route is not verified and currently valid")
+
+// StayPolicy is the authoritative government-owned stay/reservation policy read
+// from the package body. Fields are absent (nil) when the source does not supply
+// them; they are never inferred or defaulted.
+type StayPolicy struct {
+	ReservationExpirySeconds *int
+	TemporaryStayMinDays     *int
+	TemporaryStayMaxDays     *int
+	AllowTransfers           *bool
+}
+
+// ErrNoStayPolicy is returned when a required policy field is absent from the
+// authoritative package. The caller must reject rather than invent a default.
+var ErrNoStayPolicy = errors.New("store: authoritative stay policy is missing the required field")
+
+// ErrStayOutOfPolicy is returned when the requested stay dates fall outside the
+// authoritative temporary-stay bounds.
+var ErrStayOutOfPolicy = errors.New("store: stay dates outside the authoritative temporary-stay bounds")
+
+// policyBody is the minimal package-body shape for the allocation policy.
+type policyBody struct {
+	AllocationPolicy struct {
+		ReservationExpirySeconds *int  `json:"reservation_expiry_seconds"`
+		TemporaryStayMinDays     *int  `json:"temporary_stay_min_days"`
+		TemporaryStayMaxDays     *int  `json:"temporary_stay_max_days"`
+		AllowTransfers           *bool `json:"allow_transfers"`
+	} `json:"allocation_policy"`
+}
+
+// RevalidateReservationContext enforces the authoritative eligibility gates at
+// commit time, inside the reservation transaction. It binds the facility,
+// optional route, package and requested stay to ONE currently-operational
+// context: the package's source must be OPERATIONAL with a currently-valid
+// authorization in the package's jurisdiction; the package must be effective,
+// unexpired and not superseded; the facility must belong to the package. A
+// requested route must be verified, currently valid and unclosed. The package
+// row is locked FOR UPDATE so a concurrent quarantine/revocation/supersession
+// serializes against this reservation: whichever commits first determines
+// whether the reservation sees a still-operational or already-withdrawn
+// context. Returns the package jurisdiction and the authoritative stay policy
+// for the caller's use.
+func RevalidateReservationContext(ctx context.Context, db DBTX, facilityID, packageID string, routeID *string, now time.Time) (string, StayPolicy, error) {
+	var (
+		jurisdiction string
+		body         []byte
+	)
+	err := db.QueryRowContext(ctx, `
+		SELECT p.jurisdiction, p.body
+		FROM packages p
+		JOIN sources s ON s.source_id = p.source_id
+		WHERE p.package_id = $1
+		  AND s.state = 'OPERATIONAL'
+		  AND p.effective_at <= $2 AND p.expires_at > $2
+		  AND p.superseded_by IS NULL
+		  AND EXISTS (
+			SELECT 1 FROM source_authorizations sa
+			WHERE sa.source_id = p.source_id AND sa.jurisdiction = p.jurisdiction
+			  AND (sa.expires_at IS NULL OR sa.expires_at > $2)
+		  )
+		FOR UPDATE OF p`, packageID, now).Scan(&jurisdiction, &body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", StayPolicy{}, ErrReservationContext
+	}
+	if err != nil {
+		return "", StayPolicy{}, err
+	}
+	// Facility must belong to the requested package.
+	var fcount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*) FROM facilities WHERE facility_id = $1 AND package_id = $2`,
+		facilityID, packageID).Scan(&fcount); err != nil {
+		return "", StayPolicy{}, err
+	}
+	if fcount == 0 {
+		return "", StayPolicy{}, ErrFacilityPackageMismatch
+	}
+	// A requested route must be verified, currently valid and unclosed.
+	if routeID != nil && *routeID != "" {
+		var rcount int
+		if err := db.QueryRowContext(ctx, `
+			SELECT count(*) FROM route_versions rv
+			WHERE rv.package_id = $1 AND rv.route_id = $2
+			  AND rv.approval IN ('SYNTHETIC_DEMO','AUTHORIZED_OPERATIONAL')
+			  AND rv.verified_by IS NOT NULL
+			  AND (rv.valid_from IS NULL OR rv.valid_from <= $3)
+			  AND (rv.valid_until IS NULL OR rv.valid_until > $3)
+			  AND NOT EXISTS (
+				SELECT 1 FROM route_closures rc
+				WHERE rc.route_id = rv.route_id AND rc.reopened_at IS NULL)`,
+			packageID, *routeID, now).Scan(&rcount); err != nil {
+			return "", StayPolicy{}, err
+		}
+		if rcount == 0 {
+			return "", StayPolicy{}, ErrRouteUnavailable
+		}
+	}
+	// Read the authoritative stay policy from the same locked package row.
+	var pb policyBody
+	if err := json.Unmarshal(body, &pb); err != nil {
+		return "", StayPolicy{}, err
+	}
+	pol := StayPolicy{
+		ReservationExpirySeconds: pb.AllocationPolicy.ReservationExpirySeconds,
+		TemporaryStayMinDays:     pb.AllocationPolicy.TemporaryStayMinDays,
+		TemporaryStayMaxDays:     pb.AllocationPolicy.TemporaryStayMaxDays,
+		AllowTransfers:           pb.AllocationPolicy.AllowTransfers,
+	}
+	return jurisdiction, pol, nil
+}
+
+// CheckStayBounds enforces the authoritative temporary-stay bounds on a
+// half-open [start, end) interval. A bound that is absent means the policy does
+// not authorize stays; that is rejected, not defaulted. The interval length in
+// whole days must satisfy min <= days <= max.
+func CheckStayBounds(pol StayPolicy, start, end time.Time) error {
+	if pol.TemporaryStayMinDays == nil || pol.TemporaryStayMaxDays == nil {
+		return ErrNoStayPolicy
+	}
+	days := int(end.Sub(start).Hours() / 24)
+	if days < *pol.TemporaryStayMinDays || days > *pol.TemporaryStayMaxDays {
+		return ErrStayOutOfPolicy
+	}
+	return nil
+}
+
+// HoldExpiry derives the reservation hold deadline from the authoritative
+// policy and server time. A missing expiry policy is rejected, never defaulted.
+func HoldExpiry(pol StayPolicy, now time.Time) (time.Time, error) {
+	if pol.ReservationExpirySeconds == nil || *pol.ReservationExpirySeconds <= 0 {
+		return time.Time{}, ErrNoStayPolicy
+	}
+	return now.Add(time.Duration(*pol.ReservationExpirySeconds) * time.Second), nil
+}
+
+// StayContext returns the stay's package, facility and route for authoritative
+// revalidation of a new commitment (extension/transfer).
+func (s *StayStore) StayContext(ctx context.Context, db DBTX, stayID string) (packageID, facilityID string, routeID *string, err error) {
+	err = db.QueryRowContext(ctx, `
+		SELECT package_id, facility_id, route_id FROM stays WHERE stay_id = $1`, stayID).
+		Scan(&packageID, &facilityID, &routeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", nil, ErrStayNotFound
+	}
+	if err != nil {
+		return "", "", nil, err
+	}
+	return packageID, facilityID, routeID, nil
 }
 
 // StayFacilityJurisdiction reports the jurisdiction of the facility a stay

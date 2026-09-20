@@ -292,7 +292,8 @@ func TestFailedTransferRetainsOriginal(t *testing.T) {
 
 	// Transfer to the full facility must fail.
 	err := s.InTx(ctx, func(tx DBTX) error {
-		return stays.Transfer(ctx, tx, orig.StayID, uid("STAY"), uid("RES"), fullFac, nowUTC())
+		exp := nowUTC().Add(time.Hour)
+		return stays.Transfer(ctx, tx, orig.StayID, uid("STAY"), uid("RES"), fullFac, &exp, nowUTC())
 	})
 	if !errors.Is(err, ErrCapacityExhausted) {
 		t.Fatalf("transfer to full: got %v, want ErrCapacityExhausted", err)
@@ -328,7 +329,8 @@ func TestSuccessfulTransfer(t *testing.T) {
 	}
 	newStay := uid("STAY")
 	if err := s.InTx(ctx, func(tx DBTX) error {
-		return stays.Transfer(ctx, tx, orig.StayID, newStay, uid("RES"), facB, nowUTC())
+		exp := nowUTC().Add(time.Hour)
+		return stays.Transfer(ctx, tx, orig.StayID, newStay, uid("RES"), facB, &exp, nowUTC())
 	}); err != nil {
 		t.Fatalf("Transfer: %v", err)
 	}

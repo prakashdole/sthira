@@ -534,9 +534,10 @@ func TestOperatorQuarantineCrossJurisdiction(t *testing.T) {
 // the replay of a previously-completed key.
 func TestOperatorGrantRevokedDeniesOperationAndReplay(t *testing.T) {
 	srv, st := newOperatorServer(t, syntheticVerifier{})
-	grantOperator(t, st, "subj-rev", "JTEST")
+	subj := "subj-rev-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	grantOperator(t, st, subj, "JTEST")
 	srcID := seedOperatorSource(t, st, "JTEST")
-	_, token, rec := issueOperator(t, srv, "subj-rev")
+	_, token, rec := issueOperator(t, srv, subj)
 	if rec.code != http.StatusCreated {
 		t.Fatalf("operator session: code=%d body=%s", rec.code, rec.body)
 	}
@@ -550,7 +551,7 @@ func TestOperatorGrantRevokedDeniesOperationAndReplay(t *testing.T) {
 
 	// Revoke the grant out-of-band.
 	now := time.Now().UTC()
-	if err := (store.OperatorGrantStore{}).RevokeOperatorGrant(t.Context(), st.DB(), "subj-rev", "JTEST", now); err != nil {
+	if err := (store.OperatorGrantStore{}).RevokeOperatorGrant(t.Context(), st.DB(), subj, "JTEST", now); err != nil {
 		t.Fatalf("revoke grant: %v", err)
 	}
 
@@ -580,15 +581,16 @@ func TestOperatorGrantRevokedDeniesOperationAndReplay(t *testing.T) {
 // denied even though the session itself is unexpired and unrevoked.
 func TestOperatorGrantExpiredDeniesSession(t *testing.T) {
 	srv, st := newOperatorServer(t, syntheticVerifier{})
+	subj := "subj-exp-" + fmt.Sprintf("%d", time.Now().UnixNano())
 	// Grant that expires almost immediately.
 	now := time.Now().UTC()
 	exp := now.Add(2 * time.Second)
 	if err := (store.OperatorGrantStore{}).GrantOperator(t.Context(), st.DB(),
-		"GRANT-subj-exp-JTEST", "subj-exp", "JTEST", "test-admin", &exp, now); err != nil {
+		"GRANT-"+subj, subj, "JTEST", "test-admin", &exp, now); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	srcID := seedOperatorSource(t, st, "JTEST")
-	_, token, rec := issueOperator(t, srv, "subj-exp")
+	_, token, rec := issueOperator(t, srv, subj)
 	if rec.code != http.StatusCreated {
 		t.Fatalf("operator session: code=%d body=%s", rec.code, rec.body)
 	}

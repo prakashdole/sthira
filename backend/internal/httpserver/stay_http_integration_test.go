@@ -42,18 +42,31 @@ func newStayServer(t *testing.T) (*Server, *store.Store) {
 	return s, st
 }
 
-// seedHTTPPackageFacility seeds a package + facility + inventory and returns
-// (packageID, facilityID, snapshotVersion).
+// seedHTTPPackageFacility seeds an OPERATIONAL, authorized package + facility +
+// inventory with a valid stay policy, and returns (packageID, facilityID,
+// snapshotVersion). Reservation commit revalidation (Item B/C) requires the
+// source to be OPERATIONAL with a live authorization and the package body to
+// carry an authoritative allocation_policy; a bare DISCOVERED seed no longer
+// passes the commit gate.
 func seedHTTPPackageFacility(t *testing.T, st *store.Store, capacity int, start, end time.Time) (string, string, int) {
+	t.Helper()
+	return seedHTTPPackageFacilityPolicy(t, st, capacity, start, end,
+		`{"allocation_policy":{"reservation_expiry_seconds":3600,"temporary_stay_min_days":1,"temporary_stay_max_days":14,"allow_transfers":true}}`)
+}
+
+// seedHTTPPackageFacilityPolicy is seedHTTPPackageFacility with a caller-supplied
+// package body (to vary or omit the stay policy).
+func seedHTTPPackageFacilityPolicy(t *testing.T, st *store.Store, capacity int, start, end time.Time, body string) (string, string, int) {
 	t.Helper()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	srcID, artID, pkgID, facID := "SRC-"+suffix, "ART-"+suffix, "PKG-"+suffix, "FAC-"+suffix
 	hash := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	sources := store.NewSourceStore(store.ChainAuditor{})
 	err := st.InTx(t.Context(), func(tx store.DBTX) error {
 		if _, err := tx.ExecContext(t.Context(), `
 			INSERT INTO sources (source_id, government_owner, official_domain, state, version, created_at, updated_at)
-			VALUES ($1,'gov','gov.example','DISCOVERED',1,$2,$2)`, srcID, now); err != nil {
+			VALUES ($1,'gov','gov.example','OPERATIONAL',1,$2,$2)`, srcID, now); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(t.Context(), `
@@ -63,7 +76,17 @@ func seedHTTPPackageFacility(t *testing.T, st *store.Store, capacity int, start,
 		}
 		if _, err := tx.ExecContext(t.Context(), `
 			INSERT INTO packages (package_id, alert_id, source_id, artifact_id, version, jurisdiction, evidence_class, effective_at, expires_at, checksum_sha256, body)
-			VALUES ($1,'ALT',$2,$3,1,'JTEST','SYNTHETIC',$4,$5,$6,'{}')`, pkgID, srcID, artID, now, now.Add(24*time.Hour), hash); err != nil {
+			VALUES ($1,'ALT',$2,$3,1,'JTEST','SYNTHETIC',$4,$5,$6,$7)`, pkgID, srcID, artID, now, now.Add(24*time.Hour), hash, body); err != nil {
+			return err
+		}
+		if err := sources.RecordAuthorization(t.Context(), tx, store.Authorization{
+			AuthorizationID: "AUTH-" + srcID,
+			SourceID:        srcID,
+			GrantedBy:       "gov",
+			EvidenceRef:     "doc-1",
+			Jurisdiction:    "JTEST",
+			GrantedAt:       now,
+		}); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(t.Context(), `
@@ -446,5 +469,374 @@ func TestHTTPGuidanceQueryUnknownCapacityHonest(t *testing.T) {
 		if d.RouteVerified {
 			t.Fatalf("route verified while gate closed for %s", d.FacilityID)
 		}
+	}
+}
+
+// --- Item B: authoritative eligibility enforced at reservation commit ---
+
+// quarantineSource quarantines a source directly at the store seam.
+func quarantineSource(t *testing.T, st *store.Store, srcID string) {
+	t.Helper()
+	sources := store.NewSourceStore(store.ChainAuditor{})
+	now := time.Now().UTC()
+	err := st.InTx(t.Context(), func(tx store.DBTX) error {
+		src, err := sources.GetSource(t.Context(), tx, srcID)
+		if err != nil {
+			return err
+		}
+		return sources.Quarantine(t.Context(), tx, srcID, src.Version, "test-op", "suspect", "EV-Q-"+srcID, now)
+	})
+	if err != nil {
+		t.Fatalf("quarantine: %v", err)
+	}
+}
+
+// sourceIDForPackage resolves the source backing a seeded package.
+func sourceIDForPackage(t *testing.T, st *store.Store, pkgID string) string {
+	t.Helper()
+	var srcID string
+	if err := st.DB().QueryRowContext(t.Context(),
+		`SELECT source_id FROM packages WHERE package_id=$1`, pkgID).Scan(&srcID); err != nil {
+		t.Fatalf("resolve source: %v", err)
+	}
+	return srcID
+}
+
+// heldCount reads the held bucket for a facility/date.
+func heldCount(t *testing.T, st *store.Store, facID string, d time.Time) int {
+	t.Helper()
+	var held int
+	if err := st.DB().QueryRowContext(t.Context(),
+		`SELECT held FROM facility_inventory WHERE facility_id=$1 AND service_date=$2`,
+		facID, d).Scan(&held); err != nil {
+		t.Fatalf("read held: %v", err)
+	}
+	return held
+}
+
+// TestHTTPQuarantineDeniesNewReservation: quarantining the source after a
+// snapshot was read denies a NEW reservation and leaves capacity unchanged.
+func TestHTTPQuarantineDeniesNewReservation(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	pkgID, facID, snap := seedHTTPPackageFacility(t, st, 3, httpDayT(1), httpDayT(4))
+	_, token := createSession(t, srv)
+
+	quarantineSource(t, st, sourceIDForPackage(t, st, pkgID))
+
+	rec := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token,
+		reservationBody(facID, pkgID, 1, httpDay(1), httpDay(2), "q-key", snap))
+	if rec.code != http.StatusConflict {
+		t.Fatalf("quarantined reserve: code=%d, want 409; body=%s", rec.code, rec.body)
+	}
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 0 {
+		t.Fatalf("held=%d after denied reservation, want 0 (no capacity moved)", got)
+	}
+}
+
+// TestHTTPSuspendedSourceDeniesReservation: a SUSPENDED source denies a new
+// reservation at commit.
+func TestHTTPSuspendedSourceDeniesReservation(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	pkgID, facID, snap := seedHTTPPackageFacility(t, st, 3, httpDayT(1), httpDayT(4))
+	_, token := createSession(t, srv)
+
+	sources := store.NewSourceStore(store.ChainAuditor{})
+	srcID := sourceIDForPackage(t, st, pkgID)
+	now := time.Now().UTC()
+	err := st.InTx(t.Context(), func(tx store.DBTX) error {
+		src, err := sources.GetSource(t.Context(), tx, srcID)
+		if err != nil {
+			return err
+		}
+		return sources.Transition(t.Context(), tx, srcID, src.Version, "SUSPENDED", "test-op", "hold", "EV-S-"+srcID, now)
+	})
+	if err != nil {
+		t.Fatalf("suspend: %v", err)
+	}
+
+	rec := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token,
+		reservationBody(facID, pkgID, 1, httpDay(1), httpDay(2), "s-key", snap))
+	if rec.code != http.StatusConflict {
+		t.Fatalf("suspended reserve: code=%d, want 409; body=%s", rec.code, rec.body)
+	}
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 0 {
+		t.Fatalf("held=%d, want 0", got)
+	}
+}
+
+// TestHTTPRevokedAuthorizationDeniesReservation: removing the source's
+// authorization denies a new reservation even while the source row stays
+// OPERATIONAL.
+func TestHTTPRevokedAuthorizationDeniesReservation(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	pkgID, facID, snap := seedHTTPPackageFacility(t, st, 3, httpDayT(1), httpDayT(4))
+	_, token := createSession(t, srv)
+
+	srcID := sourceIDForPackage(t, st, pkgID)
+	if _, err := st.DB().ExecContext(t.Context(),
+		`DELETE FROM source_authorizations WHERE source_id=$1`, srcID); err != nil {
+		t.Fatalf("revoke auth: %v", err)
+	}
+
+	rec := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token,
+		reservationBody(facID, pkgID, 1, httpDay(1), httpDay(2), "r-key", snap))
+	if rec.code != http.StatusConflict {
+		t.Fatalf("unauthorized reserve: code=%d, want 409; body=%s", rec.code, rec.body)
+	}
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 0 {
+		t.Fatalf("held=%d, want 0", got)
+	}
+}
+
+// TestHTTPSupersededPackageDeniesReservation: a superseded package is no longer
+// a valid operational context.
+func TestHTTPSupersededPackageDeniesReservation(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	pkgID, facID, snap := seedHTTPPackageFacility(t, st, 3, httpDayT(1), httpDayT(4))
+	_, token := createSession(t, srv)
+
+	// superseded_by is a self-FK: create a real superseding package first.
+	pkgNewer, _, _ := seedHTTPPackageFacility(t, st, 3, httpDayT(1), httpDayT(4))
+	if _, err := st.DB().ExecContext(t.Context(),
+		`UPDATE packages SET superseded_by=$2 WHERE package_id=$1`, pkgID, pkgNewer); err != nil {
+		t.Fatalf("supersede: %v", err)
+	}
+
+	rec := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token,
+		reservationBody(facID, pkgID, 1, httpDay(1), httpDay(2), "sup-key", snap))
+	if rec.code != http.StatusConflict {
+		t.Fatalf("superseded reserve: code=%d, want 409; body=%s", rec.code, rec.body)
+	}
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 0 {
+		t.Fatalf("held=%d, want 0", got)
+	}
+}
+
+// TestHTTPFacilityPackageMismatchRejected: a facility that does not belong to
+// the requested package is rejected (no cross-package binding).
+func TestHTTPFacilityPackageMismatchRejected(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	_, facID, _ := seedHTTPPackageFacility(t, st, 3, httpDayT(1), httpDayT(4))
+	// A second, independent package; facID belongs to the first.
+	pkgID2, _, _ := seedHTTPPackageFacility(t, st, 3, httpDayT(1), httpDayT(4))
+	_, token := createSession(t, srv)
+
+	rec := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token,
+		reservationBody(facID, pkgID2, 1, httpDay(1), httpDay(2), "mm-key", 1))
+	if rec.code != http.StatusConflict {
+		t.Fatalf("mismatch reserve: code=%d, want 409; body=%s", rec.code, rec.body)
+	}
+	env := decodeEnvelope(t, rec)
+	if len(env.Errors) == 0 {
+		t.Fatalf("want error envelope, got %s", rec.body)
+	}
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 0 {
+		t.Fatalf("held=%d, want 0", got)
+	}
+}
+
+// --- Item C: expiry + stay policy wired to HTTP flows ---
+
+// TestHTTPReservationStoresPolicyDeadline: a reservation created over HTTP
+// persists expires_at derived from the authoritative policy + server time.
+func TestHTTPReservationStoresPolicyDeadline(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	pkgID, facID, snap := seedHTTPPackageFacility(t, st, 3, httpDayT(1), httpDayT(4))
+	_, token := createSession(t, srv)
+
+	before := time.Now().UTC()
+	rec := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token,
+		reservationBody(facID, pkgID, 1, httpDay(1), httpDay(2), "exp-key", snap))
+	if rec.code != http.StatusCreated {
+		t.Fatalf("reserve: code=%d body=%s", rec.code, rec.body)
+	}
+	env := decodeEnvelope(t, rec)
+	var created struct {
+		StayID string `json:"stay_id"`
+	}
+	b, _ := json.Marshal(env.Data)
+	_ = json.Unmarshal(b, &created)
+
+	var expiresAt *time.Time
+	if err := st.DB().QueryRowContext(t.Context(),
+		`SELECT expires_at FROM stays WHERE stay_id=$1`, created.StayID).Scan(&expiresAt); err != nil {
+		t.Fatalf("read expires_at: %v", err)
+	}
+	if expiresAt == nil {
+		t.Fatal("expires_at not persisted on stay")
+	}
+	// Policy is 3600s; deadline must be ~before+3600 (within a generous skew).
+	wantLo := before.Add(3590 * time.Second)
+	wantHi := time.Now().UTC().Add(3610 * time.Second)
+	if expiresAt.Before(wantLo) || expiresAt.After(wantHi) {
+		t.Fatalf("expires_at=%v outside policy window [%v, %v]", expiresAt, wantLo, wantHi)
+	}
+}
+
+// TestHTTPMissingPolicyRejected: a package without an authoritative stay policy
+// cannot create a reservation (no invented defaults).
+func TestHTTPMissingPolicyRejected(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	pkgID, facID, snap := seedHTTPPackageFacilityPolicy(t, st, 3, httpDayT(1), httpDayT(4), `{}`)
+	_, token := createSession(t, srv)
+
+	rec := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token,
+		reservationBody(facID, pkgID, 1, httpDay(1), httpDay(2), "nop-key", snap))
+	if rec.code != http.StatusConflict {
+		t.Fatalf("missing policy: code=%d, want 409; body=%s", rec.code, rec.body)
+	}
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 0 {
+		t.Fatalf("held=%d, want 0", got)
+	}
+}
+
+// TestHTTPOutOfPolicyDatesRejected: a stay interval outside the authoritative
+// min/max day bounds cannot allocate capacity.
+func TestHTTPOutOfPolicyDatesRejected(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	// Policy allows max 14 days; request a 20-day stay (seed inventory covers it).
+	pkgID, facID, snap := seedHTTPPackageFacility(t, st, 3, httpDayT(1), httpDayT(25))
+	_, token := createSession(t, srv)
+
+	rec := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token,
+		reservationBody(facID, pkgID, 1, httpDay(1), httpDay(21), "oop-key", snap))
+	if rec.code != http.StatusConflict {
+		t.Fatalf("out-of-policy dates: code=%d, want 409; body=%s", rec.code, rec.body)
+	}
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 0 {
+		t.Fatalf("held=%d, want 0", got)
+	}
+}
+
+// TestHTTPExpiryWorkerReleasesHoldOnce: a reservation whose policy deadline
+// passes is expired by the real worker, releasing capacity exactly once.
+func TestHTTPExpiryWorkerReleasesHoldOnce(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	// 1-second expiry policy so the worker can fire on controlled time.
+	pkgID, facID, snap := seedHTTPPackageFacilityPolicy(t, st, 2, httpDayT(1), httpDayT(4),
+		`{"allocation_policy":{"reservation_expiry_seconds":1,"temporary_stay_min_days":1,"temporary_stay_max_days":14,"allow_transfers":true}}`)
+	_, token := createSession(t, srv)
+
+	rec := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token,
+		reservationBody(facID, pkgID, 1, httpDay(1), httpDay(2), "wk-key", snap))
+	if rec.code != http.StatusCreated {
+		t.Fatalf("reserve: code=%d body=%s", rec.code, rec.body)
+	}
+	env := decodeEnvelope(t, rec)
+	var created struct {
+		StayID string `json:"stay_id"`
+	}
+	b, _ := json.Marshal(env.Data)
+	_ = json.Unmarshal(b, &created)
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 1 {
+		t.Fatalf("held=%d before expiry, want 1", got)
+	}
+
+	// Advance past the deadline, then run the real worker tick.
+	time.Sleep(1500 * time.Millisecond)
+	stays := store.NewStayStore(store.ChainAuditor{})
+	worker := store.NewExpiryWorker(st, stays)
+	if _, err := worker.Tick(t.Context()); err != nil {
+		t.Fatalf("worker tick: %v", err)
+	}
+
+	var state string
+	if err := st.DB().QueryRowContext(t.Context(),
+		`SELECT state FROM stays WHERE stay_id=$1`, created.StayID).Scan(&state); err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if state != "EXPIRED" {
+		t.Fatalf("state=%s, want EXPIRED", state)
+	}
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 0 {
+		t.Fatalf("held=%d after expiry, want 0 (released)", got)
+	}
+
+	// A second tick is a no-op: capacity released exactly once.
+	if _, err := worker.Tick(t.Context()); err != nil {
+		t.Fatalf("worker tick 2: %v", err)
+	}
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 0 {
+		t.Fatalf("held=%d after second tick, want 0 (no double release)", got)
+	}
+}
+
+// TestHTTPFailedTransferPreservesOriginal: a transfer to a full facility fails
+// and leaves the original stay and its capacity intact.
+func TestHTTPFailedTransferPreservesOriginal(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	pkgID, facID, snap := seedHTTPPackageFacility(t, st, 2, httpDayT(1), httpDayT(4))
+	// A full target facility in the SAME package (capacity 0).
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	fullFac := "FAC-FULL-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	err := st.InTx(t.Context(), func(tx store.DBTX) error {
+		if _, err := tx.ExecContext(t.Context(), `
+			INSERT INTO facilities (facility_id, package_id, safe_zone_id, timezone, version, updated_at)
+			VALUES ($1,$2,'SZ','Asia/Kolkata',1,$3)`, fullFac, pkgID, now); err != nil {
+			return err
+		}
+		for d := httpDayT(1); d.Before(httpDayT(4)); d = d.AddDate(0, 0, 1) {
+			if _, err := tx.ExecContext(t.Context(), `
+				INSERT INTO facility_inventory (facility_id, service_date, capacity, reserved, held, occupied, version, updated_at)
+				VALUES ($1,$2,0,0,0,0,1,$3)`, fullFac, d, now); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("seed full facility: %v", err)
+	}
+
+	_, token := createSession(t, srv)
+	rec := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token,
+		reservationBody(facID, pkgID, 1, httpDay(1), httpDay(2), "tf-key", snap))
+	if rec.code != http.StatusCreated {
+		t.Fatalf("reserve: code=%d body=%s", rec.code, rec.body)
+	}
+	env := decodeEnvelope(t, rec)
+	var created struct {
+		StayID string `json:"stay_id"`
+	}
+	b, _ := json.Marshal(env.Data)
+	_ = json.Unmarshal(b, &created)
+
+	// Transfer to the full facility must fail.
+	tr := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations/"+created.StayID+"/events", token,
+		fmt.Sprintf(`{"type":"TRANSFER","new_facility_id":%q,"idempotency_key":"ev-tf"}`, fullFac))
+	if tr.code != http.StatusConflict {
+		t.Fatalf("transfer to full: code=%d, want 409; body=%s", tr.code, tr.body)
+	}
+	// Original retained: still RESERVED, capacity still held on the origin.
+	var state string
+	if err := st.DB().QueryRowContext(t.Context(),
+		`SELECT state FROM stays WHERE stay_id=$1`, created.StayID).Scan(&state); err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if state != "RESERVED" {
+		t.Fatalf("origin state=%s, want RESERVED (transfer failed atomically)", state)
+	}
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 1 {
+		t.Fatalf("origin held=%d, want 1 (capacity retained)", got)
 	}
 }
