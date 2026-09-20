@@ -1,3 +1,4 @@
+
 # Target architecture
 
 2026-09-19 · Go application backend; mobile architecture pending P8. See [tech-stack.md](tech-stack.md) for selections and [cleanup.md](cleanup.md) for the current repository.

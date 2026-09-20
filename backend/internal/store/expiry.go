@@ -74,7 +74,7 @@ func (w *ExpiryWorker) Tick(ctx context.Context) (int, error) {
 	expired := 0
 	for _, id := range ids {
 		err := w.store.InTx(ctx, func(tx DBTX) error {
-			return w.stays.Expire(ctx, tx, id, now)
+			return w.stays.Expire(ctx, tx, id, now, "")
 		})
 		if err == nil {
 			expired++

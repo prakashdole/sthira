@@ -45,12 +45,15 @@ type ChoiceQuery struct {
 	EndDate      time.Time
 	// RouteGateOpen reports whether operational routing is authorized (O05).
 	// While false, no destination is route-verified for operational use.
+	// This MUST be false in production; synthetic routes are only available
+	// via isolated test configuration that directly invokes the store layer.
 	RouteGateOpen bool
 }
 
 // routeVerified reports whether a route from any red zone to the safe zone is
 // verified, currently valid and not closed. Synthetic-approval routes count
-// only when the caller has opened the gate for an isolated exercise.
+// only when the caller has explicitly opened the gate for an isolated exercise
+// (RouteGateOpen=true). In production, RouteGateOpen is always false.
 func routeVerified(ctx context.Context, db DBTX, packageID, safeZoneID string, now time.Time, gateOpen bool) (bool, *string, error) {
 	if !gateOpen {
 		return false, nil, nil

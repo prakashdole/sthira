@@ -268,7 +268,7 @@ func (s *Server) handleStayCorrection(w http.ResponseWriter, r *http.Request) {
 			resultPayload, replay = res, true
 			return nil
 		}
-		if err := stays.Correct(r.Context(), tx, stayID, req.NewPartySize, op.SessionID, req.Reason, now); err != nil {
+		if err := stays.Correct(r.Context(), tx, stayID, req.NewPartySize, op.SessionID, req.Reason, now, req.IdempotencyKey); err != nil {
 			return err
 		}
 		result := map[string]any{"stay_id": stayID, "new_party_size": req.NewPartySize}

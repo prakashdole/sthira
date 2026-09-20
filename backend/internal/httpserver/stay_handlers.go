@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -165,16 +166,16 @@ func (s *Server) handleGuidanceQuery(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, http.StatusBadRequest, contracts.ErrInvalidValue, "invalid party size or date range", "start_date", false)
 		return
 	}
-	// Route authority (O05) is open: the operational route gate is closed. Only
-	// an explicit synthetic-exercise flag opens it in isolation.
-	gateOpen := r.Header.Get("X-Sthira-Synthetic-Route-Gate") == "open"
+	// Route authority (O05) is open: the operational route gate is CLOSED.
+	// Synthetic routes are ONLY available via isolated test configuration, never
+	// via a request header. This enforces the fail-closed operational boundary.
 	q := store.ChoiceQuery{
 		Jurisdiction:  req.Jurisdiction,
 		PackageID:     req.PackageID,
 		PartySize:     req.PartySize,
 		StartDate:     start,
 		EndDate:       end,
-		RouteGateOpen: gateOpen,
+		RouteGateOpen: false, // always closed while O05 is open
 	}
 	dests, err := store.ChoiceQuerier{}.Eligible(r.Context(), s.store.DB(), q, time.Now().UTC())
 	if err != nil {
@@ -201,7 +202,7 @@ func (s *Server) handleGuidanceQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	s.writeData(w, r, http.StatusOK, req.PackageID, contracts.FreshnessUnknown, map[string]any{
 		"destinations": items,
-		"route_gate":   gateOpen,
+		"route_gate":   false,
 	})
 }
 
@@ -288,8 +289,9 @@ func (s *Server) handleCreateReservation(w http.ResponseWriter, r *http.Request)
 		}
 		// Authoritative eligibility at commit: source OPERATIONAL + authorized,
 		// package effective/unexpired/not superseded, facility in package, route
-		// verified/valid/unclosed. Locks the package row so a concurrent
-		// quarantine/revocation serializes against this reservation.
+		// verified/valid/unclosed. Locks source then package so a concurrent
+		// quarantine/suspension/revocation/supersession serializes against this
+		// reservation.
 		_, pol, err := store.RevalidateReservationContext(ctx, tx, req.FacilityID, req.PackageID, routeID, now)
 		if err != nil {
 			return err
@@ -316,7 +318,7 @@ func (s *Server) handleCreateReservation(w http.ResponseWriter, r *http.Request)
 			FacilityID: req.FacilityID, PartySize: req.PartySize,
 			StartDate: start, EndDate: end, PackageID: req.PackageID, RouteID: routeID,
 			ExpiresAt: &expiresAt,
-		}, now); err != nil {
+		}, now, req.IdemKey); err != nil {
 			return err
 		}
 		return is.Complete(ctx, tx, sess.SessionID, "reservation.create", req.IdemKey, map[string]string{
@@ -417,10 +419,12 @@ func (s *Server) handleGetReservation(w http.ResponseWriter, r *http.Request) {
 // --- reservation events (arrive/cancel/depart/extend/transfer) ---
 
 type stayEventRequest struct {
-	Type          string `json:"type"` // ARRIVE|CANCEL|DEPART|EXTEND|TRANSFER
-	IdemKey       string `json:"idempotency_key"`
-	NewEndDate    string `json:"new_end_date,omitempty"`    // EXTEND
-	NewFacilityID string `json:"new_facility_id,omitempty"` // TRANSFER
+	Type            string `json:"type"` // ARRIVE|CANCEL|DEPART|EXTEND|TRANSFER
+	IdemKey         string `json:"idempotency_key"`
+	NewEndDate      string `json:"new_end_date,omitempty"`     // EXTEND
+	NewFacilityID   string `json:"new_facility_id,omitempty"`  // TRANSFER
+	NewRouteID      string `json:"new_route_id,omitempty"`     // TRANSFER: route to new facility's safe zone
+	SnapshotVersion int    `json:"snapshot_version,omitempty"` // EXTEND/TRANSFER: revalidate against locked snapshot
 }
 
 func (s *Server) handleStayEvent(w http.ResponseWriter, r *http.Request) {
@@ -456,7 +460,14 @@ func (s *Server) handleStayEvent(w http.ResponseWriter, r *http.Request) {
 	stays := store.NewStayStore(store.ChainAuditor{})
 	now := time.Now().UTC()
 	op := "stay." + strings.ToLower(req.Type)
-	payloadHash := sha256Hex(sess.SessionID + "|" + stayID + "|" + req.Type + "|" + req.NewEndDate + "|" + req.NewFacilityID + "|" + req.IdemKey)
+	// For TRANSFER, generate replacement IDs upfront so they can be returned
+	// on first success and included in the idempotency result for replay.
+	var newStayID, newResID string
+	if strings.ToUpper(req.Type) == "TRANSFER" {
+		newStayID = newID("STAY")
+		newResID = newID("RES")
+	}
+	payloadHash := sha256Hex(sess.SessionID + "|" + stayID + "|" + req.Type + "|" + req.NewEndDate + "|" + req.NewFacilityID + "|" + req.NewRouteID + "|" + fmt.Sprint(req.SnapshotVersion) + "|" + req.IdemKey)
 
 	var result []byte
 	var replay bool
@@ -480,11 +491,11 @@ func (s *Server) handleStayEvent(w http.ResponseWriter, r *http.Request) {
 		var opErr error
 		switch strings.ToUpper(req.Type) {
 		case "ARRIVE":
-			opErr = stays.Arrive(ctx, tx, stayID, now)
+			opErr = stays.Arrive(ctx, tx, stayID, now, req.IdemKey)
 		case "CANCEL":
-			opErr = stays.Cancel(ctx, tx, stayID, now)
+			opErr = stays.Cancel(ctx, tx, stayID, now, req.IdemKey)
 		case "DEPART":
-			opErr = stays.Depart(ctx, tx, stayID, now)
+			opErr = stays.Depart(ctx, tx, stayID, now, req.IdemKey)
 		case "EXTEND":
 			nd, perr := time.Parse("2006-01-02", req.NewEndDate)
 			if perr != nil {
@@ -501,6 +512,10 @@ func (s *Server) handleStayEvent(w http.ResponseWriter, r *http.Request) {
 			if rerr != nil {
 				return rerr
 			}
+			// Revalidate against the locked snapshot version, not the earlier read.
+			if err := revalidateSnapshotVersion(ctx, tx, pkgID, req.SnapshotVersion); err != nil {
+				return err
+			}
 			st, gerr := getStayDates(ctx, tx, stayID)
 			if gerr != nil {
 				return gerr
@@ -508,21 +523,31 @@ func (s *Server) handleStayEvent(w http.ResponseWriter, r *http.Request) {
 			if berr := store.CheckStayBounds(pol, st.StartDate, nd); berr != nil {
 				return berr
 			}
-			opErr = stays.Extend(ctx, tx, stayID, nd, now)
+			opErr = stays.Extend(ctx, tx, stayID, nd, now, req.IdemKey)
 		case "TRANSFER":
 			if req.NewFacilityID == "" {
 				return errInvalidEvent
 			}
 			// Transfer creates a new commitment at a new facility: the policy must
 			// authorize transfers, and the new facility+package+route context must
-			// be currently operational before any capacity moves.
-			pkgID, _, routeID, cerr := stays.StayContext(ctx, tx, stayID)
+			// be currently operational before any capacity moves. The route MUST be
+			// to the NEW facility's safe zone; the old stay's route is not reused.
+			pkgID, _, _, cerr := stays.StayContext(ctx, tx, stayID)
 			if cerr != nil {
 				return cerr
 			}
-			_, pol, rerr := store.RevalidateReservationContext(ctx, tx, req.NewFacilityID, pkgID, routeID, now)
+			var newRouteID *string
+			if req.NewRouteID != "" {
+				newRouteID = &req.NewRouteID
+			}
+			// Validate the new facility's context with the new route (not the old one).
+			_, pol, rerr := store.RevalidateReservationContext(ctx, tx, req.NewFacilityID, pkgID, newRouteID, now)
 			if rerr != nil {
 				return rerr
+			}
+			// Revalidate against the locked snapshot version, not the earlier read.
+			if err := revalidateSnapshotVersion(ctx, tx, pkgID, req.SnapshotVersion); err != nil {
+				return err
 			}
 			if pol.AllowTransfers == nil || !*pol.AllowTransfers {
 				return store.ErrStayOutOfPolicy
@@ -533,7 +558,16 @@ func (s *Server) handleStayEvent(w http.ResponseWriter, r *http.Request) {
 			if herr != nil {
 				return herr
 			}
-			opErr = stays.Transfer(ctx, tx, stayID, newID("STAY"), newID("RES"), req.NewFacilityID, &newExp, now)
+			opErr = stays.Transfer(ctx, tx, stayID, newStayID, newResID, req.NewFacilityID, &newExp, now, req.IdemKey)
+			if opErr == nil {
+				// Include replacement IDs in the idempotency result for replay and recovery.
+				return is.Complete(ctx, tx, sess.SessionID, op, req.IdemKey, map[string]string{
+					"stay_id":            stayID,
+					"type":               req.Type,
+					"new_stay_id":        newStayID,
+					"new_reservation_id": newResID,
+				})
+			}
 		default:
 			return errInvalidEvent
 		}
@@ -561,6 +595,16 @@ func (s *Server) handleStayEvent(w http.ResponseWriter, r *http.Request) {
 		s.writeReservationError(w, r, err)
 		return
 	}
+	// For TRANSFER, include the replacement IDs in the first successful response.
+	if strings.ToUpper(req.Type) == "TRANSFER" {
+		s.writeData(w, r, http.StatusOK, "none", contracts.FreshnessUnknown, map[string]string{
+			"stay_id":            stayID,
+			"type":               req.Type,
+			"new_stay_id":        newStayID,
+			"new_reservation_id": newResID,
+		})
+		return
+	}
 	s.writeData(w, r, http.StatusOK, "none", contracts.FreshnessUnknown, map[string]string{
 		"stay_id": stayID, "type": req.Type,
 	})
@@ -568,6 +612,22 @@ func (s *Server) handleStayEvent(w http.ResponseWriter, r *http.Request) {
 
 var errNotOwner = errors.New("not the owning session")
 var errInvalidEvent = errors.New("invalid stay event")
+
+// revalidateSnapshotVersion checks the current package version against the
+// client's snapshot version under the locks already held by the caller.
+func revalidateSnapshotVersion(ctx context.Context, db store.DBTX, packageID string, expectedVersion int) error {
+	if expectedVersion == 0 {
+		return nil // caller didn't provide a version; skip (legacy path)
+	}
+	var curVersion int
+	if err := db.QueryRowContext(ctx, `SELECT version FROM packages WHERE package_id = $1`, packageID).Scan(&curVersion); err != nil {
+		return err
+	}
+	if curVersion != expectedVersion {
+		return &snapshotStaleError{want: expectedVersion, got: curVersion}
+	}
+	return nil
+}
 
 // stayDates holds a stay's current interval for bounds checks.
 type stayDates struct {

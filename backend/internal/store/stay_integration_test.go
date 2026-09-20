@@ -129,7 +129,7 @@ func TestStayLifecycleConservation(t *testing.T) {
 
 	st := mkStay(sessID, facID, pkgID, 2, start, end)
 	seedReservation(t, s, st)
-	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, st, nowUTC()) }); err != nil {
+	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, st, nowUTC(), "") }); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
 	h, o, c := buckets(t, s, facID, start)
@@ -137,7 +137,7 @@ func TestStayLifecycleConservation(t *testing.T) {
 		t.Fatalf("after reserve: held=%d occupied=%d capacity=%d, want 2/0/5", h, o, c)
 	}
 
-	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Arrive(ctx, tx, st.StayID, nowUTC()) }); err != nil {
+	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Arrive(ctx, tx, st.StayID, nowUTC(), "") }); err != nil {
 		t.Fatalf("Arrive: %v", err)
 	}
 	h, o, c = buckets(t, s, facID, start)
@@ -145,7 +145,7 @@ func TestStayLifecycleConservation(t *testing.T) {
 		t.Fatalf("after arrive: held=%d occupied=%d, want 0/2 (no second decrement)", h, o)
 	}
 
-	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Depart(ctx, tx, st.StayID, nowUTC()) }); err != nil {
+	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Depart(ctx, tx, st.StayID, nowUTC(), "") }); err != nil {
 		t.Fatalf("Depart: %v", err)
 	}
 	h, o, c = buckets(t, s, facID, start)
@@ -174,7 +174,7 @@ func TestConcurrentLastSpaceStay(t *testing.T) {
 			sessID := seedSession(t, s)
 			st := mkStay(sessID, facID, pkgID, 1, start, end)
 			seedReservation(t, s, st)
-			err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, st, nowUTC()) })
+			err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, st, nowUTC(), "") })
 			wins <- err
 		}()
 	}
@@ -211,16 +211,16 @@ func TestExpiryArrivalRace(t *testing.T) {
 	past := nowUTC().Add(-time.Minute)
 	st.ExpiresAt = &past
 	seedReservation(t, s, st)
-	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, st, nowUTC()) }); err != nil {
+	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, st, nowUTC(), "") }); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
 
 	// Expiry wins.
-	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Expire(ctx, tx, st.StayID, nowUTC()) }); err != nil {
+	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Expire(ctx, tx, st.StayID, nowUTC(), "") }); err != nil {
 		t.Fatalf("Expire: %v", err)
 	}
 	// Arrival after expiry must fail.
-	err := s.InTx(ctx, func(tx DBTX) error { return stays.Arrive(ctx, tx, st.StayID, nowUTC()) })
+	err := s.InTx(ctx, func(tx DBTX) error { return stays.Arrive(ctx, tx, st.StayID, nowUTC(), "") })
 	if !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("arrive after expire: got %v, want ErrInvalidTransition", err)
 	}
@@ -243,7 +243,7 @@ func TestExpiryWorker(t *testing.T) {
 	past := nowUTC().Add(-time.Minute)
 	st.ExpiresAt = &past
 	seedReservation(t, s, st)
-	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, st, nowUTC()) }); err != nil {
+	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, st, nowUTC(), "") }); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
 
@@ -279,21 +279,21 @@ func TestFailedTransferRetainsOriginal(t *testing.T) {
 	// Fill the target.
 	fill := mkStay(sessID, fullFac, pkgID, 1, start, end)
 	seedReservation(t, s, fill)
-	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, fill, nowUTC()) }); err != nil {
+	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, fill, nowUTC(), "") }); err != nil {
 		t.Fatalf("fill target: %v", err)
 	}
 
 	// Original stay on facID.
 	orig := mkStay(sessID, facID, pkgID, 2, start, end)
 	seedReservation(t, s, orig)
-	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, orig, nowUTC()) }); err != nil {
+	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, orig, nowUTC(), "") }); err != nil {
 		t.Fatalf("Reserve orig: %v", err)
 	}
 
 	// Transfer to the full facility must fail.
 	err := s.InTx(ctx, func(tx DBTX) error {
 		exp := nowUTC().Add(time.Hour)
-		return stays.Transfer(ctx, tx, orig.StayID, uid("STAY"), uid("RES"), fullFac, &exp, nowUTC())
+		return stays.Transfer(ctx, tx, orig.StayID, uid("STAY"), uid("RES"), fullFac, &exp, nowUTC(), "")
 	})
 	if !errors.Is(err, ErrCapacityExhausted) {
 		t.Fatalf("transfer to full: got %v, want ErrCapacityExhausted", err)
@@ -324,13 +324,13 @@ func TestSuccessfulTransfer(t *testing.T) {
 
 	orig := mkStay(sessID, facA, pkgID, 1, start, end)
 	seedReservation(t, s, orig)
-	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, orig, nowUTC()) }); err != nil {
+	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, orig, nowUTC(), "") }); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
 	newStay := uid("STAY")
 	if err := s.InTx(ctx, func(tx DBTX) error {
 		exp := nowUTC().Add(time.Hour)
-		return stays.Transfer(ctx, tx, orig.StayID, newStay, uid("RES"), facB, &exp, nowUTC())
+		return stays.Transfer(ctx, tx, orig.StayID, newStay, uid("RES"), facB, &exp, nowUTC(), "")
 	}); err != nil {
 		t.Fatalf("Transfer: %v", err)
 	}
@@ -367,12 +367,12 @@ func TestOverlappingIntervals(t *testing.T) {
 	// Stay A: days 1-2 (party 2). Stay B: days 2-3 (party 2). They overlap day 2.
 	a := mkStay(sessID, facID, pkgID, 2, day(1), day(3))
 	seedReservation(t, s, a)
-	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, a, nowUTC()) }); err != nil {
+	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, a, nowUTC(), "") }); err != nil {
 		t.Fatalf("Reserve A: %v", err)
 	}
 	b := mkStay(sessID, facID, pkgID, 2, day(2), day(4))
 	seedReservation(t, s, b)
-	err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, b, nowUTC()) })
+	err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, b, nowUTC(), "") })
 	if !errors.Is(err, ErrCapacityExhausted) {
 		t.Fatalf("overlapping over-capacity reserve: got %v, want ErrCapacityExhausted (day2: 2+2>3)", err)
 	}
@@ -403,7 +403,7 @@ func TestMultiDateDeadlockFree(t *testing.T) {
 			defer wg.Done()
 			st := mkStay(sessID, facID, pkgID, 2, start, end)
 			seedReservation(t, s, st)
-			errs <- s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, st, nowUTC()) })
+			errs <- s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, st, nowUTC(), "") })
 		}()
 	}
 	wg.Wait()
@@ -431,10 +431,10 @@ func TestExtendAddsOnlyNewDates(t *testing.T) {
 
 	st := mkStay(sessID, facID, pkgID, 1, day(1), day(3)) // days 1-2
 	seedReservation(t, s, st)
-	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, st, nowUTC()) }); err != nil {
+	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, st, nowUTC(), "") }); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
-	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Extend(ctx, tx, st.StayID, day(5), nowUTC()) }); err != nil {
+	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Extend(ctx, tx, st.StayID, day(5), nowUTC(), "") }); err != nil {
 		t.Fatalf("Extend: %v", err)
 	}
 	// Days 1-4 each held=1 now.
@@ -457,10 +457,10 @@ func TestCancelReleasesHold(t *testing.T) {
 	sessID := seedSession(t, s)
 	st := mkStay(sessID, facID, pkgID, 2, start, end)
 	seedReservation(t, s, st)
-	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, st, nowUTC()) }); err != nil {
+	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Reserve(ctx, tx, st, nowUTC(), "") }); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
-	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Cancel(ctx, tx, st.StayID, nowUTC()) }); err != nil {
+	if err := s.InTx(ctx, func(tx DBTX) error { return stays.Cancel(ctx, tx, st.StayID, nowUTC(), "") }); err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}
 	h, o, _ := buckets(t, s, facID, start)
@@ -468,7 +468,7 @@ func TestCancelReleasesHold(t *testing.T) {
 		t.Fatalf("after cancel: held=%d occupied=%d, want 0/0", h, o)
 	}
 	// Double cancel must fail.
-	err := s.InTx(ctx, func(tx DBTX) error { return stays.Cancel(ctx, tx, st.StayID, nowUTC()) })
+	err := s.InTx(ctx, func(tx DBTX) error { return stays.Cancel(ctx, tx, st.StayID, nowUTC(), "") })
 	if !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("double cancel: got %v, want ErrInvalidTransition", err)
 	}

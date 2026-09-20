@@ -194,6 +194,10 @@ paths:
         Arrival requires explicit citizen confirmation (R14). Idempotency-keyed;
         capacity conservation holds across every event. Requires the owning
         citizen session.
+        For TRANSFER, the response includes new_stay_id and new_reservation_id
+        for the replacement stay (both on first success and on idempotent replay).
+        The authenticated GET /reservations/{new_stay_id} provides the recovery
+        path after restart or a lost response.
       security:
         - bearerAuth: []
       parameters:
@@ -213,6 +217,8 @@ paths:
                 idempotency_key: { type: string }
                 new_end_date: { type: string, format: date }
                 new_facility_id: { type: string }
+                new_route_id: { type: string }
+                snapshot_version: { type: integer }
       responses:
         '200': { $ref: '#/components/responses/DataEnvelope' }
         '400': { $ref: '#/components/responses/ErrorEnvelope' }

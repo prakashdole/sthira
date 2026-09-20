@@ -112,8 +112,10 @@ func adjustInventory(ctx context.Context, db DBTX, facilityID string, date time.
 // whole half-open interval. Capacity must be available on every date; the
 // conditional update matches no row (ErrCapacityExhausted) when any date is
 // full. The reservation, stay, inventory updates, idempotency result, audit and
-// outbox records commit in the caller's transaction.
-func (s *StayStore) Reserve(ctx context.Context, db DBTX, stay Stay, now time.Time) error {
+// outbox records commit in the caller's transaction. idemKey is the idempotency
+// key for the operation; when provided it is included in the audit EventID to
+// give each distinct committed operation a unique identity.
+func (s *StayStore) Reserve(ctx context.Context, db DBTX, stay Stay, now time.Time, idemKey string) error {
 	dates := dateRange(stay.StartDate, stay.EndDate)
 	if len(dates) == 0 {
 		return fmt.Errorf("store: stay interval is empty")
@@ -140,7 +142,7 @@ func (s *StayStore) Reserve(ctx context.Context, db DBTX, stay Stay, now time.Ti
 		now, stay.ExpiresAt); err != nil {
 		return err
 	}
-	return s.record(ctx, db, stay.StayID, stay.SessionID, "STAY_RESERVE", "", string(StayReserved), now)
+	return s.record(ctx, db, stay.StayID, stay.SessionID, "STAY_RESERVE", "", string(StayReserved), now, idemKey)
 }
 
 // getStayForUpdate locks and reads a stay row.
@@ -174,7 +176,7 @@ func (s *StayStore) setState(ctx context.Context, db DBTX, stayID string, expect
 // Arrive converts held space to occupied across the interval (no second
 // decrement of free). Only a RESERVED stay may arrive; expiry/arrival races are
 // resolved by the version guard and the inventory conditional update.
-func (s *StayStore) Arrive(ctx context.Context, db DBTX, stayID string, now time.Time) error {
+func (s *StayStore) Arrive(ctx context.Context, db DBTX, stayID string, now time.Time, idemKey string) error {
 	st, err := s.getStayForUpdate(ctx, db, stayID)
 	if err != nil {
 		return err
@@ -201,7 +203,7 @@ func (s *StayStore) Arrive(ctx context.Context, db DBTX, stayID string, now time
 	if _, err := db.ExecContext(ctx, `UPDATE stays SET arrived_at = $2 WHERE stay_id = $1`, stayID, now); err != nil {
 		return err
 	}
-	return s.record(ctx, db, stayID, st.SessionID, "STAY_ARRIVE", string(StayReserved), string(StayArrived), now)
+	return s.record(ctx, db, stayID, st.SessionID, "STAY_ARRIVE", string(StayReserved), string(StayArrived), now, idemKey)
 }
 
 // releaseHeld returns held space to free (cancel/expire before arrival).
@@ -219,7 +221,7 @@ func (s *StayStore) releaseHeld(ctx context.Context, db DBTX, st Stay, action st
 }
 
 // Cancel releases a RESERVED hold back to free. Only RESERVED may cancel.
-func (s *StayStore) Cancel(ctx context.Context, db DBTX, stayID string, now time.Time) error {
+func (s *StayStore) Cancel(ctx context.Context, db DBTX, stayID string, now time.Time, idemKey string) error {
 	st, err := s.getStayForUpdate(ctx, db, stayID)
 	if err != nil {
 		return err
@@ -233,13 +235,13 @@ func (s *StayStore) Cancel(ctx context.Context, db DBTX, stayID string, now time
 	if err := s.setState(ctx, db, stayID, st.Version, StayCancelled, now); err != nil {
 		return err
 	}
-	return s.record(ctx, db, stayID, st.SessionID, "STAY_CANCEL", string(StayReserved), string(StayCancelled), now)
+	return s.record(ctx, db, stayID, st.SessionID, "STAY_CANCEL", string(StayReserved), string(StayCancelled), now, idemKey)
 }
 
 // Expire releases a RESERVED hold whose expiry has passed. The expiry worker
 // calls this; the version guard and inventory conditional update race safely
 // with a concurrent arrival.
-func (s *StayStore) Expire(ctx context.Context, db DBTX, stayID string, now time.Time) error {
+func (s *StayStore) Expire(ctx context.Context, db DBTX, stayID string, now time.Time, idemKey string) error {
 	st, err := s.getStayForUpdate(ctx, db, stayID)
 	if err != nil {
 		return err
@@ -256,11 +258,11 @@ func (s *StayStore) Expire(ctx context.Context, db DBTX, stayID string, now time
 	if err := s.setState(ctx, db, stayID, st.Version, StayExpired, now); err != nil {
 		return err
 	}
-	return s.record(ctx, db, stayID, st.SessionID, "STAY_EXPIRE", string(StayReserved), string(StayExpired), now)
+	return s.record(ctx, db, stayID, st.SessionID, "STAY_EXPIRE", string(StayReserved), string(StayExpired), now, idemKey)
 }
 
 // Depart frees occupied space across the interval. Only ARRIVED may depart.
-func (s *StayStore) Depart(ctx context.Context, db DBTX, stayID string, now time.Time) error {
+func (s *StayStore) Depart(ctx context.Context, db DBTX, stayID string, now time.Time, idemKey string) error {
 	st, err := s.getStayForUpdate(ctx, db, stayID)
 	if err != nil {
 		return err
@@ -283,14 +285,16 @@ func (s *StayStore) Depart(ctx context.Context, db DBTX, stayID string, now time
 	if _, err := db.ExecContext(ctx, `UPDATE stays SET departed_at = $2 WHERE stay_id = $1`, stayID, now); err != nil {
 		return err
 	}
-	return s.record(ctx, db, stayID, st.SessionID, "STAY_DEPART", string(StayArrived), string(StayDeparted), now)
+	return s.record(ctx, db, stayID, st.SessionID, "STAY_DEPART", string(StayArrived), string(StayDeparted), now, idemKey)
 }
 
 // Extend lengthens a stay's end_date, requiring availability on the added dates
 // only. The original dates are already held/occupied; only the extension dates
 // convert free -> held (RESERVED) or free -> occupied (ARRIVED). Bounded by the
-// facility/policy temporary-stay limits, enforced by the caller.
-func (s *StayStore) Extend(ctx context.Context, db DBTX, stayID string, newEndDate time.Time, now time.Time) error {
+// facility/policy temporary-stay limits, enforced by the caller. idemKey is the
+// idempotency key for the operation; when provided it is included in the audit
+// EventID to give each distinct committed operation a unique identity.
+func (s *StayStore) Extend(ctx context.Context, db DBTX, stayID string, newEndDate time.Time, now time.Time, idemKey string) error {
 	st, err := s.getStayForUpdate(ctx, db, stayID)
 	if err != nil {
 		return err
@@ -324,14 +328,18 @@ func (s *StayStore) Extend(ctx context.Context, db DBTX, stayID string, newEndDa
 		stayID, st.Version, newEndDate, now); err != nil {
 		return err
 	}
-	return s.record(ctx, db, stayID, st.SessionID, "STAY_EXTEND", string(st.State), string(st.State), now)
+	return s.record(ctx, db, stayID, st.SessionID, "STAY_EXTEND", string(st.State), string(st.State), now, idemKey)
 }
 
 // Transfer moves a stay to a different facility. The new facility's space is
 // held first; only after the new stay is safely created is the old stay's space
 // released. A failed transfer (new facility full) returns ErrCapacityExhausted
-// and retains the original stay unchanged.
-func (s *StayStore) Transfer(ctx context.Context, db DBTX, stayID, newStayID, newReservationID, newFacilityID string, newExpiresAt *time.Time, now time.Time) error {
+// and retains the original stay unchanged. Inventory rows for BOTH facilities
+// are locked in deterministic (facility_id, service_date) order to avoid
+// deadlock between opposing transfers. idemKey is the idempotency key for the
+// operation; when provided it is included in the audit EventID to give each
+// distinct committed operation a unique identity.
+func (s *StayStore) Transfer(ctx context.Context, db DBTX, stayID, newStayID, newReservationID, newFacilityID string, newExpiresAt *time.Time, now time.Time, idemKey string) error {
 	st, err := s.getStayForUpdate(ctx, db, stayID)
 	if err != nil {
 		return err
@@ -339,12 +347,19 @@ func (s *StayStore) Transfer(ctx context.Context, db DBTX, stayID, newStayID, ne
 	if st.State != StayReserved && st.State != StayArrived {
 		return ErrInvalidTransition
 	}
+	dates := dateRange(st.StartDate, st.EndDate)
+	// Deterministic lock order across both facilities to prevent deadlock.
+	lockOrder := []string{st.FacilityID, newFacilityID}
+	if lockOrder[0] > lockOrder[1] {
+		lockOrder[0], lockOrder[1] = lockOrder[1], lockOrder[0]
+	}
+	for _, f := range lockOrder {
+		if err := lockInventory(ctx, db, f, dates); err != nil {
+			return err
+		}
+	}
 	// Hold the new facility's space first. If this fails the original stay is
 	// untouched (the transaction rolls back).
-	dates := dateRange(st.StartDate, st.EndDate)
-	if err := lockInventory(ctx, db, newFacilityID, dates); err != nil {
-		return err
-	}
 	for _, d := range dates {
 		if err := adjustInventory(ctx, db, newFacilityID, d, st.PartySize, 0, now); err != nil {
 			if errors.Is(err, ErrVersionConflict) {
@@ -374,9 +389,6 @@ func (s *StayStore) Transfer(ctx context.Context, db DBTX, stayID, newStayID, ne
 		return err
 	}
 	// Release the old stay's space (held if RESERVED, occupied if ARRIVED).
-	if err := lockInventory(ctx, db, st.FacilityID, dates); err != nil {
-		return err
-	}
 	heldDelta, occDelta := -st.PartySize, 0
 	if st.State == StayArrived {
 		heldDelta, occDelta = 0, -st.PartySize
@@ -389,10 +401,10 @@ func (s *StayStore) Transfer(ctx context.Context, db DBTX, stayID, newStayID, ne
 	if err := s.setState(ctx, db, stayID, st.Version, StayDeparted, now); err != nil {
 		return err
 	}
-	if err := s.record(ctx, db, stayID, st.SessionID, "STAY_TRANSFER_OUT", string(st.State), string(StayDeparted), now); err != nil {
+	if err := s.record(ctx, db, stayID, st.SessionID, "STAY_TRANSFER_OUT", string(st.State), string(StayDeparted), now, idemKey); err != nil {
 		return err
 	}
-	return s.record(ctx, db, newStayID, st.SessionID, "STAY_TRANSFER_IN", "", string(StayReserved), now)
+	return s.record(ctx, db, newStayID, st.SessionID, "STAY_TRANSFER_IN", "", string(StayReserved), now, idemKey)
 }
 
 // ErrReservationContext is returned when the reservation's authoritative
@@ -445,19 +457,22 @@ type policyBody struct {
 // context: the package's source must be OPERATIONAL with a currently-valid
 // authorization in the package's jurisdiction; the package must be effective,
 // unexpired and not superseded; the facility must belong to the package. A
-// requested route must be verified, currently valid and unclosed. The package
-// row is locked FOR UPDATE so a concurrent quarantine/revocation/supersession
-// serializes against this reservation: whichever commits first determines
-// whether the reservation sees a still-operational or already-withdrawn
-// context. Returns the package jurisdiction and the authoritative stay policy
-// for the caller's use.
+// requested route must be verified, currently valid and unclosed. Both the
+// source and package rows are locked FOR UPDATE (source first, then package)
+// so a concurrent quarantine/suspension/revocation/supersession serializes
+// against this reservation: whichever commits first determines whether the
+// reservation sees a still-operational or already-withdrawn context. The
+// source state is rechecked under the lock. Returns the package jurisdiction
+// and the authoritative stay policy for the caller's use.
 func RevalidateReservationContext(ctx context.Context, db DBTX, facilityID, packageID string, routeID *string, now time.Time) (string, StayPolicy, error) {
 	var (
 		jurisdiction string
 		body         []byte
+		sourceID     string
 	)
+	// Lock source first (consistent order with source state transitions), then package.
 	err := db.QueryRowContext(ctx, `
-		SELECT p.jurisdiction, p.body
+		SELECT p.jurisdiction, p.body, p.source_id
 		FROM packages p
 		JOIN sources s ON s.source_id = p.source_id
 		WHERE p.package_id = $1
@@ -469,7 +484,7 @@ func RevalidateReservationContext(ctx context.Context, db DBTX, facilityID, pack
 			WHERE sa.source_id = p.source_id AND sa.jurisdiction = p.jurisdiction
 			  AND (sa.expires_at IS NULL OR sa.expires_at > $2)
 		  )
-		FOR UPDATE OF p`, packageID, now).Scan(&jurisdiction, &body)
+		FOR UPDATE OF s, p`, packageID, now).Scan(&jurisdiction, &body, &sourceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", StayPolicy{}, ErrReservationContext
 	}
@@ -584,8 +599,10 @@ func (s *StayStore) StayFacilityJurisdiction(ctx context.Context, db DBTX, stayI
 // fall and free rises. An upward correction would require new capacity and is
 // rejected here rather than silently overbooking. The correction, its audit
 // event (actor = operator session) and the inventory adjustment commit in the
-// caller's transaction.
-func (s *StayStore) Correct(ctx context.Context, db DBTX, stayID string, newPartySize int, operatorSessionID, reason string, now time.Time) error {
+// caller's transaction. idemKey is the idempotency key for the operation; when
+// provided it is included in the audit EventID to give each distinct committed
+// operation a unique identity.
+func (s *StayStore) Correct(ctx context.Context, db DBTX, stayID string, newPartySize int, operatorSessionID, reason string, now time.Time, idemKey string) error {
 	st, err := s.getStayForUpdate(ctx, db, stayID)
 	if err != nil {
 		return err
@@ -626,7 +643,7 @@ func (s *StayStore) Correct(ctx context.Context, db DBTX, stayID string, newPart
 		return nil
 	}
 	return s.audit.Record(ctx, db, AuditEvent{
-		EventID:   stayID + ":STAY_CORRECT",
+		EventID:   auditEventID(stayID, "STAY_CORRECT", idemKey),
 		OccuredAt: now,
 		ActorID:   operatorSessionID,
 		Action:    "STAY_CORRECT",
@@ -638,13 +655,28 @@ func (s *StayStore) Correct(ctx context.Context, db DBTX, stayID string, newPart
 	})
 }
 
-// record appends an audit event for a stay transition.
-func (s *StayStore) record(ctx context.Context, db DBTX, stayID, sessionID, action, from, to string, now time.Time) error {
+// auditEventID builds a unique audit event ID by combining the subject ID,
+// action, and optional idempotency key. When idemKey is provided, it is
+// included to give each distinct committed operation a unique identity. This
+// prevents collisions on repeated legitimate operations (e.g., two extensions
+// with different keys) while preserving exactly-once behavior for retries of
+// the same operation (same key produces same EventID).
+func auditEventID(subjectID, action, idemKey string) string {
+	if idemKey != "" {
+		return subjectID + ":" + action + ":" + idemKey
+	}
+	return subjectID + ":" + action
+}
+
+// record appends an audit event for a stay transition. idemKey is the
+// idempotency key for the operation; when provided it is included in the
+// audit EventID to give each distinct committed operation a unique identity.
+func (s *StayStore) record(ctx context.Context, db DBTX, stayID, sessionID, action, from, to string, now time.Time, idemKey string) error {
 	if s.audit == nil {
 		return nil
 	}
 	return s.audit.Record(ctx, db, AuditEvent{
-		EventID:   stayID + ":" + action,
+		EventID:   auditEventID(stayID, action, idemKey),
 		OccuredAt: now,
 		ActorID:   sessionID,
 		Action:    action,
