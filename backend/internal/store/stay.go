@@ -501,12 +501,17 @@ func RevalidateReservationContext(ctx context.Context, db DBTX, facilityID, pack
 	if fcount == 0 {
 		return "", StayPolicy{}, ErrFacilityPackageMismatch
 	}
-	// A requested route must be verified, currently valid and unclosed.
+	// A requested route must be verified, currently valid, unclosed, AND bound
+	// to the facility's safe zone (to_safe_zone_id matches). The same gate
+	// applies at reserve, extend and transfer: the route must lead to the
+	// selected destination's safe zone.
 	if routeID != nil && *routeID != "" {
 		var rcount int
 		if err := db.QueryRowContext(ctx, `
 			SELECT count(*) FROM route_versions rv
+			JOIN facilities f ON f.facility_id = $4 AND f.package_id = $1
 			WHERE rv.package_id = $1 AND rv.route_id = $2
+			  AND rv.to_safe_zone_id = f.safe_zone_id
 			  AND rv.approval IN ('SYNTHETIC_DEMO','AUTHORIZED_OPERATIONAL')
 			  AND rv.verified_by IS NOT NULL
 			  AND (rv.valid_from IS NULL OR rv.valid_from <= $3)
@@ -514,7 +519,7 @@ func RevalidateReservationContext(ctx context.Context, db DBTX, facilityID, pack
 			  AND NOT EXISTS (
 				SELECT 1 FROM route_closures rc
 				WHERE rc.route_id = rv.route_id AND rc.reopened_at IS NULL)`,
-			packageID, *routeID, now).Scan(&rcount); err != nil {
+			packageID, *routeID, now, facilityID).Scan(&rcount); err != nil {
 			return "", StayPolicy{}, err
 		}
 		if rcount == 0 {
