@@ -1,7 +1,7 @@
 # P5 Implementation Contract: Offline Package & Map-Delivery Protocol
 
 **Phase:** P5 — Offline package and map-delivery protocol  
-**Status:** DRAFT CONTRACT (Ready for implementation by Agents 1–5)  
+**Status:** REVIEWED CONTRACT (Common baseline for Agents 1–5)  
 **Date:** 2026-09-20  
 **Governing Baseline:** Sthira v2 (`plan/architecture.md`, `plan/trd.md`, `plan/parameters.md`, `plan/decisions.md`)  
 **Active Blockers Retained:** O01, O05, O06, O07, O14 (no invented government facts, licenses, or operational route approvals)  
