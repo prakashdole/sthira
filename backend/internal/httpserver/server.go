@@ -12,6 +12,7 @@ import (
 
 	"sthira/backend/internal/contracts"
 	"sthira/backend/internal/httpjson"
+	"sthira/backend/internal/offlinedelivery"
 	"sthira/backend/internal/store"
 )
 
@@ -68,6 +69,9 @@ type Server struct {
 	// syntheticExercise is the explicit server-side test/exercise dependency.
 	// Nil in production; synthetic evidence is then rejected for commitments.
 	syntheticExercise SyntheticExercise
+	// pubSource is the source for P5 offline delivery (manifests, cards, resources).
+	pubSource   offlinedelivery.PublicationSource
+	deliveryCfg *offlinedelivery.Config
 }
 
 // persistedResolver adapts the store's persisted context resolution to the
@@ -169,6 +173,28 @@ func (s *Server) allowSynthetic() bool {
 	return s.syntheticExercise != nil && s.syntheticExercise.AllowSynthetic()
 }
 
+// WithPublicationSource wires the publication source for P5 offline delivery.
+func WithPublicationSource(src offlinedelivery.PublicationSource) Option {
+	return func(s *Server) { s.pubSource = src }
+}
+
+// WithDeliveryConfig configures P5 offline delivery options such as cache TTLs.
+func WithDeliveryConfig(cfg offlinedelivery.Config) Option {
+	return func(s *Server) { s.deliveryCfg = &cfg }
+}
+
+type emptyPublicationSource struct{}
+
+func (emptyPublicationSource) GetManifest(ctx context.Context, jurisdiction string) (*offlinedelivery.ManifestRecord, error) {
+	return nil, offlinedelivery.ErrNotFound
+}
+func (emptyPublicationSource) GetCard(ctx context.Context, packageID string, version int) (*offlinedelivery.CardRecord, error) {
+	return nil, offlinedelivery.ErrNotFound
+}
+func (emptyPublicationSource) GetResource(ctx context.Context, resourceID string) (*offlinedelivery.ResourceContent, error) {
+	return nil, offlinedelivery.ErrNotFound
+}
+
 // New builds a Server with bounded timeouts and the frozen route set.
 func New(cfg Config, opts ...Option) *Server {
 	s := &Server{
@@ -201,6 +227,21 @@ func New(cfg Config, opts ...Option) *Server {
 	mux.HandleFunc("/api/v3/operations/sources/{id}/transitions", s.withRequestID(s.withOperator(s.handleSourceTransition)))
 	mux.HandleFunc("/api/v3/operations/sources/{id}/quarantine", s.withRequestID(s.withOperator(s.handleSourceQuarantine)))
 	mux.HandleFunc("/api/v3/operations/stays/{id}/corrections", s.withRequestID(s.withOperator(s.handleStayCorrection)))
+
+	// P5 public offline delivery routes (manifest, card, and auxiliary resources).
+	pubSrc := s.pubSource
+	if pubSrc == nil && s.store != nil {
+		pubSrc = NewStorePublicationSource(s.store)
+	}
+	if pubSrc == nil {
+		pubSrc = emptyPublicationSource{}
+	}
+	delCfg := offlinedelivery.DefaultConfig()
+	if s.deliveryCfg != nil {
+		delCfg = *s.deliveryCfg
+	}
+	deliveryHandler := offlinedelivery.NewHandler(delCfg, pubSrc, s.logger)
+	deliveryHandler.RegisterRoutes(mux, s.withRequestID)
 
 	// Test-only crash fault-injection endpoint; a no-op unless built with the
 	// `crashtest` tag. Never present in production builds.

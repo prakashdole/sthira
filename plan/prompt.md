@@ -802,7 +802,7 @@ End-to-end synthetic choice→reservation→arrival→temporary stay→departure
 
 ## P5 — Offline package and map-delivery protocol
 
-Prerequisites: P2 + P3. Initial status: NOT_STARTED.
+Prerequisites: P2 + P3. Initial status: COMPLETED.
 Shared implementation contract: [plan/p5-contract.md](p5-contract.md).
 
 ### Read and establish
@@ -824,7 +824,24 @@ Simulate poor network, truncation/resume, corrupt signature/digest, wrong key, r
 
 ### Deliver and stop
 
-Documented tested client protocol and package delivery meet declared byte/security/freshness contracts. Map data licensing/pack-format choices stay blocked where unverified; no claim that a native offline client exists yet.
+Documented tested client protocol and package delivery meet declared byte/security/freshness contracts. Map data licensing/pack-format choices stay blocked where unverified (O06); no claim that a native offline client exists yet.
+
+**P5 Verified Implementation Evidence (2026-09-20):**
+- Integrated five implementation branches: Agent 1 (`offlinepkg`), Agent 4 (`offlineresources`), Agent 2 (`offlinedelivery`), Agent 3 (`offlineclient`), Agent 5 (`offlinequeue`).
+- Migration 0006 (`published_manifests`, `published_cards`, `published_resources`) and store repository methods implemented; OpenAPI contract additively updated (`/api/v3/regions/{id}/manifest`, `/api/v3/packages/{id}/versions/{version}`, `/api/v3/resources/{id}`).
+- Verified Acceptance Flows 1–5 in `backend/internal/httpserver/p5_acceptance_test.go`:
+  1. *Flow 1 (Publication to Disk Activation):* Ed25519 signature verification, manifest validation, atomic directory activation.
+  2. *Flow 2 (Interrupted Download & Resumable Range):* RFC 9110 byte range resume, atomic part-file assembly, active package intact after restart.
+  3. *Flow 3 (Revocations & Tombstones):* Monotonic revision check, persistent route and package tombstones surviving restart, rollback rejection (`ErrVersionRollback`).
+  4. *Flow 4 (Optional Asset Degradation):* Missing optional vector map or audio leaves critical card usable with `FreshnessCurrent`.
+  5. *Flow 5 (Pending Writes Reconnect & Lost Response):* Durable pending queue across restart, server-side revalidation, idempotency deduplication with 0 duplicate commitment or capacity loss, changed payload conflict rejection (409 `IDEMPOTENCY_CONFLICT`).
+- Verified Measurements & Invariants:
+  - Critical Card Compressed Size: 1.10 KiB (1,130 bytes gzip, 2,202 bytes uncompressed; budget $\le 64$ KiB).
+  - Regional Map Pack Size: 41.18 MiB (43,184,128 bytes; budget $\le 50$ MiB).
+  - Public/Private Separation: Public delivery endpoints strictly exclude citizen tokens, private IDs, and session cookies (`Cache-Control: public`).
+  - Shield Cache Upstream Bounds: 50 concurrent client downloads coalesce to 1 upstream query via in-memory singleflight; 50 sequential requests within TTL trigger 1 upstream query.
+  - Network Simulation Profile: 400 kbit/s down, 128 kbit/s up, latency injection, 2% drop rate emulated via stdlib `http.RoundTripper`. Recorded boundary: Transport-level HTTP chunk rate-limiting and connection-drop emulation were simulated. Kernel-level packet loss (e.g. pfctl/dummynet) and native mobile client runtime were not executed.
+- External Blockers Retained: O06 (official map licenses) and O05 (operational routes) remain open and fail-closed. P5 engineering is complete; stop before P6.
 
 ## P6 — Regional ASR, constrained middle model and TTS
 

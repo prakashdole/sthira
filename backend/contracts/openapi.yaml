@@ -18,6 +18,7 @@ tags:
   - name: voice
   - name: stay
   - name: operations
+  - name: offline
 paths:
   /health/live:
     get:
@@ -381,6 +382,79 @@ paths:
         '409': { $ref: '#/components/responses/ErrorEnvelope' }
         '415': { $ref: '#/components/responses/ErrorEnvelope' }
         '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /regions/{id}/manifest:
+    get:
+      tags: [offline]
+      summary: Read active regional manifest
+      description: Public regional discovery manifest. Supports ETag conditional GET (304 Not Modified).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Active regional manifest
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Manifest' }
+        '304': { description: Not Modified }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '410': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /packages/{id}/versions/{version}:
+    get:
+      tags: [offline]
+      summary: Download immutable public incident card
+      description: Public standalone incident card projection. Supports standard Range (206) and If-Range.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Public incident card
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicIncidentCard' }
+        '206': { description: Partial Content }
+        '304': { description: Not Modified }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '410': { $ref: '#/components/responses/ErrorEnvelope' }
+        '416': { $ref: '#/components/responses/ErrorEnvelope' }
+  /resources/{id}:
+    get:
+      tags: [offline]
+      summary: Download content-addressed resource asset
+      description: Immutable auxiliary asset (vector map pack, style, font glyph, audio). Resumable via standard RFC 9110 Range headers.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Full asset stream
+          content:
+            application/octet-stream: {}
+        '206':
+          description: Partial asset stream
+          content:
+            application/octet-stream: {}
+        '304': { description: Not Modified }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '416': { description: Range Not Satisfiable }
 components:
   securitySchemes:
     bearerAuth:
@@ -547,3 +621,196 @@ components:
         direction: { type: string, description: IN/OUT for ZOOM; NORTH/SOUTH/EAST/WEST for PAN. }
         steps: { type: integer, enum: [1] }
         language: { type: string }
+    Manifest:
+      type: object
+      description: Signed regional discovery manifest
+      required:
+        - schema_version
+        - manifest_id
+        - jurisdiction
+        - revision
+        - generated_at
+        - valid_until
+        - source_status
+        - critical_card
+        - resources
+        - revocations
+        - provenance
+        - checksum_sha256
+      properties:
+        schema_version: { type: string, enum: ["3.0"] }
+        manifest_id: { type: string }
+        jurisdiction: { type: string }
+        revision: { type: integer, minimum: 1 }
+        generated_at: { type: string, format: date-time }
+        valid_until: { type: string, format: date-time }
+        source_status: { type: string }
+        critical_card:
+          type: object
+          required: [package_id, version, uri, checksum_sha256, uncompressed_bytes, compressed_bytes, content_type]
+          properties:
+            package_id: { type: string }
+            version: { type: integer, minimum: 1 }
+            uri: { type: string }
+            checksum_sha256: { type: string }
+            uncompressed_bytes: { type: integer, minimum: 1 }
+            compressed_bytes: { type: integer, minimum: 1, maximum: 65536 }
+            content_type: { type: string }
+        resources:
+          type: array
+          items:
+            type: object
+            required: [resource_id, type, uri, checksum_sha256, byte_size, content_type, required, attribution]
+            properties:
+              resource_id: { type: string }
+              type:
+                type: string
+                enum: [VECTOR_TILES, MAP_STYLE, MAP_SPRITE, MAP_GLYPHS, GAZETTEER, EMERGENCY_AUDIO]
+              uri: { type: string }
+              checksum_sha256: { type: string }
+              byte_size: { type: integer, minimum: 1 }
+              content_type: { type: string }
+              required: { type: boolean }
+              attribution: { type: string }
+        revocations:
+          type: object
+          properties:
+            revoked_packages:
+              type: array
+              items: { type: string }
+            cancelled_routes:
+              type: array
+              items: { type: string }
+            superseded_versions:
+              type: array
+              items:
+                type: object
+                required: [package_id, version]
+                properties:
+                  package_id: { type: string }
+                  version: { type: integer, minimum: 1 }
+        provenance:
+          type: object
+          required: [authority, dataset_id, evidence_class]
+          properties:
+            authority: { type: string }
+            dataset_id: { type: string }
+            evidence_class: { type: string }
+        checksum_sha256: { type: string }
+        signature:
+          type: object
+          required: [algorithm, key_id, value]
+          properties:
+            algorithm: { type: string, enum: [Ed25519] }
+            key_id: { type: string }
+            value: { type: string }
+    PublicIncidentCard:
+      type: object
+      description: Standalone public incident card projection
+      required:
+        - schema_version
+        - package_id
+        - version
+        - jurisdiction
+        - evidence_class
+        - effective_at
+        - expires_at
+        - alert
+        - red_zones
+        - safe_zones
+        - approved_routes
+        - facilities
+        - instructions
+        - emergency_contacts
+        - allocation_policy
+        - checksum_sha256
+      properties:
+        schema_version: { type: string, enum: ["3.0"] }
+        package_id: { type: string }
+        version: { type: integer, minimum: 1 }
+        jurisdiction: { type: string }
+        evidence_class: { type: string }
+        effective_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        alert:
+          type: object
+          required: [identifier, sender, headline, severity, urgency, certainty, area_description]
+          properties:
+            identifier: { type: string }
+            sender: { type: string }
+            headline: { type: string }
+            severity: { type: string }
+            urgency: { type: string }
+            certainty: { type: string }
+            area_description: { type: string }
+        red_zones:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: { type: string }
+              name: { type: string }
+        safe_zones:
+          type: array
+          items:
+            type: object
+            required: [id, name, role, status, capacity_mode]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              role: { type: string }
+              status: { type: string }
+              capacity_mode: { type: string }
+        approved_routes:
+          type: array
+          items:
+            type: object
+            required: [id, name, from_zone, to_safe_zone]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              from_zone: { type: string }
+              to_safe_zone: { type: string }
+        facilities:
+          type: array
+          items:
+            type: object
+            required: [id, safe_zone_id, name]
+            properties:
+              id: { type: string }
+              safe_zone_id: { type: string }
+              name: { type: string }
+        instructions:
+          type: array
+          items:
+            type: object
+            required: [id, language, title, summary]
+            properties:
+              id: { type: string }
+              language: { type: string }
+              title: { type: string }
+              summary: { type: string }
+        emergency_contacts:
+          type: array
+          items:
+            type: object
+            required: [name, number]
+            properties:
+              name: { type: string }
+              number: { type: string }
+        allocation_policy:
+          type: object
+          required: [order]
+          properties:
+            order:
+              type: array
+              items: { type: string }
+        checksum_sha256: { type: string }
+        signature:
+          type: object
+          required: [algorithm, key_id, value]
+          properties:
+            algorithm: { type: string, enum: [Ed25519] }
+            key_id: { type: string }
+            value: { type: string }

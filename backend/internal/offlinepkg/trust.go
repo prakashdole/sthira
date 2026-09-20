@@ -90,7 +90,7 @@ func (s *MemoryTrustStore) VerifySignatureAt(keyID, jurisdiction string, canonic
 	}
 
 	if k.Revoked {
-		return fmt.Errorf("%w: key %q is revoked", ErrSignerUnauthorized, keyID)
+		return fmt.Errorf("%w: %w: key %q is revoked", ErrSignerUnauthorized, ErrKeyRevoked, keyID)
 	}
 
 	// Wildcard "*" permitted only in test harnesses; otherwise jurisdiction must match exactly.

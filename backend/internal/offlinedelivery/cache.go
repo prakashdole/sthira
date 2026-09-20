@@ -84,11 +84,50 @@ func (c *MemoryCache) InvalidateJurisdiction(jurisdiction string) {
 	delete(c.manifests, jurisdiction)
 }
 
-// CachedSource wraps any PublicationSource with in-memory caching.
+type call[T any] struct {
+	wg  sync.WaitGroup
+	val T
+	err error
+}
+
+type callGroup[T any] struct {
+	mu sync.Mutex
+	m  map[string]*call[T]
+}
+
+func (g *callGroup[T]) Do(key string, fn func() (T, error)) (T, error) {
+	g.mu.Lock()
+	if g.m == nil {
+		g.m = make(map[string]*call[T])
+	}
+	if c, ok := g.m[key]; ok {
+		g.mu.Unlock()
+		c.wg.Wait()
+		return c.val, c.err
+	}
+	c := new(call[T])
+	c.wg.Add(1)
+	g.m[key] = c
+	g.mu.Unlock()
+
+	c.val, c.err = fn()
+	c.wg.Done()
+
+	g.mu.Lock()
+	delete(g.m, key)
+	g.mu.Unlock()
+
+	return c.val, c.err
+}
+
+// CachedSource wraps any PublicationSource with in-memory caching and
+// request coalescing to shield upstream sources from concurrent bursts.
 type CachedSource struct {
-	inner PublicationSource
-	cache *MemoryCache
-	cfg   Config
+	inner          PublicationSource
+	cache          *MemoryCache
+	cfg            Config
+	manifestFlight callGroup[*ManifestRecord]
+	cardFlight     callGroup[*CardRecord]
 }
 
 // NewCachedSource creates a cached publication source.
@@ -100,34 +139,45 @@ func NewCachedSource(inner PublicationSource, cfg Config, now func() time.Time) 
 	}
 }
 
-// GetManifest checks cache before calling upstream.
+// GetManifest checks cache before calling upstream, coalescing concurrent misses.
 func (s *CachedSource) GetManifest(ctx context.Context, jurisdiction string) (*ManifestRecord, error) {
 	if rec, hit := s.cache.GetManifest(jurisdiction); hit {
 		return rec, nil
 	}
-	rec, err := s.inner.GetManifest(ctx, jurisdiction)
-	if err != nil {
-		return nil, err
-	}
-	if rec != nil && s.cfg.ManifestCacheTTL > 0 {
-		s.cache.PutManifest(jurisdiction, rec, s.cfg.ManifestCacheTTL)
-	}
-	return rec, nil
+	return s.manifestFlight.Do(jurisdiction, func() (*ManifestRecord, error) {
+		if rec, hit := s.cache.GetManifest(jurisdiction); hit {
+			return rec, nil
+		}
+		rec, err := s.inner.GetManifest(ctx, jurisdiction)
+		if err != nil {
+			return nil, err
+		}
+		if rec != nil && s.cfg.ManifestCacheTTL > 0 {
+			s.cache.PutManifest(jurisdiction, rec, s.cfg.ManifestCacheTTL)
+		}
+		return rec, nil
+	})
 }
 
-// GetCard checks cache before calling upstream.
+// GetCard checks cache before calling upstream, coalescing concurrent misses.
 func (s *CachedSource) GetCard(ctx context.Context, packageID string, version int) (*CardRecord, error) {
 	if rec, hit := s.cache.GetCard(packageID, version); hit {
 		return rec, nil
 	}
-	rec, err := s.inner.GetCard(ctx, packageID, version)
-	if err != nil {
-		return nil, err
-	}
-	if rec != nil && s.cfg.CardCacheTTL > 0 {
-		s.cache.PutCard(packageID, version, rec, s.cfg.CardCacheTTL)
-	}
-	return rec, nil
+	key := fmt.Sprintf("%s:%d", packageID, version)
+	return s.cardFlight.Do(key, func() (*CardRecord, error) {
+		if rec, hit := s.cache.GetCard(packageID, version); hit {
+			return rec, nil
+		}
+		rec, err := s.inner.GetCard(ctx, packageID, version)
+		if err != nil {
+			return nil, err
+		}
+		if rec != nil && s.cfg.CardCacheTTL > 0 {
+			s.cache.PutCard(packageID, version, rec, s.cfg.CardCacheTTL)
+		}
+		return rec, nil
+	})
 }
 
 // GetResource passes directly to inner source, as resource streams are seekable readers.

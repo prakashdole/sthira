@@ -75,8 +75,8 @@ func disposableDB(t *testing.T) (string, func()) {
 		_ = cmd.Run()
 	}
 	dsn := strings.Replace(admin, "/postgres", "/"+dbName, 1)
-	// Apply migrations 0001..0005 in order.
-	for _, m := range []string{"0001_p3_foundation", "0002_p4_stays", "0003_p4_operator", "0004_p4_operator_grants", "0005_p4_operator_identity"} {
+	// Apply migrations 0001..0006 in order.
+	for _, m := range []string{"0001_p3_foundation", "0002_p4_stays", "0003_p4_operator", "0004_p4_operator_grants", "0005_p4_operator_identity", "0006_p5_offline_publication"} {
 		migPath := filepath.Join("..", "..", "migrations", m+".sql")
 		if _, err := os.Stat(migPath); err != nil {
 			t.Fatalf("migration file not found: %s: %v", migPath, err)

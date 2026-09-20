@@ -34,6 +34,9 @@ func TestServedRoutesMatchOpenAPI(t *testing.T) {
 		{"/api/v3/operations/sources/SRC-x/transitions", http.MethodGet, http.StatusMethodNotAllowed},
 		{"/api/v3/operations/sources/SRC-x/quarantine", http.MethodGet, http.StatusMethodNotAllowed},
 		{"/api/v3/operations/stays/STAY-x/corrections", http.MethodGet, http.StatusMethodNotAllowed},
+		{"/api/v3/regions/KL/manifest", http.MethodPost, http.StatusMethodNotAllowed},
+		{"/api/v3/packages/PKG-1/versions/1", http.MethodPost, http.StatusMethodNotAllowed},
+		{"/api/v3/resources/RES-1", http.MethodPost, http.StatusMethodNotAllowed},
 	}
 	srv := httptest.NewServer(newTestServer().Handler())
 	defer srv.Close()
