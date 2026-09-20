@@ -1,10 +1,8 @@
 package store
 
 // P4 concurrent commitment/withdrawal verification: deterministic two-
-// connection tests with barrier coordination and pg_locks-based
-// observation (no timing-dependent sleeps; the test proves the competing
-// transaction actually entered lock-wait state before the racing
-// transaction releases).
+// connection tests with barrier coordination and targeted PostgreSQL lock-wait
+// observation.
 //
 // Gated on STHIRA_TEST_DSN; skipped when unset.
 //
@@ -13,10 +11,16 @@ package store
 // touches the same source row, and vice versa. Whichever transaction
 // acquires the lock first determines whether the new commitment sees a
 // still-operational or already-withdrawn source.
+//
+// Lock ordering is enforced by the database lock manager and verified by
+// observing the exact competing backend PIDs via pg_stat_activity and
+// pg_blocking_pids. Short polling intervals (2ms) rate-limit observation;
+// sleeps do not determine race winners.
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -89,19 +93,22 @@ func runRacing(t *testing.T, fns ...func() error) {
 // TestSourceLockBlocksWithdrawal: when a reservation holds FOR UPDATE OF s,p
 // on the source row, a concurrent quarantine must block until the
 // reservation commits or rolls back. The test OBSERVES that the
-// quarantine transaction entered lock-wait state via pg_locks before the
-// reservation releases the lock, proving the lock contention is real.
+// quarantine transaction entered lock-wait state blocked specifically by the
+// reservation connection before the reservation releases the lock.
 //
-// Ordering protocol (no sleeps):
-//  1. reservation begins tx and acquires FOR UPDATE on the source row.
+// Ordering protocol:
+//  1. reservation begins tx, obtains its backend PID, and acquires FOR UPDATE
+//     on the source row.
 //  2. reservation signals "holding-lock" (lockHeld barrier).
-//  3. quarantine begins tx and attempts the UPDATE; the UPDATE blocks
-//     because the source row is locked.
-//  4. observer polls pg_locks and signals when it sees the wait state.
-//  5. reservation verifies the source version was NOT bumped under its
-//     lock, commits its work, and signals "released".
-//  6. quarantine's UPDATE unblocks; it returns whatever the store says
-//     (here ErrVersionConflict, since its srcVersion is now stale).
+//  3. quarantine begins tx, obtains its backend PID, and issues UPDATE;
+//     the UPDATE blocks because the source row is locked.
+//  4. quarantine signals "quarantineIssued".
+//  5. reservation's observer polls pg_stat_activity and pg_blocking_pids,
+//     confirming that quarantine's PID is actively waiting for reservation's PID.
+//  6. reservation verifies the source version was NOT bumped under its lock,
+//     commits its work, and signals "released".
+//  7. quarantine's UPDATE unblocks; it returns ErrVersionConflict (its
+//     srcVersion is now stale).
 func TestSourceLockBlocksWithdrawal(t *testing.T) {
 	s := testDB(t)
 	s2 := openSecondStore(t)
@@ -112,23 +119,26 @@ func TestSourceLockBlocksWithdrawal(t *testing.T) {
 	stays := NewStayStore(ChainAuditor{})
 	sources := NewSourceStore(ChainAuditor{})
 
-	lockHeld := make(chan struct{})           // commit has the source FOR UPDATE
-	quarantineIssued := make(chan struct{})   // quarantine tx has issued its UPDATE
-	quarantineObserved := make(chan struct{}) // observer confirms wait
-	commitRelease := make(chan struct{})      // commit transaction finished
+	lockHeld := make(chan struct{})         // commit has the source FOR UPDATE
+	quarantineIssued := make(chan struct{}) // quarantine tx has issued its UPDATE
+	commitRelease := make(chan struct{})    // commit transaction finished
 
-	var quarObservedWaiting atomic.Bool
+	var commitPID, quarPID int
 
 	runRacing(t,
 		func() error {
 			// Reservation goroutine.
 			return s.InTx(ctx, func(tx DBTX) error {
+				var err error
+				commitPID, err = backendPID(ctx, tx)
+				if err != nil {
+					return err
+				}
 				_, _, rerr := RevalidateReservationContext(ctx, tx, facID, pkgID, nil, nowUTC())
 				if rerr != nil {
 					return rerr
 				}
-				// We hold the FOR UPDATE on sources/packages; tell the
-				// quarantine goroutine to issue its UPDATE.
+				// We hold the FOR UPDATE on sources/packages; signal that the lock is held.
 				close(lockHeld)
 				// Wait for the quarantine to have actually issued the UPDATE.
 				select {
@@ -137,11 +147,9 @@ func TestSourceLockBlocksWithdrawal(t *testing.T) {
 					return errors.New("quarantine did not issue its UPDATE")
 				}
 				// Wait for the observer to confirm the quarantine IS waiting
-				// on the row lock (the contention is observable, not assumed).
-				select {
-				case <-quarantineObserved:
-				case <-time.After(5 * time.Second):
-					return errors.New("observer did not confirm quarantine as waiting")
+				// specifically on the row lock held by our commitPID.
+				if err := pollUntilBlocked(ctx, obs, quarPID, commitPID, 5*time.Second); err != nil {
+					return fmt.Errorf("observer did not confirm quarantine as waiting on commit lock: %w", err)
 				}
 				var v int
 				if err := tx.QueryRowContext(ctx, `SELECT version FROM sources WHERE source_id=$1`, srcID).Scan(&v); err != nil {
@@ -165,40 +173,31 @@ func TestSourceLockBlocksWithdrawal(t *testing.T) {
 			// lock, then issues its UPDATE; the UPDATE will block on the
 			// source row FOR UPDATE.
 			return s2.InTx(ctx, func(tx DBTX) error {
-				// Make sure the reservation goroutine is holding the lock.
 				select {
 				case <-lockHeld:
 				case <-time.After(5 * time.Second):
 					return errors.New("reservation did not acquire lock first")
 				}
+				var err error
+				quarPID, err = backendPID(ctx, tx)
+				if err != nil {
+					return err
+				}
 				// Issue the UPDATE in a goroutine; it will block on the
-				// source row. We signal quarantineIssued AFTER issuing, then
-				// wait for the observer to confirm we are in lock-wait.
+				// source row. We signal quarantineIssued AFTER issuing.
 				errCh := make(chan error, 1)
 				go func() {
 					errCh <- sources.Quarantine(ctx, tx, srcID, srcVersion, "test-op", "hold", "EV-Q-"+srcID, nowUTC())
 				}()
 				close(quarantineIssued)
-				// Observer: poll pg_locks to confirm the quarantine IS blocked.
-				go func() {
-					if _, err := pollUntilWaiting(ctx, obs, 5*time.Second); err == nil {
-						quarObservedWaiting.Store(true)
-						close(quarantineObserved)
-					}
-				}()
 				// Wait for the commit to release.
 				select {
 				case <-commitRelease:
 				case <-time.After(10 * time.Second):
 					return errors.New("reservation did not release lock in time")
 				}
-				if !quarObservedWaiting.Load() {
-					return errors.New("observer did not confirm lock-wait contention")
-				}
 				// Quarantine runs against the post-commit state; its
 				// srcVersion is now stale, so it gets ErrVersionConflict.
-				// That is the CORRECT outcome of lock-serialized contention:
-				// the second writer waits, then sees the new state.
 				return <-errCh
 			})
 		},
@@ -207,22 +206,21 @@ func TestSourceLockBlocksWithdrawal(t *testing.T) {
 
 // TestConcurrentBarrierCommitmentWins: both goroutines reach the lock
 // before either commits. The COMMIT transaction holds the source lock
-// first; the QUARANTINE UPDATE is observed in lock-wait state until the
-// commit releases. Capacity reflects the commit; the quarantine then
-// succeeds against the new source version. No data corruption.
+// first; the QUARANTINE UPDATE is observed in lock-wait state specifically
+// blocked by the commit transaction until the commit releases. Capacity
+// reflects the commit; the quarantine returns ErrVersionConflict.
 //
-// Ordering protocol (no sleeps):
-//  1. commit begins tx and acquires FOR UPDATE on the source row.
+// Ordering protocol:
+//  1. commit begins tx, captures its backend PID, and acquires FOR UPDATE on
+//     the source row.
 //  2. commit signals "lock-held" (lockHeld barrier).
-//  3. quarantine begins tx; in a goroutine issues its UPDATE (which
-//     blocks on the source row); signals "issued" (quarantineIssued).
-//  4. observer polls pg_stat_activity and signals "observed" when it
-//     sees the quarantine waiting on a Lock wait_event_type.
-//  5. commit verifies source version unchanged, commits, and signals
-//     "released".
-//  6. quarantine's UPDATE unblocks; its srcVersion is stale, so it
-//     returns ErrVersionConflict (the second-writer-sees-new-state
-//     contract).
+//  3. quarantine begins tx, captures its backend PID; in a goroutine issues
+//     its UPDATE (which blocks on the source row); signals "issued" (quarantineIssued).
+//  4. observer polls pg_stat_activity and pg_blocking_pids, verifying the
+//     quarantine PID is waiting specifically on commit PID's lock.
+//  5. commit verifies source version unchanged, reserves capacity, commits,
+//     and signals "released".
+//  6. quarantine's UPDATE unblocks and returns ErrVersionConflict.
 func TestConcurrentBarrierCommitmentWins(t *testing.T) {
 	s := testDB(t)
 	s2 := openSecondStore(t)
@@ -235,14 +233,18 @@ func TestConcurrentBarrierCommitmentWins(t *testing.T) {
 
 	lockHeld := make(chan struct{})
 	quarantineIssued := make(chan struct{})
-	quarantineObserved := make(chan struct{})
 	commitRelease := make(chan struct{})
 	var commitHeld atomic.Int32
-	var quarObservedWaiting atomic.Bool
+	var commitPID, quarPID int
 
 	runRacing(t,
 		func() error {
 			return s.InTx(ctx, func(tx DBTX) error {
+				var err error
+				commitPID, err = backendPID(ctx, tx)
+				if err != nil {
+					return err
+				}
 				_, _, rerr := RevalidateReservationContext(ctx, tx, facID, pkgID, nil, nowUTC())
 				if rerr != nil {
 					return rerr
@@ -254,10 +256,9 @@ func TestConcurrentBarrierCommitmentWins(t *testing.T) {
 				case <-time.After(5 * time.Second):
 					return errors.New("quarantine did not issue its UPDATE")
 				}
-				select {
-				case <-quarantineObserved:
-				case <-time.After(5 * time.Second):
-					return errors.New("observer did not report quarantine waiting")
+				// Observer confirms the quarantine backend is waiting on commitPID's lock.
+				if err := pollUntilBlocked(ctx, obs, quarPID, commitPID, 5*time.Second); err != nil {
+					return fmt.Errorf("observer did not confirm quarantine as waiting on commit lock: %w", err)
 				}
 				sessID := seedSession(t, s)
 				st := mkStay(sessID, facID, pkgID, 1, start, end)
@@ -277,35 +278,28 @@ func TestConcurrentBarrierCommitmentWins(t *testing.T) {
 				case <-time.After(5 * time.Second):
 					return errors.New("commit did not acquire lock first")
 				}
+				var err error
+				quarPID, err = backendPID(ctx, tx)
+				if err != nil {
+					return err
+				}
 				errCh := make(chan error, 1)
 				go func() {
 					errCh <- sources.Quarantine(ctx, tx, srcID, srcVersion, "test-op", "hold", "EV-Q-"+srcID, nowUTC())
 				}()
 				close(quarantineIssued)
-				go func() {
-					if _, err := pollUntilWaiting(ctx, obs, 5*time.Second); err == nil {
-						quarObservedWaiting.Store(true)
-						close(quarantineObserved)
-					}
-				}()
 				select {
 				case <-commitRelease:
 				case <-time.After(10 * time.Second):
 					return errors.New("commit did not release in time")
 				}
-				if !quarObservedWaiting.Load() {
-					return errors.New("observer did not confirm lock-wait contention")
-				}
-				// Quarantine runs against the post-commit state; its
-				// srcVersion is now stale, so it gets ErrVersionConflict.
 				return <-errCh
 			})
 		},
 	)
 
 	// The commit won; capacity reflects it. The quarantine got
-	// ErrVersionConflict (its expected srcVersion is now stale), which is
-	// the correct outcome of lock-serialized contention.
+	// ErrVersionConflict (its expected srcVersion is now stale).
 	if got := commitHeld.Load(); got != 1 {
 		t.Fatalf("commitHeld=%d, want 1", got)
 	}
@@ -318,20 +312,20 @@ func TestConcurrentBarrierCommitmentWins(t *testing.T) {
 // TestConcurrentBarrierWithdrawalWins: same barrier pattern but the
 // QUARANTINE goroutine acquires the source UPDATE first. The COMMIT
 // transaction's RevalidateReservationContext waits for the source lock,
-// then reads the now-QUARANTINED source under its own lock and rejects
-// with ErrReservationContext. Capacity unchanged.
+// observed specifically blocked by the quarantine backend. Quarantine commits;
+// commit unblocks and rejects with ErrReservationContext. Capacity unchanged.
 //
-// Ordering protocol (no sleeps):
-//  1. quarantine begins tx and signals "in-tx" (inTx barrier).
-//  2. commit begins tx; signals "in-tx" (inTx barrier).
-//  3. quarantine issues its UPDATE; commits its lock acquisition via
-//     "withdrawal-locked" barrier.
-//  4. commit issues its SELECT FOR UPDATE; the observer confirms the
-//     commit is waiting; commit signals "commit-observer-saw-wait".
-//  5. quarantine waits for "commit-observed" barrier; then releases
-//     its tx by completing.
-//  6. commit's SELECT FOR UPDATE unblocks and reads the QUARANTINED
-//     state; it returns ErrReservationContext.
+// Ordering protocol:
+//  1. quarantine begins tx, captures its backend PID, and executes Quarantine
+//     (acquires exclusive row lock).
+//  2. quarantine signals "withdrawal-locked".
+//  3. commit begins tx, captures its backend PID, and issues its SELECT FOR UPDATE;
+//     this blocks on the row held by quarantine. Signals "commitIssued".
+//  4. quarantine's observer polls pg_stat_activity and pg_blocking_pids,
+//     confirming commit's PID is actively blocked by quarantine's PID.
+//  5. quarantine commits its transaction and releases its lock.
+//  6. commit's SELECT FOR UPDATE unblocks and reads the QUARANTINED state;
+//     it returns ErrReservationContext.
 func TestConcurrentBarrierWithdrawalWins(t *testing.T) {
 	s := testDB(t)
 	s2 := openSecondStore(t)
@@ -341,24 +335,27 @@ func TestConcurrentBarrierWithdrawalWins(t *testing.T) {
 	pkgID, facID, srcID, srcVersion := seedOperationalPackage(t, s, 5, start, end)
 	sources := NewSourceStore(ChainAuditor{})
 
-	withdrawalLocked := make(chan struct{})      // quarantine holds the source UPDATE lock
-	commitIssued := make(chan struct{})          // commit issued its SELECT FOR UPDATE
-	commitObservedWaiting := make(chan struct{}) // observer confirms commit is in lock-wait
-	withdrawalRelease := make(chan struct{})     // quarantine completed
+	withdrawalLocked := make(chan struct{})  // quarantine holds the source UPDATE lock
+	commitIssued := make(chan struct{})      // commit issued its SELECT FOR UPDATE
+	withdrawalRelease := make(chan struct{}) // quarantine completed
 
-	var quarObserved atomic.Bool
+	var quarPID, commitPID int
 
 	runRacing(t,
 		func() error {
 			// Quarantine goroutine.
 			return s2.InTx(ctx, func(tx DBTX) error {
+				var err error
+				quarPID, err = backendPID(ctx, tx)
+				if err != nil {
+					return err
+				}
 				// Issue the UPDATE; it will lock the source row.
 				quarErr := sources.Quarantine(ctx, tx, srcID, srcVersion, "test-op", "hold", "EV-Q-"+srcID, nowUTC())
 				if quarErr != nil {
 					return quarErr
 				}
-				// Quarantine has the source row locked (UPDATE completed
-				// but the tx is still open).
+				// Quarantine has the source row locked.
 				close(withdrawalLocked)
 				// Wait for the commit to have issued its SELECT FOR UPDATE.
 				select {
@@ -366,14 +363,9 @@ func TestConcurrentBarrierWithdrawalWins(t *testing.T) {
 				case <-time.After(5 * time.Second):
 					return errors.New("commit did not issue its SELECT FOR UPDATE")
 				}
-				// Wait for the observer to confirm the commit IS waiting.
-				select {
-				case <-commitObservedWaiting:
-				case <-time.After(5 * time.Second):
-					return errors.New("observer did not confirm commit as waiting")
-				}
-				if !quarObserved.Load() {
-					return errors.New("observer did not confirm commit lock-wait")
+				// Observer confirms commitPID IS waiting on quarPID's lock.
+				if err := pollUntilBlocked(ctx, obs, commitPID, quarPID, 5*time.Second); err != nil {
+					return fmt.Errorf("observer did not confirm commit as waiting on quarantine lock: %w", err)
 				}
 				close(withdrawalRelease)
 				return nil
@@ -389,6 +381,11 @@ func TestConcurrentBarrierWithdrawalWins(t *testing.T) {
 				return errors.New("quarantine did not acquire its lock")
 			}
 			return s.InTx(ctx, func(tx DBTX) error {
+				var err error
+				commitPID, err = backendPID(ctx, tx)
+				if err != nil {
+					return err
+				}
 				// Issue the SELECT FOR UPDATE in a goroutine; it will
 				// block on the source row held by the quarantine tx.
 				errCh := make(chan error, 1)
@@ -397,13 +394,6 @@ func TestConcurrentBarrierWithdrawalWins(t *testing.T) {
 					errCh <- err
 				}()
 				close(commitIssued)
-				// Observer confirms the commit is in lock-wait.
-				go func() {
-					if _, err := pollUntilWaiting(ctx, obs, 5*time.Second); err == nil {
-						quarObserved.Store(true)
-						close(commitObservedWaiting)
-					}
-				}()
 				// Wait for the quarantine tx to release.
 				select {
 				case <-withdrawalRelease:
@@ -412,9 +402,13 @@ func TestConcurrentBarrierWithdrawalWins(t *testing.T) {
 				}
 				// The SELECT FOR UPDATE unblocks; the source is QUARANTINED,
 				// so RevalidateReservationContext returns ErrReservationContext.
-				revalErr := <-errCh
-				if !errors.Is(revalErr, ErrReservationContext) {
-					t.Errorf("revalidate after withdrawal: got %v, want ErrReservationContext", revalErr)
+				select {
+				case revalErr := <-errCh:
+					if !errors.Is(revalErr, ErrReservationContext) {
+						t.Errorf("revalidate after withdrawal: got %v, want ErrReservationContext", revalErr)
+					}
+				case <-time.After(5 * time.Second):
+					return errors.New("commit SELECT FOR UPDATE did not unblock after quarantine released")
 				}
 				return nil
 			})
@@ -425,6 +419,142 @@ func TestConcurrentBarrierWithdrawalWins(t *testing.T) {
 	h, _, _ := buckets(t, s, facID, start)
 	if h != 0 {
 		t.Fatalf("after withdrawal-wins: held=%d, want 0 (commit denied)", h)
+	}
+}
+
+// TestObserverRejectsUnrelatedContention verifies that active lock contention
+// between unrelated database connections does NOT satisfy the targeted observer
+// for the test's intended waiter/blocker.
+func TestObserverRejectsUnrelatedContention(t *testing.T) {
+	s := testDB(t)
+	s2 := openSecondStore(t)
+	obs := openObserverPool(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	// 1. Establish two idle connections that represent the intended participants.
+	var intendedWaiterPID, intendedBlockerPID int
+	txWaiter, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin txWaiter: %v", err)
+	}
+	defer txWaiter.Rollback()
+	if err := txWaiter.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&intendedWaiterPID); err != nil {
+		t.Fatalf("waiter PID: %v", err)
+	}
+
+	txBlocker, err := s2.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin txBlocker: %v", err)
+	}
+	defer txBlocker.Rollback()
+	if err := txBlocker.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&intendedBlockerPID); err != nil {
+		t.Fatalf("blocker PID: %v", err)
+	}
+
+	// 2. Create unrelated lock contention on two completely separate connections.
+	sUnrelated1 := openSecondStore(t)
+	sUnrelated2 := openSecondStore(t)
+	txUnrelated1, err := sUnrelated1.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin unrelated1: %v", err)
+	}
+	defer txUnrelated1.Rollback()
+	txUnrelated2, err := sUnrelated2.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin unrelated2: %v", err)
+	}
+	defer txUnrelated2.Rollback()
+
+	var unrelatedBlockerPID, unrelatedWaiterPID int
+	_ = txUnrelated1.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&unrelatedBlockerPID)
+	_ = txUnrelated2.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&unrelatedWaiterPID)
+
+	// Unrelated connection 1 acquires an advisory transaction lock.
+	const testLockID = 88888888
+	if _, err := txUnrelated1.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, testLockID); err != nil {
+		t.Fatalf("unrelated1 lock: %v", err)
+	}
+
+	// Unrelated connection 2 attempts to acquire the same lock; this blocks.
+	unrelatedBlocked := make(chan struct{})
+	unrelatedErrCh := make(chan error, 1)
+	go func() {
+		close(unrelatedBlocked)
+		_, err := txUnrelated2.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, testLockID)
+		unrelatedErrCh <- err
+	}()
+	<-unrelatedBlocked
+
+	// Confirm that global lock contention exists (unrelated waiter is blocked by unrelated blocker).
+	if err := pollUntilBlocked(ctx, obs, unrelatedWaiterPID, unrelatedBlockerPID, 2*time.Second); err != nil {
+		t.Fatalf("setup: unrelated contention was not observed: %v", err)
+	}
+
+	// Legacy waitingBackends count would see w > 0 here.
+	w, err := waitingBackends(ctx, obs)
+	if err != nil || w == 0 {
+		t.Fatalf("setup: expected global waitingBackends > 0, got w=%d, err=%v", w, err)
+	}
+
+	// 3. Negative check: pollUntilBlocked for our intended waiter and blocker MUST FAIL.
+	// The intended waiter is NOT blocked, and certainly not blocked by intendedBlockerPID.
+	shortBudget := 150 * time.Millisecond
+	start := time.Now()
+	err = pollUntilBlocked(ctx, obs, intendedWaiterPID, intendedBlockerPID, shortBudget)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatalf("pollUntilBlocked falsely succeeded on unrelated contention for waiter %d blocker %d",
+			intendedWaiterPID, intendedBlockerPID)
+	}
+
+	// Also verify that even if we check intendedWaiterPID without a specific blocker, it is not blocked.
+	err = pollUntilBlocked(ctx, obs, intendedWaiterPID, 0, shortBudget)
+	if err == nil {
+		t.Fatalf("pollUntilBlocked falsely reported idle waiter %d as blocked", intendedWaiterPID)
+	}
+
+	// 4. Release unrelated contention and clean up.
+	_ = txUnrelated1.Rollback() // releases advisory lock
+	select {
+	case <-unrelatedErrCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("unrelated waiter did not unblock after rollback")
+	}
+	t.Logf("unrelated contention correctly rejected in %v with expected error: %v", elapsed, err)
+}
+
+// TestObserverTimesOutWhenContentionMissing verifies that when the expected lock
+// contention does not occur, pollUntilBlocked produces a bounded failure rather
+// than hanging indefinitely.
+func TestObserverTimesOutWhenContentionMissing(t *testing.T) {
+	s := testDB(t)
+	obs := openObserverPool(t)
+	ctx := t.Context()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	pid, err := backendPID(ctx, tx)
+	if err != nil {
+		t.Fatalf("backendPID: %v", err)
+	}
+
+	budget := 100 * time.Millisecond
+	start := time.Now()
+	err = pollUntilBlocked(ctx, obs, pid, 9999999, budget)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatalf("expected timeout error, got nil")
+	}
+	if elapsed < budget {
+		t.Fatalf("timed out too quickly: elapsed %v < budget %v", elapsed, budget)
+	}
+	if elapsed > budget+500*time.Millisecond {
+		t.Fatalf("timed out too slowly (possible hang): elapsed %v", elapsed)
 	}
 }
 
