@@ -26,17 +26,25 @@ const (
 	Operational     State = "OPERATIONAL"
 	Suspended       State = "SUSPENDED"
 	Retired         State = "RETIRED"
+	// Quarantined is a restriction state: the source's evidence is held suspect
+	// and must not drive operational guidance or new reservations. Distinct from
+	// SUSPENDED (a temporary operational pause): quarantine marks the evidence
+	// itself as not-to-be-used pending review. Reachable from any active state.
+	Quarantined State = "QUARANTINED"
 )
 
 // transitions maps a state to its legal successors.
 var transitions = map[State]map[State]bool{
-	Discovered:      {AccessRequested: true},
-	AccessRequested: {SampleAcquired: true},
-	SampleAcquired:  {Validated: true},
-	Validated:       {Authorized: true},
-	Authorized:      {Operational: true},
-	Operational:     {Suspended: true, Retired: true},
-	Suspended:       {Operational: true, Retired: true},
+	Discovered:      {AccessRequested: true, Quarantined: true},
+	AccessRequested: {SampleAcquired: true, Quarantined: true},
+	SampleAcquired:  {Validated: true, Quarantined: true},
+	Validated:       {Authorized: true, Quarantined: true},
+	Authorized:      {Operational: true, Quarantined: true},
+	Operational:     {Suspended: true, Retired: true, Quarantined: true},
+	Suspended:       {Operational: true, Retired: true, Quarantined: true},
+	// Quarantine is terminal here: release requires re-validation through a fresh
+	// source, not a silent un-quarantine.
+	Quarantined: {},
 }
 
 // ActivationError is a lifecycle failure.

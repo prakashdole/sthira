@@ -52,8 +52,18 @@ func main() {
 		opts = append(opts,
 			httpserver.WithProber(store.NewReadinessProber(st.DB(), store.SchemaRevision)),
 			httpserver.WithStore(st),
+			// Persisted context resolver: voice-commands validates against the
+			// current authorized OPERATIONAL package snapshot, failing closed when
+			// none exists. Distinct from the static demo resolver below.
+			httpserver.WithPersistedContextResolver(st),
 		)
 		logger.Info("durable store wired", "schema_revision", store.SchemaRevision)
+
+		// Operator issuance: no trusted identity/MFA verifier is wired in this
+		// binary, so POST /api/v3/operations/sessions fails closed. Wiring a real
+		// verifier requires an external identity-provider decision (see
+		// plan/open-decisions.md); until then no operator token can be minted here.
+		logger.Info("no trusted operator identity verifier configured; operator issuance fails closed")
 
 		// Bounded, retry-safe expiry worker: expires RESERVED holds past their
 		// expiry so held capacity returns to free. Runs against the DB (not a

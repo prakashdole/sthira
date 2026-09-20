@@ -229,26 +229,18 @@ paths:
       summary: Issue an operator session
       description: >-
         Issues a jurisdiction-scoped OPERATOR session. Operator authority comes
-        from a verified identity plus a second factor (MFA), not the OPERATOR
-        label alone (R22); mfa_verified attests the second-factor boundary was
-        completed. Without it no operator session is issued. The bearer token is
-        shown once; only its hash is stored.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [jurisdiction, mfa_verified]
-              properties:
-                jurisdiction: { type: string }
-                mfa_verified: { type: boolean }
+        from a server-verified identity plus a second factor (MFA) established at
+        a trusted authentication boundary, NOT from any request-body flag (R22).
+        The request carries no jurisdiction or MFA field: the permitted
+        jurisdiction is derived from a server-controlled grant bound to the
+        verified subject. With no trusted verifier configured the endpoint fails
+        closed (503); without a grant it returns 403. The bearer token is shown
+        once; only its hash is stored.
       responses:
         '201': { $ref: '#/components/responses/DataEnvelope' }
-        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '401': { $ref: '#/components/responses/ErrorEnvelope' }
         '403': { $ref: '#/components/responses/ErrorEnvelope' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
-        '415': { $ref: '#/components/responses/ErrorEnvelope' }
         '503': { $ref: '#/components/responses/ErrorEnvelope' }
   /operations/sources/{id}/transitions:
     post:
@@ -276,6 +268,46 @@ paths:
               required: [target, idempotency_key]
               properties:
                 target: { type: string, enum: [OPERATIONAL, SUSPENDED, RETIRED] }
+                idempotency_key: { type: string }
+                reason: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '401': { $ref: '#/components/responses/ErrorEnvelope' }
+        '403': { $ref: '#/components/responses/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /operations/sources/{id}/quarantine:
+    post:
+      tags: [operations]
+      summary: Quarantine a source's evidence
+      description: >-
+        Moves a source from any active state to QUARANTINED, marking its evidence
+        as not-to-be-used pending review. Distinct from SUSPENDED (a temporary
+        operational pause). Requires an OPERATOR session with verified MFA.
+        Jurisdiction-scoped via the source's current authorization. Quarantined
+        evidence is excluded from the resolved operational context and from new
+        reservation commit revalidation; existing stays are NOT cancelled or
+        released. Quarantine is terminal: release requires a fresh source.
+        Idempotency-keyed to the target source; version-guarded; audit-attributed.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotency_key, reason]
+              properties:
                 idempotency_key: { type: string }
                 reason: { type: string }
       responses:

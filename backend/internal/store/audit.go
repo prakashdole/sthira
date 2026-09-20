@@ -42,6 +42,14 @@ const genesisHash = "00000000000000000000000000000000000000000000000000000000000
 // transaction (serializing concurrent appends via the identity PK) and writes
 // the new event with its computed hash.
 func (ChainAuditor) Record(ctx context.Context, db DBTX, ev AuditEvent) error {
+	// Serialize appends: the head read and the insert must be atomic, else two
+	// concurrent transactions read the same head and write divergent successors,
+	// breaking the chain. A transaction-scoped advisory lock held to commit gives
+	// that serialization without a table lock. (The identity PK alone does not:
+	// both txs can read head H before either commits.)
+	if _, err := db.ExecContext(ctx, `SELECT pg_advisory_xact_lock(7301)`); err != nil {
+		return fmt.Errorf("store: lock audit chain: %w", err)
+	}
 	prev := genesisHash
 	var h string
 	err := db.QueryRowContext(ctx,

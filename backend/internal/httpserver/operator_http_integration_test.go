@@ -1,12 +1,17 @@
 package httpserver
 
-// P4 operator operations HTTP verification: real HTTP -> operator auth (MFA +
-// jurisdiction) -> service -> PostgreSQL. Gated on STHIRA_TEST_DSN; skipped (not
-// passed) when unset. Covers the MFA/identity boundary, cross-jurisdiction scope
-// denial, the auditable correction trail, and publish/revoke supersession.
+// P4 operator operations HTTP verification: real HTTP -> trusted identity/MFA
+// boundary -> server-controlled grant -> service -> PostgreSQL. Gated on
+// STHIRA_TEST_DSN; skipped (not passed) when unset.
+//
+// The synthetic verifier here is TEST-ONLY: it is injected via
+// WithOperatorVerifier and simulates a trusted boundary by reading a header the
+// production binary never wires. It is never selectable by an ordinary request
+// in the production server (main wires no verifier, so issuance fails closed).
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -16,12 +21,69 @@ import (
 	"sthira/backend/internal/store"
 )
 
-// createOperatorSession issues an operator session over HTTP. jurisdiction and
-// mfaVerified drive the boundary. Returns (sessionID, token, response).
-func createOperatorSession(t *testing.T, srv *httptest.Server, jurisdiction string, mfaVerified bool) (string, string, response) {
+// syntheticVerifier is a test-injected trusted boundary. It treats the
+// X-Test-Operator-Subject header as an already-verified identity with MFA. The
+// production server never wires this; it exists only so tests can exercise the
+// grant-bound issuance path.
+type syntheticVerifier struct {
+	// mfaNil, when true, returns an identity with no MFA evidence (rejected).
+	mfaNil bool
+	// fail, when set, makes verification fail (missing/invalid evidence).
+	fail bool
+}
+
+func (v syntheticVerifier) VerifyOperator(r *http.Request) (VerifiedIdentity, error) {
+	if v.fail {
+		return VerifiedIdentity{}, errors.New("synthetic: identity evidence rejected")
+	}
+	subj := r.Header.Get("X-Test-Operator-Subject")
+	if subj == "" {
+		return VerifiedIdentity{}, errors.New("synthetic: no verified subject")
+	}
+	now := time.Now().UTC()
+	id := VerifiedIdentity{Subject: subj, MFAVerifiedAt: &now}
+	if v.mfaNil {
+		id.MFAVerifiedAt = nil
+	}
+	return id, nil
+}
+
+// newOperatorServer builds a server wired to the real store plus the test-only
+// synthetic verifier, and returns it.
+func newOperatorServer(t *testing.T, v OperatorVerifier) (*httptest.Server, *store.Store) {
 	t.Helper()
-	body := fmt.Sprintf(`{"jurisdiction":%q,"mfa_verified":%t}`, jurisdiction, mfaVerified)
-	rec := do(t, srv, http.MethodPost, "/api/v3/operations/sessions", "application/json", body)
+	st := httpTestDB(t)
+	s := New(DefaultConfig("127.0.0.1:0"), WithStore(st), WithOperatorVerifier(v))
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	return srv, st
+}
+
+// grantOperator provisions a server-controlled grant for a subject+jurisdiction.
+func grantOperator(t *testing.T, st *store.Store, subject, jurisdiction string) {
+	t.Helper()
+	now := time.Now().UTC()
+	err := store.OperatorGrantStore{}.GrantOperator(t.Context(), st.DB(),
+		"GRANT-"+subject+"-"+jurisdiction, subject, jurisdiction, "test-admin", nil, now)
+	if err != nil {
+		t.Fatalf("grant operator: %v", err)
+	}
+}
+
+// issueOperator calls the issuance endpoint with the given verified subject and
+// returns (sessionID, token, response).
+func issueOperator(t *testing.T, srv *httptest.Server, subject string) (string, string, response) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/v3/operations/sessions", nil)
+	if subject != "" {
+		req.Header.Set("X-Test-Operator-Subject", subject)
+	}
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("issue operator: %v", err)
+	}
+	defer resp.Body.Close()
+	rec := response{code: resp.StatusCode, header: resp.Header, body: readAll(t, resp)}
 	if rec.code != http.StatusCreated {
 		return "", "", rec
 	}
@@ -65,17 +127,96 @@ func seedOperatorSource(t *testing.T, st *store.Store, jurisdiction string) stri
 	return srcID
 }
 
-// TestOperatorMFARequired: no operator session is issued without MFA.
-func TestOperatorMFARequired(t *testing.T) {
-	s, _ := newStayServer(t)
+// --- issuance boundary ---
+
+// TestOperatorIssuanceFailsClosedNoVerifier: with no verifier wired (the
+// production default), issuance is unavailable and no token is minted even with
+// a self-asserted mfa_verified:true body.
+func TestOperatorIssuanceFailsClosedNoVerifier(t *testing.T) {
+	s, _ := newStayServer(t) // no WithOperatorVerifier
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
-	_, _, rec := createOperatorSession(t, srv, "JTEST", false)
+	rec := do(t, srv, http.MethodPost, "/api/v3/operations/sessions", "application/json",
+		`{"jurisdiction":"JTEST","mfa_verified":true}`)
+	if rec.code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 fail-closed without verifier, got %d body=%s", rec.code, rec.body)
+	}
+}
+
+// TestOperatorIssuanceRejectsBodyMFA: a request-body mfa_verified:true is not
+// evidence; without a verified subject the boundary rejects issuance.
+func TestOperatorIssuanceRejectsBodyMFA(t *testing.T) {
+	srv, _ := newOperatorServer(t, syntheticVerifier{})
+	// No X-Test-Operator-Subject header: the synthetic boundary has nothing
+	// verified. A body flag must not substitute.
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/v3/operations/sessions", nil)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without verified subject, got %d", resp.StatusCode)
+	}
+}
+
+// TestOperatorIssuanceNoGrant: a verified identity with MFA but no
+// server-controlled grant cannot obtain an operator session.
+func TestOperatorIssuanceNoGrant(t *testing.T) {
+	srv, _ := newOperatorServer(t, syntheticVerifier{})
+	_, _, rec := issueOperator(t, srv, "subj-no-grant")
+	if rec.code != http.StatusForbidden {
+		t.Fatalf("expected 403 without grant, got %d body=%s", rec.code, rec.body)
+	}
+}
+
+// TestOperatorIssuanceMFARequired: a verified identity without MFA evidence is
+// rejected even with a grant.
+func TestOperatorIssuanceMFARequired(t *testing.T) {
+	srv, st := newOperatorServer(t, syntheticVerifier{mfaNil: true})
+	grantOperator(t, st, "subj-nomfa", "JTEST")
+	_, _, rec := issueOperator(t, srv, "subj-nomfa")
 	if rec.code != http.StatusForbidden {
 		t.Fatalf("expected 403 without MFA, got %d body=%s", rec.code, rec.body)
 	}
 }
+
+// TestOperatorIssuanceInvalidEvidence: rejected identity evidence -> 401.
+func TestOperatorIssuanceInvalidEvidence(t *testing.T) {
+	srv, _ := newOperatorServer(t, syntheticVerifier{fail: true})
+	_, _, rec := issueOperator(t, srv, "subj-x")
+	if rec.code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 on rejected evidence, got %d body=%s", rec.code, rec.body)
+	}
+}
+
+// TestOperatorIssuanceDerivesJurisdiction: with a verified identity, MFA and a
+// grant, issuance succeeds and the session jurisdiction comes from the grant
+// (the caller never supplied one).
+func TestOperatorIssuanceDerivesJurisdiction(t *testing.T) {
+	srv, st := newOperatorServer(t, syntheticVerifier{})
+	grantOperator(t, st, "subj-op", "JTEST")
+	sessID, token, rec := issueOperator(t, srv, "subj-op")
+	if rec.code != http.StatusCreated {
+		t.Fatalf("expected 201 with grant+MFA, got %d body=%s", rec.code, rec.body)
+	}
+	if sessID == "" || token == "" {
+		t.Fatalf("missing session/token: %s", rec.body)
+	}
+	// The session's jurisdiction is the granted one.
+	var jur string
+	if err := st.DB().QueryRowContext(t.Context(),
+		`SELECT jurisdiction FROM sessions WHERE session_id=$1`, sessID).Scan(&jur); err != nil {
+		t.Fatalf("read session: %v", err)
+	}
+	if jur != "JTEST" {
+		t.Fatalf("expected jurisdiction JTEST from grant, got %s", jur)
+	}
+}
+
+// --- operator route authorization ---
 
 // TestOperatorSessionRequiresMFAOnUse: a citizen token cannot call operator
 // routes (principal-kind boundary).
@@ -84,7 +225,6 @@ func TestOperatorSessionRequiresMFAOnUse(t *testing.T) {
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
-	// A citizen session must not reach operator routes.
 	_, citizenToken := createSession(t, srv)
 	rec := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/SRC-x/transitions", citizenToken,
 		`{"target":"OPERATIONAL","idempotency_key":"k1"}`)
@@ -94,40 +234,32 @@ func TestOperatorSessionRequiresMFAOnUse(t *testing.T) {
 }
 
 // TestOperatorPublishRevokeSupersession: publish (AUTHORIZED->OPERATIONAL) then
-// revoke (OPERATIONAL->RETIRED), jurisdiction-scoped, with audit.
+// revoke (OPERATIONAL->RETIRED), jurisdiction-scoped, with idempotent replay.
 func TestOperatorPublishRevokeSupersession(t *testing.T) {
-	s, st := newStayServer(t)
-	srv := httptest.NewServer(s.Handler())
-	defer srv.Close()
-
+	srv, st := newOperatorServer(t, syntheticVerifier{})
+	grantOperator(t, st, "subj-pub", "JTEST")
 	srcID := seedOperatorSource(t, st, "JTEST")
-	_, token, rec := createOperatorSession(t, srv, "JTEST", true)
+	_, token, rec := issueOperator(t, srv, "subj-pub")
 	if rec.code != http.StatusCreated {
 		t.Fatalf("operator session: code=%d body=%s", rec.code, rec.body)
 	}
 
-	// Publish: AUTHORIZED -> OPERATIONAL.
 	pub := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/transitions", token,
 		`{"target":"OPERATIONAL","idempotency_key":"pub-1","reason":"go live"}`)
 	if pub.code != http.StatusOK {
 		t.Fatalf("publish: code=%d body=%s", pub.code, pub.body)
 	}
-
-	// Replay the same publish (same key+payload) returns the stored result.
 	pubReplay := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/transitions", token,
 		`{"target":"OPERATIONAL","idempotency_key":"pub-1","reason":"go live"}`)
 	if pubReplay.code != http.StatusOK {
 		t.Fatalf("publish replay: code=%d body=%s", pubReplay.code, pubReplay.body)
 	}
-
-	// Revoke: OPERATIONAL -> RETIRED.
 	rev := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/transitions", token,
 		`{"target":"RETIRED","idempotency_key":"rev-1","reason":"superseded"}`)
 	if rev.code != http.StatusOK {
 		t.Fatalf("revoke: code=%d body=%s", rev.code, rev.body)
 	}
 
-	// Final state is RETIRED at version 3 (AUTHORIZED->OPERATIONAL->RETIRED).
 	var state string
 	var version int
 	if err := st.DB().QueryRowContext(t.Context(),
@@ -139,15 +271,13 @@ func TestOperatorPublishRevokeSupersession(t *testing.T) {
 	}
 }
 
-// TestOperatorCrossJurisdictionDenied: an operator in jurisdiction A cannot
+// TestOperatorCrossJurisdictionDenied: an operator granted jurisdiction A cannot
 // publish a source authorized only in jurisdiction B.
 func TestOperatorCrossJurisdictionDenied(t *testing.T) {
-	s, st := newStayServer(t)
-	srv := httptest.NewServer(s.Handler())
-	defer srv.Close()
-
+	srv, st := newOperatorServer(t, syntheticVerifier{})
+	grantOperator(t, st, "subj-cross", "JURISDICTION-A")
 	srcID := seedOperatorSource(t, st, "JURISDICTION-B")
-	_, token, rec := createOperatorSession(t, srv, "JURISDICTION-A", true)
+	_, token, rec := issueOperator(t, srv, "subj-cross")
 	if rec.code != http.StatusCreated {
 		t.Fatalf("operator session: code=%d body=%s", rec.code, rec.body)
 	}
@@ -157,8 +287,6 @@ func TestOperatorCrossJurisdictionDenied(t *testing.T) {
 	if pub.code != http.StatusForbidden {
 		t.Fatalf("expected 403 cross-jurisdiction, got %d body=%s", pub.code, pub.body)
 	}
-
-	// The source must remain AUTHORIZED (no transition leaked through).
 	var state string
 	if err := st.DB().QueryRowContext(t.Context(),
 		`SELECT state FROM sources WHERE source_id=$1`, srcID).Scan(&state); err != nil {
@@ -172,11 +300,9 @@ func TestOperatorCrossJurisdictionDenied(t *testing.T) {
 // TestOperatorStayCorrectionAudit: an operator correction releases space and
 // writes an audit event attributed to the operator session.
 func TestOperatorStayCorrectionAudit(t *testing.T) {
-	s, st := newStayServer(t)
-	srv := httptest.NewServer(s.Handler())
-	defer srv.Close()
+	srv, st := newOperatorServer(t, syntheticVerifier{})
+	grantOperator(t, st, "subj-corr", "JTEST")
 
-	// Seed a facility (jurisdiction JTEST) and a citizen reservation of party 3.
 	pkgID, facID, snap := seedHTTPPackageFacility(t, st, 10, httpDayT(1), httpDayT(3))
 	_, citizenToken := createSession(t, srv)
 	res := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", citizenToken,
@@ -193,8 +319,7 @@ func TestOperatorStayCorrectionAudit(t *testing.T) {
 		t.Fatalf("decode reservation: %v", err)
 	}
 
-	// Operator in JTEST corrects party size 3 -> 1 (releases 2).
-	opSessID, opToken, rec := createOperatorSession(t, srv, "JTEST", true)
+	opSessID, opToken, rec := issueOperator(t, srv, "subj-corr")
 	if rec.code != http.StatusCreated {
 		t.Fatalf("operator session: code=%d body=%s", rec.code, rec.body)
 	}
@@ -204,7 +329,6 @@ func TestOperatorStayCorrectionAudit(t *testing.T) {
 		t.Fatalf("correction: code=%d body=%s", corr.code, corr.body)
 	}
 
-	// Held drops from 3 to 1 on each date.
 	var held int
 	if err := st.DB().QueryRowContext(t.Context(),
 		`SELECT held FROM facility_inventory WHERE facility_id=$1 AND service_date=$2`, facID, httpDayT(1)).Scan(&held); err != nil {
@@ -213,12 +337,9 @@ func TestOperatorStayCorrectionAudit(t *testing.T) {
 	if held != 1 {
 		t.Fatalf("expected held=1 after correction, got %d", held)
 	}
-
-	// Audit event recorded, attributed to the operator session.
-	var actor, action string
+	var actor string
 	err := st.DB().QueryRowContext(t.Context(),
-		`SELECT actor_id, action FROM audit_events WHERE subject_id=$1 AND action='STAY_CORRECT'`, rdata.StayID).
-		Scan(&actor, &action)
+		`SELECT actor_id FROM audit_events WHERE subject_id=$1 AND action='STAY_CORRECT'`, rdata.StayID).Scan(&actor)
 	if err != nil {
 		t.Fatalf("read audit: %v", err)
 	}
@@ -227,12 +348,11 @@ func TestOperatorStayCorrectionAudit(t *testing.T) {
 	}
 }
 
-// TestOperatorCorrectionCrossJurisdictionDenied: an operator in another
+// TestOperatorCorrectionCrossJurisdictionDenied: an operator granted another
 // jurisdiction cannot correct a stay whose facility sits elsewhere.
 func TestOperatorCorrectionCrossJurisdictionDenied(t *testing.T) {
-	s, st := newStayServer(t)
-	srv := httptest.NewServer(s.Handler())
-	defer srv.Close()
+	srv, st := newOperatorServer(t, syntheticVerifier{})
+	grantOperator(t, st, "subj-xc", "ELSEWHERE")
 
 	pkgID, facID, snap := seedHTTPPackageFacility(t, st, 10, httpDayT(1), httpDayT(3))
 	_, citizenToken := createSession(t, srv)
@@ -250,8 +370,7 @@ func TestOperatorCorrectionCrossJurisdictionDenied(t *testing.T) {
 		t.Fatalf("decode reservation: %v", err)
 	}
 
-	// Operator in a DIFFERENT jurisdiction attempts the correction.
-	_, opToken, rec := createOperatorSession(t, srv, "ELSEWHERE", true)
+	_, opToken, rec := issueOperator(t, srv, "subj-xc")
 	if rec.code != http.StatusCreated {
 		t.Fatalf("operator session: code=%d body=%s", rec.code, rec.body)
 	}
@@ -260,8 +379,6 @@ func TestOperatorCorrectionCrossJurisdictionDenied(t *testing.T) {
 	if corr.code != http.StatusForbidden {
 		t.Fatalf("expected 403 cross-jurisdiction correction, got %d body=%s", corr.code, corr.body)
 	}
-
-	// Held unchanged (still 2).
 	var held int
 	if err := st.DB().QueryRowContext(t.Context(),
 		`SELECT held FROM facility_inventory WHERE facility_id=$1 AND service_date=$2`, facID, httpDayT(1)).Scan(&held); err != nil {
@@ -269,5 +386,143 @@ func TestOperatorCorrectionCrossJurisdictionDenied(t *testing.T) {
 	}
 	if held != 2 {
 		t.Fatalf("expected held=2 unchanged, got %d", held)
+	}
+}
+
+// --- idempotency resource-binding ---
+
+// TestOperatorIdempotencyTargetBinding: the same key+body against a DIFFERENT
+// target source must not return the first target's result.
+func TestOperatorIdempotencyTargetBinding(t *testing.T) {
+	srv, st := newOperatorServer(t, syntheticVerifier{})
+	grantOperator(t, st, "subj-idem", "JTEST")
+	srcA := seedOperatorSource(t, st, "JTEST")
+	srcB := seedOperatorSource(t, st, "JTEST")
+	_, token, rec := issueOperator(t, srv, "subj-idem")
+	if rec.code != http.StatusCreated {
+		t.Fatalf("operator session: code=%d body=%s", rec.code, rec.body)
+	}
+
+	// Publish source A with key "same-key".
+	a := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcA+"/transitions", token,
+		`{"target":"OPERATIONAL","idempotency_key":"same-key","reason":"r"}`)
+	if a.code != http.StatusOK {
+		t.Fatalf("publish A: code=%d body=%s", a.code, a.body)
+	}
+	// Same key+body against source B must NOT replay A's result; it is a distinct
+	// resource-scoped key and applies the transition to B.
+	b := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcB+"/transitions", token,
+		`{"target":"OPERATIONAL","idempotency_key":"same-key","reason":"r"}`)
+	if b.code != http.StatusOK {
+		t.Fatalf("publish B (distinct target): code=%d body=%s", b.code, b.body)
+	}
+	// Both transitions applied independently.
+	for _, id := range []string{srcA, srcB} {
+		var state string
+		if err := st.DB().QueryRowContext(t.Context(), `SELECT state FROM sources WHERE source_id=$1`, id).Scan(&state); err != nil {
+			t.Fatalf("read %s: %v", id, err)
+		}
+		if state != "OPERATIONAL" {
+			t.Fatalf("expected %s OPERATIONAL, got %s", id, state)
+		}
+	}
+}
+
+// TestOperatorIdempotencyPayloadConflict: same key, changed payload -> conflict.
+func TestOperatorIdempotencyPayloadConflict(t *testing.T) {
+	srv, st := newOperatorServer(t, syntheticVerifier{})
+	grantOperator(t, st, "subj-pc", "JTEST")
+	srcID := seedOperatorSource(t, st, "JTEST")
+	_, token, rec := issueOperator(t, srv, "subj-pc")
+	if rec.code != http.StatusCreated {
+		t.Fatalf("operator session: code=%d body=%s", rec.code, rec.body)
+	}
+
+	first := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/transitions", token,
+		`{"target":"OPERATIONAL","idempotency_key":"k-conf","reason":"one"}`)
+	if first.code != http.StatusOK {
+		t.Fatalf("first: code=%d body=%s", first.code, first.body)
+	}
+	// Same key, different payload (different reason) -> 409 conflict.
+	conflict := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/transitions", token,
+		`{"target":"OPERATIONAL","idempotency_key":"k-conf","reason":"two"}`)
+	if conflict.code != http.StatusConflict {
+		t.Fatalf("expected 409 payload conflict, got %d body=%s", conflict.code, conflict.body)
+	}
+}
+
+// --- quarantine ---
+
+// TestOperatorQuarantine: authorized quarantine restricts the source, is
+// idempotent, attributed, and a second quarantine is terminal-conflict.
+func TestOperatorQuarantine(t *testing.T) {
+	srv, st := newOperatorServer(t, syntheticVerifier{})
+	grantOperator(t, st, "subj-q", "JTEST")
+	srcID := seedOperatorSource(t, st, "JTEST")
+	opSess, token, rec := issueOperator(t, srv, "subj-q")
+	if rec.code != http.StatusCreated {
+		t.Fatalf("operator session: code=%d body=%s", rec.code, rec.body)
+	}
+
+	q := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/quarantine", token,
+		`{"idempotency_key":"q-1","reason":"suspect evidence"}`)
+	if q.code != http.StatusOK {
+		t.Fatalf("quarantine: code=%d body=%s", q.code, q.body)
+	}
+	// Replay returns the stored result without a duplicate transition.
+	qReplay := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/quarantine", token,
+		`{"idempotency_key":"q-1","reason":"suspect evidence"}`)
+	if qReplay.code != http.StatusOK {
+		t.Fatalf("quarantine replay: code=%d body=%s", qReplay.code, qReplay.body)
+	}
+
+	var state string
+	var version int
+	if err := st.DB().QueryRowContext(t.Context(),
+		`SELECT state, version FROM sources WHERE source_id=$1`, srcID).Scan(&state, &version); err != nil {
+		t.Fatalf("read source: %v", err)
+	}
+	if state != "QUARANTINED" || version != 2 {
+		t.Fatalf("expected QUARANTINED v2, got %s v%d", state, version)
+	}
+	// Audit attributed to the operator.
+	var actor string
+	if err := st.DB().QueryRowContext(t.Context(),
+		`SELECT actor_id FROM audit_events WHERE subject_id=$1 AND to_state='QUARANTINED'`, srcID).Scan(&actor); err != nil {
+		t.Fatalf("read audit: %v", err)
+	}
+	if actor != opSess {
+		t.Fatalf("expected audit actor=%s, got %s", opSess, actor)
+	}
+
+	// A second, distinct quarantine (different key) is terminal-conflict.
+	q2 := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/quarantine", token,
+		`{"idempotency_key":"q-2","reason":"again"}`)
+	if q2.code != http.StatusConflict {
+		t.Fatalf("expected 409 terminal quarantine, got %d body=%s", q2.code, q2.body)
+	}
+}
+
+// TestOperatorQuarantineCrossJurisdiction: an operator granted jurisdiction A
+// cannot quarantine a source authorized only in jurisdiction B.
+func TestOperatorQuarantineCrossJurisdiction(t *testing.T) {
+	srv, st := newOperatorServer(t, syntheticVerifier{})
+	grantOperator(t, st, "subj-qx", "JURISDICTION-A")
+	srcID := seedOperatorSource(t, st, "JURISDICTION-B")
+	_, token, rec := issueOperator(t, srv, "subj-qx")
+	if rec.code != http.StatusCreated {
+		t.Fatalf("operator session: code=%d body=%s", rec.code, rec.body)
+	}
+	q := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/quarantine", token,
+		`{"idempotency_key":"q-x","reason":"attempt"}`)
+	if q.code != http.StatusForbidden {
+		t.Fatalf("expected 403 cross-jurisdiction quarantine, got %d body=%s", q.code, q.body)
+	}
+	var state string
+	if err := st.DB().QueryRowContext(t.Context(), `SELECT state FROM sources WHERE source_id=$1`, srcID).Scan(&state); err != nil {
+		t.Fatalf("read source: %v", err)
+	}
+	if state != "AUTHORIZED" {
+		t.Fatalf("expected AUTHORIZED unchanged, got %s", state)
 	}
 }

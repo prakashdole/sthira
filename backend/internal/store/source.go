@@ -85,6 +85,27 @@ func (s *SourceStore) Transition(ctx context.Context, db DBTX, sourceID string, 
 	return nil
 }
 
+// ErrQuarantineTerminal is returned when a transition targets an already-
+// quarantined source (quarantine is terminal; release needs a fresh source).
+var ErrQuarantineTerminal = errors.New("store: source already quarantined")
+
+// Quarantine restricts a source's evidence: it moves any non-quarantined source
+// to QUARANTINED with a version guard, recording an attributed audit event. It is
+// idempotent at the store level only through the caller's idempotency key; a
+// second quarantine of the same source is a no-op transition error. Quarantined
+// evidence is excluded from operational use by the context resolver and by
+// reservation commit revalidation.
+func (s *SourceStore) Quarantine(ctx context.Context, db DBTX, sourceID string, expectedVersion int, actorID, reason, eventID string, now time.Time) error {
+	src, err := s.GetSource(ctx, db, sourceID)
+	if err != nil {
+		return err
+	}
+	if src.State == sourceact.Quarantined {
+		return ErrQuarantineTerminal
+	}
+	return s.Transition(ctx, db, sourceID, expectedVersion, sourceact.Quarantined, actorID, reason, eventID, now)
+}
+
 // RecordAuthorization stores the authorization evidence for a source. Source
 // activation requires recorded evidence, not merely advancing an enum: the
 // AUTHORIZED -> OPERATIONAL transition must reference an authorization row.

@@ -58,6 +58,36 @@ type Server struct {
 	// store is the durable persistence root for the P4 destination/stay routes.
 	// Nil in foundation mode; those routes then fail closed (503).
 	store *store.Store
+	// operatorVerifier is the trusted identity/MFA boundary for operator session
+	// issuance. Nil means issuance fails closed (no self-granted operator tokens).
+	operatorVerifier OperatorVerifier
+}
+
+// persistedResolver adapts the store's persisted context resolution to the
+// ContextResolver seam. It resolves from the current authorized OPERATIONAL
+// package and fails closed when none exists.
+type persistedResolver struct{ st *store.Store }
+
+func (p persistedResolver) Resolve(ctx context.Context) (ContextSnapshot, error) {
+	snap, err := store.ResolveAnyOperationalContext(ctx, p.st.DB(), time.Now().UTC())
+	if err != nil {
+		return ContextSnapshot{}, err
+	}
+	return ContextSnapshot{
+		DataVersion:      snap.DataVersion,
+		Jurisdiction:     snap.Jurisdiction,
+		KnownIDs:         snap.KnownIDs,
+		EnabledLanguages: snap.EnabledLanguages,
+	}, nil
+}
+
+// WithPersistedContextResolver wires the database-backed context resolver for
+// the voice-commands boundary. The snapshot is derived from the current
+// authorized OPERATIONAL package; absent/expired/unauthorized/quarantined
+// evidence fails closed. Distinct from the static demo resolver, which is
+// explicitly non-operational.
+func WithPersistedContextResolver(st *store.Store) Option {
+	return func(s *Server) { s.resolver = persistedResolver{st: st} }
 }
 
 // StaticContextResolver returns a ContextResolver that always serves the same
@@ -92,6 +122,13 @@ func WithLogger(l *slog.Logger) Option { return func(s *Server) { s.logger = l }
 // it those routes fail closed (503) rather than fabricating success.
 func WithStore(st *store.Store) Option { return func(s *Server) { s.store = st } }
 
+// WithOperatorVerifier wires the trusted identity/MFA boundary for operator
+// session issuance. Without it operator issuance fails closed (503); a
+// request-body MFA flag is never accepted as evidence.
+func WithOperatorVerifier(v OperatorVerifier) Option {
+	return func(s *Server) { s.operatorVerifier = v }
+}
+
 // New builds a Server with bounded timeouts and the frozen route set.
 func New(cfg Config, opts ...Option) *Server {
 	s := &Server{
@@ -122,6 +159,7 @@ func New(cfg Config, opts ...Option) *Server {
 	// are jurisdiction-scoped per handler.
 	mux.HandleFunc("/api/v3/operations/sessions", s.withRequestID(s.handleCreateOperatorSession))
 	mux.HandleFunc("/api/v3/operations/sources/{id}/transitions", s.withRequestID(s.withOperator(s.handleSourceTransition)))
+	mux.HandleFunc("/api/v3/operations/sources/{id}/quarantine", s.withRequestID(s.withOperator(s.handleSourceQuarantine)))
 	mux.HandleFunc("/api/v3/operations/stays/{id}/corrections", s.withRequestID(s.withOperator(s.handleStayCorrection)))
 
 	// Test-only crash fault-injection endpoint; a no-op unless built with the
