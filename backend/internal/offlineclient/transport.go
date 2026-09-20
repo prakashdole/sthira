@@ -66,6 +66,27 @@ func (c *ProtocolClient) downloadAndVerifyCard(ctx context.Context, req manifest
 	if err := c.verifyCard(&card, bytes); err != nil {
 		return nil, nil, 0, "", err
 	}
+	if req.ExpectedCardDesc != nil {
+		desc := req.ExpectedCardDesc
+		if card.PackageID != desc.PackageID {
+			return nil, nil, 0, "", fmt.Errorf("offlineclient: card package_id mismatch: got %q expected %q", card.PackageID, desc.PackageID)
+		}
+		if card.Version != desc.Version {
+			return nil, nil, 0, "", fmt.Errorf("offlineclient: card version mismatch: got %d expected %d", card.Version, desc.Version)
+		}
+		if req.Jurisdiction != "" && card.Jurisdiction != req.Jurisdiction {
+			return nil, nil, 0, "", fmt.Errorf("offlineclient: card jurisdiction mismatch: got %q expected %q", card.Jurisdiction, req.Jurisdiction)
+		}
+		if desc.ChecksumSHA256 != "" && card.ChecksumSHA256 != desc.ChecksumSHA256 {
+			return nil, nil, 0, "", fmt.Errorf("%w: card checksum %q does not match manifest reference %q", offlinepkg.ErrChecksumMismatch, card.ChecksumSHA256, desc.ChecksumSHA256)
+		}
+		if desc.UncompressedBytes > 0 && int64(len(bytes)) > desc.UncompressedBytes {
+			return nil, nil, 0, "", fmt.Errorf("offlineclient: card byte size %d exceeds declared manifest budget %d", len(bytes), desc.UncompressedBytes)
+		}
+		if int64(len(bytes)) > 65536 {
+			return nil, nil, 0, "", fmt.Errorf("offlineclient: card byte size %d exceeds 64 KiB ceiling", len(bytes))
+		}
+	}
 	return bytes, &card, n, partPath, nil
 }
 
@@ -274,8 +295,10 @@ func readAllBounded(r io.Reader, max int64) ([]byte, error) {
 // metadata embedded in the request when available; otherwise 0 (caller
 // skips the size check).
 func expectedTotal(req manifestDownload, etag string, body []byte) int64 {
-	if req.IsCard {
-		return int64(len(body))
+	if req.IsCard && req.ExpectedCardDesc != nil && req.ExpectedCardDesc.UncompressedBytes > 0 {
+		if int64(len(body)) > req.ExpectedCardDesc.UncompressedBytes {
+			return req.ExpectedCardDesc.UncompressedBytes
+		}
 	}
 	return int64(len(body))
 }

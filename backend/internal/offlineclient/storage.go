@@ -18,6 +18,8 @@ type persistedState struct {
 	LastRevision        int   `json:"last_revision"`
 	LastSyncMonotonicNS int64 `json:"last_sync_monotonic_ns"`
 	LastFetchedAtUnixMS int64 `json:"last_fetched_at_unix_ms"`
+	MaxObservedUnixMS   int64 `json:"max_observed_unix_ms,omitempty"`
+	ExpiredAtUnixMS     int64 `json:"expired_at_unix_ms,omitempty"`
 }
 
 // downloadMeta is the on-disk representation of <artifact>.part.meta.

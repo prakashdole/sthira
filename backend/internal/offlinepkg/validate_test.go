@@ -69,6 +69,7 @@ func TestValidateManifestStructuralErrors(t *testing.T) {
 		{"valid_until <= generated_at", func(m *Manifest) { m.ValidUntil = m.GeneratedAt }},
 		{"missing critical_card package_id", func(m *Manifest) { m.CriticalCard.PackageID = "" }},
 		{"critical_card compressed_bytes > 64 KiB", func(m *Manifest) { m.CriticalCard.CompressedBytes = 70000 }},
+		{"critical_card uncompressed_bytes > 64 KiB", func(m *Manifest) { m.CriticalCard.UncompressedBytes = 70000 }},
 		{"resource missing attribution", func(m *Manifest) { m.Resources[0].Attribution = "" }},
 		{"missing provenance authority", func(m *Manifest) { m.Provenance.Authority = "" }},
 		{"invalid evidence class", func(m *Manifest) { m.Provenance.EvidenceClass = "UNAPPROVED_DRAFT" }},

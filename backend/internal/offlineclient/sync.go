@@ -35,6 +35,12 @@ func (c *ProtocolClient) stateQuery() (*offlinepkg.PublicIncidentCard, Freshness
 	if card.PackageID != "" && c.isSuperseded(card.PackageID, card.Version) {
 		return card, FreshnessRevoked, nil
 	}
+	if card.Signature != nil && c.trust != nil {
+		tk, err := c.trust.LookupKey(card.Signature.KeyID)
+		if err != nil || tk.Revoked {
+			return card, FreshnessRevoked, nil
+		}
+	}
 	now := c.now()
 	state, err := c.computeFreshness(card, st, now)
 	if err != nil {
@@ -44,12 +50,17 @@ func (c *ProtocolClient) stateQuery() (*offlinepkg.PublicIncidentCard, Freshness
 }
 
 // computeFreshness returns CURRENT / STALE / EXPIRED using monotonic
-// elapsed time. Wall-clock rollback cannot extend validity.
+// elapsed time and absolute expiration boundaries. Wall-clock rollback
+// cannot extend validity or un-expire an expired card.
 func (c *ProtocolClient) computeFreshness(card *offlinepkg.PublicIncidentCard, st persistedState, now time.Time) (FreshnessState, error) {
 	if st.LastSyncMonotonicNS == 0 {
 		// First sync never completed; bytes on disk but no time anchor.
 		return FreshnessExpired, nil
 	}
+	if st.ExpiredAtUnixMS > 0 {
+		return FreshnessExpired, nil
+	}
+
 	expiresAt, err := time.Parse(time.RFC3339, card.ExpiresAt)
 	if err != nil {
 		return FreshnessExpired, fmt.Errorf("offlineclient: parse card expires_at: %w", err)
@@ -58,22 +69,62 @@ func (c *ProtocolClient) computeFreshness(card *offlinepkg.PublicIncidentCard, s
 	if err != nil {
 		return FreshnessExpired, fmt.Errorf("offlineclient: parse card effective_at: %w", err)
 	}
-	// Server-asserted window: how long the artifact is intended to live.
-	window := expiresAt.Sub(effectiveAt)
-	if window <= 0 {
-		return FreshnessExpired, errors.New("offlineclient: card has non-positive validity window")
+
+	// Absolute expiration check: an already-expired card must never be CURRENT.
+	if !now.Before(expiresAt) {
+		st.ExpiredAtUnixMS = now.UnixMilli()
+		if now.UnixMilli() > st.MaxObservedUnixMS {
+			st.MaxObservedUnixMS = now.UnixMilli()
+		}
+		_ = c.storage.saveState(st)
+		return FreshnessExpired, nil
 	}
-	// Monotonic elapsed since the last successful sync. If monotonic time
-	// itself is broken, surface that as a hard error.
+
+	// A card not yet effective cannot be treated as CURRENT.
+	if now.Before(effectiveAt) {
+		return FreshnessUnverifiable, nil
+	}
+
+	// Clock rollback detection against monotonically recorded wall/monotonic marks.
+	if st.MaxObservedUnixMS > 0 && now.UnixMilli() < st.MaxObservedUnixMS {
+		return FreshnessExpired, ErrClockRolledBack
+	}
 	monoNow := now.UnixNano()
 	if monoNow < st.LastSyncMonotonicNS {
 		return FreshnessExpired, ErrClockRolledBack
 	}
-	elapsed := time.Duration(monoNow - st.LastSyncMonotonicNS)
-	if elapsed > window {
+
+	// Remaining validity window bounded by acquisition time.
+	acqTime := time.UnixMilli(st.LastFetchedAtUnixMS)
+	if acqTime.IsZero() {
+		acqTime = effectiveAt
+	}
+	remainingAtAcq := expiresAt.Sub(acqTime)
+	if remainingAtAcq <= 0 {
+		st.ExpiredAtUnixMS = now.UnixMilli()
+		_ = c.storage.saveState(st)
 		return FreshnessExpired, nil
 	}
-	if window-elapsed <= c.staleBefore {
+
+	elapsed := time.Duration(monoNow - st.LastSyncMonotonicNS)
+	if elapsed >= remainingAtAcq {
+		st.ExpiredAtUnixMS = now.UnixMilli()
+		_ = c.storage.saveState(st)
+		return FreshnessExpired, nil
+	}
+
+	// Advance max observed time.
+	if now.UnixMilli() > st.MaxObservedUnixMS {
+		st.MaxObservedUnixMS = now.UnixMilli()
+		_ = c.storage.saveState(st)
+	}
+
+	remaining := expiresAt.Sub(now)
+	if remainingAtAcq-elapsed < remaining {
+		remaining = remainingAtAcq - elapsed
+	}
+
+	if remaining <= c.staleBefore {
 		return FreshnessStale, nil
 	}
 	return FreshnessCurrent, nil
@@ -208,11 +259,12 @@ func (c *ProtocolClient) sync(ctx context.Context, jurisdiction string) (*SyncRe
 		cardPath := fmt.Sprintf("/api/v3/packages/%s/versions/%d",
 			manifestMeta.CriticalCard.PackageID, manifestMeta.CriticalCard.Version)
 		cardBytes, _, _, cardPart, err := c.downloadAndVerifyArtifact(ctx, manifestDownload{
-			Jurisdiction: jurisdiction,
-			PackageID:    manifestMeta.CriticalCard.PackageID,
-			Version:      manifestMeta.CriticalCard.Version,
-			Path:         cardPath,
-			IsCard:       true,
+			Jurisdiction:     jurisdiction,
+			PackageID:        manifestMeta.CriticalCard.PackageID,
+			Version:          manifestMeta.CriticalCard.Version,
+			Path:             cardPath,
+			IsCard:           true,
+			ExpectedCardDesc: &manifestMeta.CriticalCard,
 		})
 		if err != nil {
 			return nil, err
@@ -264,14 +316,19 @@ func (c *ProtocolClient) cardNeedsFetch(st persistedState, m *offlinepkg.Manifes
 	if existing.PackageID != m.CriticalCard.PackageID || existing.Version != m.CriticalCard.Version {
 		return true, nil
 	}
-	// Same identity; if our on-disk card was verified under the same
+	if existing.ChecksumSHA256 != m.CriticalCard.ChecksumSHA256 {
+		return true, nil
+	}
+	if existing.Jurisdiction != m.Jurisdiction {
+		return true, nil
+	}
+	// Same identity and checksum; if our on-disk card was verified under the same
 	// manifest revision we already have, no re-fetch needed.
 	if st.LastRevision == m.Revision {
 		return false, nil
 	}
-	// Different revision with same critical-card identity: still safe to
-	// skip re-download because the card is immutable; it was verified
-	// already.
+	// Different revision with same critical-card identity and checksum:
+	// safe to skip re-download because the card is immutable and verified.
 	return false, nil
 }
 
@@ -311,11 +368,12 @@ func readFileIfExists(path string) ([]byte, error) {
 // manifestDownload carries the parameters needed to download one manifest
 // or card artifact. It is internal so the public API stays narrow.
 type manifestDownload struct {
-	Jurisdiction string
-	PackageID    string
-	Version      int
-	Path         string
-	IsCard       bool
+	Jurisdiction     string
+	PackageID        string
+	Version          int
+	Path             string
+	IsCard           bool
+	ExpectedCardDesc *offlinepkg.CriticalCardDescriptor
 }
 
 // validateAndCanonicalizeManifest / validateAndCanonicalizeCard are

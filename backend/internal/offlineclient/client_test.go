@@ -137,7 +137,7 @@ func makeTestManifest(t *testing.T, revision int, cardChecksum string) *offlinep
 			Version:           1,
 			URI:               "/api/v3/packages/pkg-a/versions/1",
 			ChecksumSHA256:    cardChecksum,
-			UncompressedBytes: 1024,
+			UncompressedBytes: 4096,
 			CompressedBytes:   512,
 			ContentType:       "application/json",
 		},
@@ -209,7 +209,6 @@ func makeTestCard(t *testing.T) *offlinepkg.PublicIncidentCard {
 func testFixtures(t *testing.T, revision int) (*offlinepkg.Manifest, *offlinepkg.PublicIncidentCard) {
 	card := makeTestCard(t)
 	manifest := makeTestManifest(t, revision, card.ChecksumSHA256)
-
 	manifest.Signature = &offlinepkg.Signature{
 		Algorithm: "Ed25519",
 		KeyID:     "test-key",
@@ -220,6 +219,8 @@ func testFixtures(t *testing.T, revision int) (*offlinepkg.Manifest, *offlinepkg
 		KeyID:     "test-key",
 		Value:     "stub-signature-not-verified-in-tests",
 	}
+	cRaw, _ := json.Marshal(card)
+	manifest.CriticalCard.UncompressedBytes = int64(len(cRaw))
 
 	// Checksum is over the unsigned form (signature stripped) so
 	// verifyChecksum's strip+recompute logic finds the same digest.
@@ -906,3 +907,206 @@ func TestSync_NilContext(t *testing.T) {
 	// nil context should not panic
 	_, _ = c.Sync(nil, "KL")
 }
+
+// TestCardReferenceBindingMismatch reproduces Bug 2: a card accepted despite a
+// different checksum declared in the manifest reference.
+func TestCardReferenceBindingMismatch(t *testing.T) {
+	ts := newTestServer(t, "KL")
+	defer ts.Server.Close()
+	m, card := testFixtures(t, 1)
+	m.CriticalCard.ChecksumSHA256 = "0000000000000000000000000000000000000000000000000000000000000000"
+	signManifest(m)
+
+	ts.manifest = m
+	ts.card = card
+
+	clock := fakeClock(time.Now())
+	c := newClient(t, ts.URL, t.TempDir(), clock)
+
+	_, err := c.Sync(context.Background(), "KL")
+	if err == nil {
+		t.Fatal("Sync succeeded despite critical card checksum mismatch in manifest reference; want error")
+	}
+	if !errors.Is(err, offlinepkg.ErrChecksumMismatch) && !strings.Contains(err.Error(), "checksum") {
+		t.Fatalf("expected checksum mismatch error, got: %v", err)
+	}
+}
+
+// TestCardDeclaredSizeExceeded verifies that a card exceeding the manifest's
+// declared uncompressed byte size limit is rejected.
+func TestCardDeclaredSizeExceeded(t *testing.T) {
+	ts := newTestServer(t, "KL")
+	defer ts.Server.Close()
+	m, card := testFixtures(t, 1)
+	m.CriticalCard.UncompressedBytes = 100
+	signManifest(m)
+
+	ts.manifest = m
+	ts.card = card
+
+	clock := fakeClock(time.Now())
+	c := newClient(t, ts.URL, t.TempDir(), clock)
+
+	_, err := c.Sync(context.Background(), "KL")
+	if err == nil {
+		t.Fatal("Sync succeeded despite card exceeding declared uncompressed size; want error")
+	}
+}
+
+// TestAlreadyExpiredCardReportedExpired reproduces Bug 1: an already-expired
+// card reported CURRENT.
+func TestAlreadyExpiredCardReportedExpired(t *testing.T) {
+	ts := newTestServer(t, "KL")
+	defer ts.Server.Close()
+	m, card := testFixtures(t, 1)
+
+	now := time.Now().UTC()
+	card.EffectiveAt = now.Add(-24 * time.Hour).Format(time.RFC3339)
+	card.ExpiresAt = now.Add(-1 * time.Hour).Format(time.RFC3339) // expired 1 hour ago
+	signCard(card)
+
+	m.CriticalCard.ChecksumSHA256 = card.ChecksumSHA256
+	m.CriticalCard.UncompressedBytes = int64(len(mustMarshal(card)))
+	signManifest(m)
+
+	ts.manifest = m
+	ts.card = card
+
+	clock := fakeClock(now)
+	c := newClient(t, ts.URL, t.TempDir(), clock)
+
+	_, err := c.Sync(context.Background(), "KL")
+	if err != nil {
+		t.Fatalf("Sync failed: %v", err)
+	}
+
+	_, state, err := c.GetActiveCard()
+	if err != nil {
+		t.Fatalf("GetActiveCard failed: %v", err)
+	}
+	if state == FreshnessCurrent {
+		t.Fatalf("already-expired card reported CURRENT; want EXPIRED")
+	}
+	if state != FreshnessExpired {
+		t.Fatalf("state = %v; want FreshnessExpired", state)
+	}
+}
+
+// TestClockRollbackCannotUnexpire verifies that once a card has expired,
+// rolling back the system clock does not restore it to CURRENT.
+func TestClockRollbackCannotUnexpire(t *testing.T) {
+	ts := newTestServer(t, "KL")
+	defer ts.Server.Close()
+	m, card := testFixtures(t, 1)
+
+	baseTime := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
+	card.EffectiveAt = baseTime.Format(time.RFC3339)
+	card.ExpiresAt = baseTime.Add(2 * time.Hour).Format(time.RFC3339) // expires at 12:00
+	signCard(card)
+
+	m.CriticalCard.ChecksumSHA256 = card.ChecksumSHA256
+	m.CriticalCard.UncompressedBytes = int64(len(mustMarshal(card)))
+	signManifest(m)
+
+	ts.manifest = m
+	ts.card = card
+
+	clock := fakeClock(baseTime) // sync at 10:00
+	dir := t.TempDir()
+	c := newClient(t, ts.URL, dir, clock)
+
+	_, err := c.Sync(context.Background(), "KL")
+	if err != nil {
+		t.Fatalf("Sync failed: %v", err)
+	}
+
+	// Advance clock past expiry (13:00)
+	c.now = func() time.Time { return baseTime.Add(3 * time.Hour) }
+	_, state1, err := c.GetActiveCard()
+	if err != nil {
+		t.Fatalf("GetActiveCard failed: %v", err)
+	}
+	if state1 != FreshnessExpired {
+		t.Fatalf("at 13:00 state = %v, want EXPIRED", state1)
+	}
+
+	// Roll back clock to 11:00 (before expiry)
+	c.now = func() time.Time { return baseTime.Add(1 * time.Hour) }
+	_, state2, _ := c.GetActiveCard()
+	if state2 == FreshnessCurrent {
+		t.Fatalf("clock rollback restored expired card to CURRENT; want EXPIRED")
+	}
+}
+
+// TestKeyRevocationInvalidatesCard verifies that revoking the signing key
+// invalidates an active cached card.
+func TestKeyRevocationInvalidatesCard(t *testing.T) {
+	ts := newTestServer(t, "KL")
+	defer ts.Server.Close()
+	m, card := testFixtures(t, 1)
+
+	baseTime := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
+	card.EffectiveAt = baseTime.Format(time.RFC3339)
+	card.ExpiresAt = baseTime.Add(2 * time.Hour).Format(time.RFC3339)
+	signCard(card)
+
+	m.CriticalCard.ChecksumSHA256 = card.ChecksumSHA256
+	m.CriticalCard.UncompressedBytes = int64(len(mustMarshal(card)))
+	signManifest(m)
+
+	ts.manifest = m
+	ts.card = card
+
+	clock := fakeClock(baseTime)
+	dir := t.TempDir()
+
+	tk := makeTestKey()
+	tk.KeyID = "test-key"
+	tk.Revoked = false
+	fakeV := &fakeVerifier{
+		signatures:    map[string]bool{"test-key": true},
+		jurisdictions: map[string]bool{"KL": true},
+		lookupKeys:    map[string]offlinepkg.TrustedKey{"test-key": tk},
+	}
+
+	c, err := NewClient(ClientConfig{
+		BaseURL:    ts.URL,
+		StorageDir: dir,
+		Now:        clock.Now,
+		TrustStore: fakeV,
+	})
+	if err != nil {
+		t.Fatalf("NewClient failed: %v", err)
+	}
+
+	_, err = c.Sync(context.Background(), "KL")
+	if err != nil {
+		t.Fatalf("Sync failed: %v", err)
+	}
+
+	_, stateBefore, err := c.GetActiveCard()
+	if err != nil {
+		t.Fatalf("GetActiveCard before: %v", err)
+	}
+	if stateBefore != FreshnessCurrent {
+		t.Fatalf("expected CURRENT before revocation, got %v", stateBefore)
+	}
+
+	// Revoke the key in the trust store
+	tk.Revoked = true
+	fakeV.lookupKeys["test-key"] = tk
+
+	_, stateAfter, err := c.GetActiveCard()
+	if err != nil {
+		t.Fatalf("GetActiveCard after: %v", err)
+	}
+	if stateAfter == FreshnessCurrent {
+		t.Fatalf("card still reported CURRENT after signing key revoked; want REVOKED")
+	}
+	if stateAfter != FreshnessRevoked {
+		t.Fatalf("state = %v; want REVOKED", stateAfter)
+	}
+}
+
+
+

@@ -31,7 +31,7 @@ Status vocabulary: NOT_STARTED, IN_PROGRESS, BLOCKED_EXTERNAL, DONE. Evidence ap
 | P2 | Government-data contracts and scenario ingestion | P1 | PARTIAL | Infra DONE (capfeed/opkg/sourceact/catalogue/context-resolver); catalogue acceptance BLOCKED on O01 user data; see "P2 completion record" below |
 | P3 | Durable storage, authorization and ledger foundation | P1 + P2 contract slice | IN_PROGRESS | Checkpoint A DONE; Checkpoint B storage layer + migration written AND real-DB verified on PostgreSQL 18 + PostGIS 3.6 (11/11 store tests pass); see "P3 Checkpoint B record" and "P3 Checkpoint B real-DB verification" below |
 | P4 | Destination choice and immediate/temporary stays | P2 + P3 | IN_PROGRESS | Citizen stay flows verified; operator auth/idempotency/quarantine/persisted-context gaps reopened and re-verified (schema rev 4); O05/O07 stay OPEN; live operator IdP BLOCKED_EXTERNAL; see "P4 completion record" below |
-| P5 | Offline package and map-delivery protocol | P2 + P3 | NOT_STARTED | Shared implementation contract: [plan/p5-contract.md](p5-contract.md); none for new implementation |
+| P5 | Offline package and map-delivery protocol | P2 + P3 | IN_PROGRESS | Integration commit `046183c`; engineering acceptance reopened for corrections A–G (see compact acceptance matrix below) |
 | P6 | Regional ASR, constrained middle model and TTS | P1 + P4 + P5 | NOT_STARTED | None for new implementation |
 | P7 | Backend security, performance and handoff gate B | P0–P6 acceptance evidence | NOT_STARTED | None for new implementation |
 | P8 | Select and implement Android and iPhone clients | Gate B | NOT_STARTED | None for new implementation |
@@ -802,7 +802,7 @@ End-to-end synthetic choice→reservation→arrival→temporary stay→departure
 
 ## P5 — Offline package and map-delivery protocol
 
-Prerequisites: P2 + P3. Initial status: COMPLETED.
+Prerequisites: P2 + P3. Initial status: IN_PROGRESS (reopened at 046183c for corrections A–G).
 Shared implementation contract: [plan/p5-contract.md](p5-contract.md).
 
 ### Read and establish
@@ -826,22 +826,23 @@ Simulate poor network, truncation/resume, corrupt signature/digest, wrong key, r
 
 Documented tested client protocol and package delivery meet declared byte/security/freshness contracts. Map data licensing/pack-format choices stay blocked where unverified (O06); no claim that a native offline client exists yet.
 
-**P5 Verified Implementation Evidence (2026-09-20):**
-- Integrated five implementation branches: Agent 1 (`offlinepkg`), Agent 4 (`offlineresources`), Agent 2 (`offlinedelivery`), Agent 3 (`offlineclient`), Agent 5 (`offlinequeue`).
-- Migration 0006 (`published_manifests`, `published_cards`, `published_resources`) and store repository methods implemented; OpenAPI contract additively updated (`/api/v3/regions/{id}/manifest`, `/api/v3/packages/{id}/versions/{version}`, `/api/v3/resources/{id}`).
-- Verified Acceptance Flows 1–5 in `backend/internal/httpserver/p5_acceptance_test.go`:
-  1. *Flow 1 (Publication to Disk Activation):* Ed25519 signature verification, manifest validation, atomic directory activation.
-  2. *Flow 2 (Interrupted Download & Resumable Range):* RFC 9110 byte range resume, atomic part-file assembly, active package intact after restart.
-  3. *Flow 3 (Revocations & Tombstones):* Monotonic revision check, persistent route and package tombstones surviving restart, rollback rejection (`ErrVersionRollback`).
-  4. *Flow 4 (Optional Asset Degradation):* Missing optional vector map or audio leaves critical card usable with `FreshnessCurrent`.
-  5. *Flow 5 (Pending Writes Reconnect & Lost Response):* Durable pending queue across restart, server-side revalidation, idempotency deduplication with 0 duplicate commitment or capacity loss, changed payload conflict rejection (409 `IDEMPOTENCY_CONFLICT`).
-- Verified Measurements & Invariants:
-  - Critical Card Compressed Size: 1.10 KiB (1,130 bytes gzip, 2,202 bytes uncompressed; budget $\le 64$ KiB).
-  - Regional Map Pack Size: 41.18 MiB (43,184,128 bytes; budget $\le 50$ MiB).
-  - Public/Private Separation: Public delivery endpoints strictly exclude citizen tokens, private IDs, and session cookies (`Cache-Control: public`).
-  - Shield Cache Upstream Bounds: 50 concurrent client downloads coalesce to 1 upstream query via in-memory singleflight; 50 sequential requests within TTL trigger 1 upstream query.
-  - Network Simulation Profile: 400 kbit/s down, 128 kbit/s up, latency injection, 2% drop rate emulated via stdlib `http.RoundTripper`. Recorded boundary: Transport-level HTTP chunk rate-limiting and connection-drop emulation were simulated. Kernel-level packet loss (e.g. pfctl/dummynet) and native mobile client runtime were not executed.
-- External Blockers Retained: O06 (official map licenses) and O05 (operational routes) remain open and fail-closed. P5 engineering is complete; stop before P6.
+**P5 Implementation Record & Acceptance Reopening (2026-09-20):**
+- Initial integration of five implementation branches completed at commit `046183c` (migration 0006, offline store methods, public delivery routes, protocol client, pending write queue).
+- Engineering acceptance reopened to address seven specific gap areas (A through G).
+
+#### P5 Compact Acceptance Matrix (Corrections A–G)
+
+| Area | Target Subsystem | Reproduction Test Name | Fail-Before Symptom | Pass-After Invariant | Honest Closure Evidence | Status |
+|---|---|---|---|---|---|---|
+| **A** | `offlineclient`, `offlinepkg` | `TestCardReferenceBindingMismatch`, `TestCardDeclaredSizeExceeded`, `TestManifestUncompressedBudget` | Card accepted with mismatched checksum, wrong package ID/version/jurisdiction, or exceeding declared bytes. | Card download rejected unless checksum, package ID, version, jurisdiction, and byte counts strictly match manifest descriptor. Manifest rejects uncompressed card > 64 KiB. | Runnable regression in `client_test.go` and `validate_test.go`. | IN_PROGRESS |
+| **B** | `offlineclient` | `TestAlreadyExpiredCardReportedExpired`, `TestClockRollbackCannotUnexpire`, `TestKeyRevocationInvalidatesCard` | Already-expired card returned `CURRENT`; elapsed freshness gave new full window from sync; revoked key left card `CURRENT`; rollback un-expired. | `now >= expires_at` always returns `EXPIRED`; validity window accounts for age at acquisition; revoked key returns `REVOKED`; rollback returns `EXPIRED` (`ErrClockRolledBack`). | Runnable regression in `client_test.go`. | IN_PROGRESS |
+| **C** | `offlineclient` | `TestAtomicActivationInterrupted`, `TestCorruptTombstonesFailClosed`, `TestSameRevisionRepair` | Interrupted activation committed manifest without card; corrupt `tombstones.json` silently reported route un-cancelled; missing active files ignored on same revision. | Generation staging directory commits manifest + card atomically; corrupt tombstones return unverifiable error (fail closed); same revision detects and repairs missing/corrupted active files. | Runnable regression in `client_test.go`. | IN_PROGRESS |
+| **D** | `offlineclient` | `TestResumableTransferRealConnectionDrop`, `TestResumableTransferETagDriftFallback`, `TestResumableTransfer416Reset` | Resumable transfer buffered entire body in memory and only wrote `.part` at end; connection drop lost all progress; `Content-Range` and `416` not validated. | Streaming chunked writes to `.part` with bounded buffer; connection drop retains partial file; `206 Content-Range` start offset checked; ETag drift restarts; 416 resets `.part`. | Runnable regression in `client_test.go`. | IN_PROGRESS |
+| **E** | `store`, `offlinedelivery` | `TestPublicationImmutabilityConflict`, `TestQuarantineInvalidatesCache`, `TestPublicationBoundaryValidation` | `PublishManifest`/`PublishCard` overwrote rows on conflict with differing bytes; quarantined package remained in `CachedSource`. | Identical payload re-publish is idempotent; conflicting payload returns `ErrConflict`; quarantine/withdrawal invalidates cache immediately; boundary validates schema/digests. | Runnable regression in `publication_test.go` and `cache_test.go`. | IN_PROGRESS |
+| **F** | `offlinequeue` | `TestPendingReconciliationOnLostResponse`, `TestSelectionExpiryPreservesReconciliation` | Lost response marked `FAILED_PERM` or stayed in flight; selection expiry while offline marked hold expired without checking server commitment. | Dropped response transitions to `StatePendingReconciliation`; expired local selection does not discard uncertain entry; reconciliation with same idempotency key determines true server state. | Runnable regression in `worker_test.go` and `http_integration_test.go`. | IN_PROGRESS |
+| **G** | `offlineresources`, `offlineclient`, docs | `TestResourceValidatorIntegration` | `offlineclient` did not invoke `offlineresources.Validator`; documentation overstated encryption at rest and test key authority. | `ResourceValidator` integrated in client; docs honestly state plaintext JSON storage, synthetic test keys, and illustrative regional budgets. | Runnable regression in `client_test.go` and documentation updates. | IN_PROGRESS |
+
+- External Blockers Retained: O06 (official map licenses) and O05 (operational routes) remain open and fail-closed. P5 engineering acceptance reopened for corrections A–G; stop before P6.
 
 ## P6 — Regional ASR, constrained middle model and TTS
 

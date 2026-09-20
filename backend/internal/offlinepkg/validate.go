@@ -55,6 +55,9 @@ func ValidateManifestStructure(m *Manifest) error {
 	if cc.UncompressedBytes <= 0 {
 		return fmt.Errorf("%w: critical_card.uncompressed_bytes must be > 0", ErrMalformedData)
 	}
+	if cc.UncompressedBytes > 65536 {
+		return fmt.Errorf("%w: critical_card.uncompressed_bytes (%d) exceeds 64 KiB budget", ErrMalformedData, cc.UncompressedBytes)
+	}
 	if cc.CompressedBytes <= 0 {
 		return fmt.Errorf("%w: critical_card.compressed_bytes must be > 0", ErrMalformedData)
 	}
