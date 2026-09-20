@@ -1,9 +1,16 @@
 // Command sthira runs the bounded /api/v3 backend boundary.
 //
-// This is the P1 foundation slice: health/version/contract endpoints and the
-// constrained middle-model validation boundary. It uses only the standard
-// library. Live government integrations, durable storage and model serving are
-// later phases and remain disabled.
+// Foundation mode (no STHIRA_DATABASE_DSN) serves health/version/contract
+// endpoints and the constrained middle-model validation boundary, with
+// readiness reporting BLOCKED. When STHIRA_DATABASE_DSN is set the server opens
+// the durable store, wires the migration-aware readiness prober and the P4
+// destination/stay routes, and closes the pool on shutdown.
+//
+// Dependency readiness is not operational source readiness: a reachable,
+// correctly-migrated database proves the dependency only. Operational guidance
+// additionally requires an OPERATIONAL authorized source; a working database
+// never enables unapproved guidance. Live government integrations and model
+// serving remain disabled.
 package main
 
 import (
@@ -14,6 +21,7 @@ import (
 	"syscall"
 
 	"sthira/backend/internal/httpserver"
+	"sthira/backend/internal/store"
 )
 
 func main() {
@@ -25,9 +33,27 @@ func main() {
 	}
 
 	cfg := httpserver.DefaultConfig(addr)
-	// No ReadinessProber is wired in P1: there are no real dependencies yet, so
-	// /health/ready correctly reports BLOCKED (503) rather than a false READY.
 	opts := []httpserver.Option{httpserver.WithLogger(logger)}
+
+	// Durable storage. When a DSN is provided, open the store and wire the
+	// migration-aware readiness prober; otherwise readiness stays BLOCKED.
+	var st *store.Store
+	if dsn := os.Getenv("STHIRA_DATABASE_DSN"); dsn != "" {
+		var err error
+		st, err = store.Open(dsn)
+		if err != nil {
+			logger.Error("failed to open store", "error", err)
+			os.Exit(1)
+		}
+		defer func() { _ = st.Close() }()
+		opts = append(opts,
+			httpserver.WithProber(store.NewReadinessProber(st.DB(), store.SchemaRevision)),
+			httpserver.WithStore(st),
+		)
+		logger.Info("durable store wired", "schema_revision", store.SchemaRevision)
+	} else {
+		logger.Info("no STHIRA_DATABASE_DSN; foundation mode, readiness BLOCKED")
+	}
 
 	// Optional demo context for manual smoke testing only. It wires a static
 	// server-side snapshot resolver with the golden fixture IDs so a valid

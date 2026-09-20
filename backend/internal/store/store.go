@@ -34,6 +34,12 @@ var ErrVersionConflict = errors.New("store: version conflict")
 // ErrNotFound is returned when the target row does not exist.
 var ErrNotFound = errors.New("store: not found")
 
+// SchemaRevision is the highest migration revision this binary expects. It is
+// the single source of truth the readiness prober checks schema_migrations
+// against; bump it when a new migration is added (0001 -> 1, 0002 -> 2, ...).
+// Readiness fails on an outdated database rather than assuming revision 1.
+const SchemaRevision = 1
+
 // DBTX is the minimal database/sql surface the layer needs, satisfied by both
 // *sql.DB and *sql.Tx. This keeps every repository method runnable inside or
 // outside an explicit transaction without duplicating SQL.
@@ -52,6 +58,12 @@ type Store struct {
 // New wraps an already-open *sql.DB. The driver must be registered by the
 // caller (see Open for the intended pgx wiring).
 func New(db *sql.DB) *Store { return &Store{db: db} }
+
+// DB exposes the underlying pool for wiring (readiness prober, repositories).
+func (s *Store) DB() *sql.DB { return s.db }
+
+// Close closes the underlying pool. Called on graceful shutdown.
+func (s *Store) Close() error { return s.db.Close() }
 
 // Open registers the pgx stdlib driver (imported above) and opens a connection
 // pool against the given PostgreSQL DSN. The pool is tuned conservatively and a

@@ -12,6 +12,7 @@ import (
 
 	"sthira/backend/internal/contracts"
 	"sthira/backend/internal/httpjson"
+	"sthira/backend/internal/store"
 )
 
 // ReadinessProber reports whether the service's dependencies and approved
@@ -54,6 +55,9 @@ type Server struct {
 	logger    *slog.Logger
 	httpSrv   *http.Server
 	startedAt time.Time
+	// store is the durable persistence root for the P4 destination/stay routes.
+	// Nil in foundation mode; those routes then fail closed (503).
+	store *store.Store
 }
 
 // StaticContextResolver returns a ContextResolver that always serves the same
@@ -84,6 +88,10 @@ func WithContextResolver(r ContextResolver) Option { return func(s *Server) { s.
 // WithLogger sets the structured logger.
 func WithLogger(l *slog.Logger) Option { return func(s *Server) { s.logger = l } }
 
+// WithStore wires the durable store for the P4 destination/stay routes. Without
+// it those routes fail closed (503) rather than fabricating success.
+func WithStore(st *store.Store) Option { return func(s *Server) { s.store = st } }
+
 // New builds a Server with bounded timeouts and the frozen route set.
 func New(cfg Config, opts ...Option) *Server {
 	s := &Server{
@@ -99,6 +107,9 @@ func New(cfg Config, opts ...Option) *Server {
 	mux.HandleFunc("/health/live", s.withRequestID(s.handleLive))
 	mux.HandleFunc("/health/ready", s.withRequestID(s.handleReady))
 	mux.HandleFunc("/api/v3/voice/commands", s.withRequestID(s.handleVoiceCommands))
+	// Test-only crash fault-injection endpoint; a no-op unless built with the
+	// `crashtest` tag. Never present in production builds.
+	s.registerCrashHook(mux)
 
 	s.httpSrv = &http.Server{
 		Addr:              cfg.Addr,

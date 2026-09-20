@@ -383,15 +383,27 @@ Tests/commands, environment and results (STHIRA_TEST_DSN set, go test -count=1):
     opkg, sourceact, store all ok (httpserver passes here; it fails only inside
     the sandbox, which blocks socket bind).
 Commit(s) (CLEAN branch): dcf3cdd.
-Unresolved internal work: none for Checkpoint B.
-Remaining P3 scope before DONE: none outstanding for the storage/authorization/
-  ledger foundation. The mandate's crash-after-commit retry and backup/restore
-  items are covered by the atomic InTx (change+audit+outbox commit or roll back
-  together) and the hash-chained append-only audit with VerifyChain; a physical
-  pg_dump/pg_restore exercise is an operational runbook step, not a code path.
-  P2 catalogue acceptance remains blocked on O01. P4 stay workflows out of scope.
-Next eligible step: confirm P3 DONE, or proceed to P4 only on explicit
-  instruction.
+Unresolved internal work: none for Checkpoint B storage-layer verification.
+Remaining P3 scope before DONE (corrected 2026-09-19, P4 task amendment A1):
+  The prior wording claimed crash-after-commit retry and backup/restore were
+  "covered." That overstated the evidence. Atomic InTx (change+audit+outbox
+  commit or roll back together) and the hash-chained append-only audit with
+  VerifyChain SUPPORT recovery, but they do not DEMONSTRATE it. Two checks
+  remain OUTSTANDING until exercised against the real database:
+    (a) Crash-after-commit/before-response retry: a real server process must
+        commit a reservation, die before the HTTP response returns, restart,
+        and be retried with the same idempotency key — verifying the stored
+        result returns with no duplicate capacity, audit or outbox effect.
+        Reopening a connection pool (TestRestartPersistence) is NOT this test.
+    (b) Backup/restore: a physical pg_dump into a SEPARATE disposable database,
+        then verify migrations/PostGIS, record relationships, capacity
+        conservation, idempotency replay and audit-chain consistency on the
+        restored copy. Not yet performed.
+  These are exercised in P4 Part A (P3 closure). P2 catalogue acceptance
+  remains blocked on O01.
+Next eligible step: P4 Part A — P3 closure (crash-recovery and backup/restore
+  evidence, main.go DB wiring, cross-process concurrency), then P4 citizen stay
+  flows. P4 stay workflows and P5 remain out of scope until then.
 ```
 
 ## Required completion record
