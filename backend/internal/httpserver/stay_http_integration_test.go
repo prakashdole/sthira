@@ -94,6 +94,12 @@ func seedHTTPPackageFacilityPolicy(t *testing.T, st *store.Store, capacity int, 
 			VALUES ($1,$2,'SZ','Asia/Kolkata',1,$3)`, facID, pkgID, now); err != nil {
 			return err
 		}
+		if _, err := tx.ExecContext(t.Context(), `
+			INSERT INTO zone_versions (zone_id, package_id, kind, role, status, capacity, version, updated_at)
+			VALUES ('SZ',$1,'SAFE',NULL,'OPEN',NULL,1,$2)
+			ON CONFLICT (zone_id, package_id) DO NOTHING`, pkgID, now); err != nil {
+			return err
+		}
 		for d := start; d.Before(end); d = d.AddDate(0, 0, 1) {
 			if _, err := tx.ExecContext(t.Context(), `
 				INSERT INTO facility_inventory (facility_id, service_date, capacity, reserved, held, occupied, version, updated_at)
@@ -821,9 +827,10 @@ func TestHTTPFailedTransferPreservesOriginal(t *testing.T) {
 	b, _ := json.Marshal(env.Data)
 	_ = json.Unmarshal(b, &created)
 
-	// Transfer to the full facility must fail.
+	// Transfer to the full facility must fail. snapshot_version is required
+	// for TRANSFER so the locked-snapshot revalidation cannot be skipped.
 	tr := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations/"+created.StayID+"/events", token,
-		fmt.Sprintf(`{"type":"TRANSFER","new_facility_id":%q,"idempotency_key":"ev-tf"}`, fullFac))
+		fmt.Sprintf(`{"type":"TRANSFER","new_facility_id":%q,"idempotency_key":"ev-tf","snapshot_version":%d}`, fullFac, snap))
 	if tr.code != http.StatusConflict {
 		t.Fatalf("transfer to full: code=%d, want 409; body=%s", tr.code, tr.body)
 	}

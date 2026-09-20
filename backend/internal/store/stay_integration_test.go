@@ -45,6 +45,12 @@ func seedPackageFacility(t *testing.T, s *Store, capacity int, start, end time.T
 			VALUES ($1,$2,'SZ','Asia/Kolkata',1,$3)`, facID, pkgID, now); err != nil {
 			return err
 		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO zone_versions (zone_id, package_id, kind, role, status, capacity, version, updated_at)
+			VALUES ('SZ',$1,'SAFE',NULL,'OPEN',NULL,1,$2)
+			ON CONFLICT (zone_id, package_id) DO NOTHING`, pkgID, now); err != nil {
+			return err
+		}
 		for d := start; d.Before(end); d = d.AddDate(0, 0, 1) {
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO facility_inventory (facility_id, service_date, capacity, reserved, held, occupied, version, updated_at)
@@ -293,7 +299,7 @@ func TestFailedTransferRetainsOriginal(t *testing.T) {
 	// Transfer to the full facility must fail.
 	err := s.InTx(ctx, func(tx DBTX) error {
 		exp := nowUTC().Add(time.Hour)
-		return stays.Transfer(ctx, tx, orig.StayID, uid("STAY"), uid("RES"), fullFac, &exp, nowUTC(), "")
+		return stays.Transfer(ctx, tx, orig.StayID, uid("STAY"), uid("RES"), fullFac, nil, &exp, nowUTC(), "")
 	})
 	if !errors.Is(err, ErrCapacityExhausted) {
 		t.Fatalf("transfer to full: got %v, want ErrCapacityExhausted", err)
@@ -330,7 +336,7 @@ func TestSuccessfulTransfer(t *testing.T) {
 	newStay := uid("STAY")
 	if err := s.InTx(ctx, func(tx DBTX) error {
 		exp := nowUTC().Add(time.Hour)
-		return stays.Transfer(ctx, tx, orig.StayID, newStay, uid("RES"), facB, &exp, nowUTC(), "")
+		return stays.Transfer(ctx, tx, orig.StayID, newStay, uid("RES"), facB, nil, &exp, nowUTC(), "")
 	}); err != nil {
 		t.Fatalf("Transfer: %v", err)
 	}

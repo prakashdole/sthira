@@ -336,10 +336,13 @@ func (s *StayStore) Extend(ctx context.Context, db DBTX, stayID string, newEndDa
 // released. A failed transfer (new facility full) returns ErrCapacityExhausted
 // and retains the original stay unchanged. Inventory rows for BOTH facilities
 // are locked in deterministic (facility_id, service_date) order to avoid
-// deadlock between opposing transfers. idemKey is the idempotency key for the
-// operation; when provided it is included in the audit EventID to give each
-// distinct committed operation a unique identity.
-func (s *StayStore) Transfer(ctx context.Context, db DBTX, stayID, newStayID, newReservationID, newFacilityID string, newExpiresAt *time.Time, now time.Time, idemKey string) error {
+// deadlock between opposing transfers. The caller passes newRouteID as the
+// route validated against the NEW facility's safe zone (never the old stay's
+// route); it is persisted on the replacement stay so an authenticated read
+// after a lost response sees the actual route to the destination. idemKey is
+// the idempotency key for the operation; when provided it is included in the
+// audit EventID to give each distinct committed operation a unique identity.
+func (s *StayStore) Transfer(ctx context.Context, db DBTX, stayID, newStayID, newReservationID, newFacilityID string, newRouteID *string, newExpiresAt *time.Time, now time.Time, idemKey string) error {
 	st, err := s.getStayForUpdate(ctx, db, stayID)
 	if err != nil {
 		return err
@@ -376,15 +379,20 @@ func (s *StayStore) Transfer(ctx context.Context, db DBTX, stayID, newStayID, ne
 		newReservationID, st.SessionID, newFacilityID, st.StartDate, st.PartySize, now); err != nil {
 		return err
 	}
-	// The replacement stay gets a FRESH hold deadline, not the old one: copying a
-	// stale/expired deadline into the new stay would let an already-due hold
-	// persist. The caller derives the new deadline from authoritative policy.
+	// The replacement stay is persisted with the VALIDATED replacement route
+	// (newRouteID), not the old stay's route. The old stay's route bound the
+	// origin facility's safe zone; it does not satisfy the new facility's safe
+	// zone binding. The caller passes the route that RevalidateReservationContext
+	// accepted against the destination. The replacement stay gets a FRESH hold
+	// deadline, not the old one: copying a stale/expired deadline into the new
+	// stay would let an already-due hold persist. The caller derives the new
+	// deadline from authoritative policy.
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO stays (stay_id, reservation_id, session_id, facility_id, party_size,
 			start_date, end_date, state, package_id, route_id, transferred_from, version, created_at, updated_at, expires_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1,$12,$12,$13)`,
 		newStayID, newReservationID, st.SessionID, newFacilityID, st.PartySize,
-		st.StartDate, st.EndDate, string(StayReserved), st.PackageID, st.RouteID,
+		st.StartDate, st.EndDate, string(StayReserved), st.PackageID, newRouteID,
 		stayID, now, newExpiresAt); err != nil {
 		return err
 	}
@@ -431,11 +439,28 @@ type StayPolicy struct {
 	TemporaryStayMinDays     *int
 	TemporaryStayMaxDays     *int
 	AllowTransfers           *bool
+	// RouteRequired means every operational commitment (reservation,
+	// extension, transfer) must reference a verified, currently-valid,
+	// unclosed route bound to the destination's safe zone. The store fails
+	// closed when RouteRequired=true and no route is provided: the commitment
+	// is rejected with ErrRouteRequired and no capacity change occurs.
+	RouteRequired *bool
+}
+
+// RoutePolicyRequired reports whether the policy requires a route on every
+// operational commitment. Absent means the policy does not require one.
+func (p StayPolicy) RoutePolicyRequired() bool {
+	return p.RouteRequired != nil && *p.RouteRequired
 }
 
 // ErrNoStayPolicy is returned when a required policy field is absent from the
 // authoritative package. The caller must reject rather than invent a default.
 var ErrNoStayPolicy = errors.New("store: authoritative stay policy is missing the required field")
+
+// ErrRouteRequired is returned when the authoritative policy requires a route
+// (allocation_policy.route_required = true) and the commitment supplied no
+// route_id, or the supplied route is invalid. Capacity is unchanged.
+var ErrRouteRequired = errors.New("store: route required by authoritative policy and none provided")
 
 // ErrStayOutOfPolicy is returned when the requested stay dates fall outside the
 // authoritative temporary-stay bounds.
@@ -448,6 +473,7 @@ type policyBody struct {
 		TemporaryStayMinDays     *int  `json:"temporary_stay_min_days"`
 		TemporaryStayMaxDays     *int  `json:"temporary_stay_max_days"`
 		AllowTransfers           *bool `json:"allow_transfers"`
+		RouteRequired            *bool `json:"route_required"`
 	} `json:"allocation_policy"`
 }
 
@@ -501,11 +527,36 @@ func RevalidateReservationContext(ctx context.Context, db DBTX, facilityID, pack
 	if fcount == 0 {
 		return "", StayPolicy{}, ErrFacilityPackageMismatch
 	}
+	// The facility's safe zone must be currently available. CLOSED, FULL or
+	// other non-operational zone status blocks the commitment; OPEN and
+	// PUBLISHED are accepted. This is the destination-availability boundary
+	// enforced at commit (not only at eligibility preview).
+	var zoneStatus string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(zv.status, '') FROM facilities f
+		JOIN zone_versions zv ON zv.zone_id = f.safe_zone_id AND zv.package_id = f.package_id
+		WHERE f.facility_id = $1 AND f.package_id = $2`,
+		facilityID, packageID).Scan(&zoneStatus); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", StayPolicy{}, err
+		}
+		// No zone_versions row: zone status is unknown; reject (fail closed).
+		return "", StayPolicy{}, ErrReservationContext
+	}
+	switch zoneStatus {
+	case "", "OPEN", "PUBLISHED":
+		// accepted
+	default:
+		return "", StayPolicy{}, ErrReservationContext
+	}
 	// A requested route must be verified, currently valid, unclosed, AND bound
 	// to the facility's safe zone (to_safe_zone_id matches). The same gate
 	// applies at reserve, extend and transfer: the route must lead to the
-	// selected destination's safe zone.
-	if routeID != nil && *routeID != "" {
+	// selected destination's safe zone. When the policy requires a route and
+	// none is provided, the commitment is rejected with ErrRouteRequired
+	// BEFORE any capacity change.
+	hasRoute := routeID != nil && *routeID != ""
+	if hasRoute {
 		var rcount int
 		if err := db.QueryRowContext(ctx, `
 			SELECT count(*) FROM route_versions rv
@@ -536,6 +587,14 @@ func RevalidateReservationContext(ctx context.Context, db DBTX, facilityID, pack
 		TemporaryStayMinDays:     pb.AllocationPolicy.TemporaryStayMinDays,
 		TemporaryStayMaxDays:     pb.AllocationPolicy.TemporaryStayMaxDays,
 		AllowTransfers:           pb.AllocationPolicy.AllowTransfers,
+		RouteRequired:            pb.AllocationPolicy.RouteRequired,
+	}
+	// Fail closed: when the authoritative policy requires a route and the
+	// caller provided none (or an empty route), reject with ErrRouteRequired
+	// before any capacity change. This is the policy-driven counterpart to
+	// the optional-route validation above.
+	if pol.RoutePolicyRequired() && !hasRoute {
+		return "", StayPolicy{}, ErrRouteRequired
 	}
 	return jurisdiction, pol, nil
 }

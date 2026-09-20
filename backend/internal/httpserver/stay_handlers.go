@@ -250,7 +250,7 @@ func (s *Server) handleCreateReservation(w http.ResponseWriter, r *http.Request)
 	}
 	start, err1 := time.Parse("2006-01-02", req.StartDate)
 	end, err2 := time.Parse("2006-01-02", req.EndDate)
-	if err1 != nil || err2 != nil || !end.After(start) || req.PartySize < 1 || req.IdemKey == "" {
+	if err1 != nil || err2 != nil || !end.After(start) || req.PartySize < 1 || req.IdemKey == "" || req.SnapshotVersion <= 0 {
 		s.writeError(w, r, http.StatusBadRequest, contracts.ErrInvalidValue, "invalid reservation request", "", false)
 		return
 	}
@@ -276,6 +276,12 @@ func (s *Server) handleCreateReservation(w http.ResponseWriter, r *http.Request)
 			return nil
 		}
 		// Revalidate the source snapshot version at commit (stale selection).
+		// A missing/zero confirmation is rejected: every commitment must have a
+		// non-zero snapshot version checked under the locks the revalidation
+		// just acquired.
+		if req.SnapshotVersion <= 0 {
+			return &snapshotStaleError{want: req.SnapshotVersion, got: -1}
+		}
 		var curVersion int
 		if err := tx.QueryRowContext(ctx, `SELECT version FROM packages WHERE package_id = $1`, req.PackageID).Scan(&curVersion); err != nil {
 			return err
@@ -368,6 +374,8 @@ func (s *Server) writeReservationError(w http.ResponseWriter, r *http.Request, e
 		s.writeError(w, r, http.StatusConflict, contracts.ErrValidation, "facility is not in the requested package", "facility_id", false)
 	case errors.Is(err, store.ErrRouteUnavailable):
 		s.writeError(w, r, http.StatusConflict, contracts.ErrRouteUnverified, "route is not verified and currently valid", "route_id", false)
+	case errors.Is(err, store.ErrRouteRequired):
+		s.writeError(w, r, http.StatusConflict, contracts.ErrRouteUnverified, "authoritative policy requires a verified route to the destination", "route_id", false)
 	case errors.Is(err, store.ErrNoStayPolicy):
 		s.writeError(w, r, http.StatusConflict, contracts.ErrValidation, "authoritative stay policy is missing a required field", "", false)
 	case errors.Is(err, store.ErrStayOutOfPolicy):
@@ -454,6 +462,13 @@ func (s *Server) handleStayEvent(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, http.StatusBadRequest, contracts.ErrInvalidValue, "idempotency_key is required", "idempotency_key", false)
 		return
 	}
+	// EXTEND and TRANSFER are commitments that revalidate against the locked
+	// snapshot: snapshot_version must be present and non-zero at the boundary
+	// so the revalidation check cannot be silently skipped.
+	if (strings.ToUpper(req.Type) == "EXTEND" || strings.ToUpper(req.Type) == "TRANSFER") && req.SnapshotVersion <= 0 {
+		s.writeError(w, r, http.StatusBadRequest, contracts.ErrInvalidValue, "snapshot_version is required for "+req.Type, "snapshot_version", false)
+		return
+	}
 
 	ctx := r.Context()
 	is := store.IdempotencyStore{}
@@ -531,7 +546,8 @@ func (s *Server) handleStayEvent(w http.ResponseWriter, r *http.Request) {
 			// Transfer creates a new commitment at a new facility: the policy must
 			// authorize transfers, and the new facility+package+route context must
 			// be currently operational before any capacity moves. The route MUST be
-			// to the NEW facility's safe zone; the old stay's route is not reused.
+			// to the NEW facility's safe zone; the old stay's route is not reused
+			// and is NOT persisted on the replacement stay.
 			pkgID, _, _, cerr := stays.StayContext(ctx, tx, stayID)
 			if cerr != nil {
 				return cerr
@@ -558,7 +574,10 @@ func (s *Server) handleStayEvent(w http.ResponseWriter, r *http.Request) {
 			if herr != nil {
 				return herr
 			}
-			opErr = stays.Transfer(ctx, tx, stayID, newStayID, newResID, req.NewFacilityID, &newExp, now, req.IdemKey)
+			// Pass newRouteID (the validated route) into Transfer so the
+			// replacement stay is persisted with the route that leads to the
+			// NEW facility's safe zone. The old stay's RouteID is NEVER used.
+			opErr = stays.Transfer(ctx, tx, stayID, newStayID, newResID, req.NewFacilityID, newRouteID, &newExp, now, req.IdemKey)
 			if opErr == nil {
 				// Include replacement IDs in the idempotency result for replay and recovery.
 				return is.Complete(ctx, tx, sess.SessionID, op, req.IdemKey, map[string]string{
@@ -614,10 +633,13 @@ var errNotOwner = errors.New("not the owning session")
 var errInvalidEvent = errors.New("invalid stay event")
 
 // revalidateSnapshotVersion checks the current package version against the
-// client's snapshot version under the locks already held by the caller.
+// client's snapshot version under the locks already held by the caller. A
+// zero or negative expected version is rejected with snapshotStaleError:
+// every commitment that revalidates against the locked snapshot MUST have a
+// non-zero confirmation, so a missing version cannot slip past the gate.
 func revalidateSnapshotVersion(ctx context.Context, db store.DBTX, packageID string, expectedVersion int) error {
-	if expectedVersion == 0 {
-		return nil // caller didn't provide a version; skip (legacy path)
+	if expectedVersion <= 0 {
+		return &snapshotStaleError{want: expectedVersion, got: -1}
 	}
 	var curVersion int
 	if err := db.QueryRowContext(ctx, `SELECT version FROM packages WHERE package_id = $1`, packageID).Scan(&curVersion); err != nil {

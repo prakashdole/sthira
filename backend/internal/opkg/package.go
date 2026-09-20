@@ -173,6 +173,13 @@ type AllocationPolicy struct {
 	// absent means the policy does not authorize them by default.
 	AllowWalkIns   *bool `json:"allow_walk_ins,omitempty"`
 	AllowTransfers *bool `json:"allow_transfers,omitempty"`
+	// RouteRequired means every operational commitment (reservation,
+	// extension, transfer) in this package must reference a verified,
+	// currently-valid, unclosed route bound to the destination's safe zone.
+	// Optional; absent means the policy does not require a route by default.
+	// The store fails closed when route_required=true and no route is
+	// provided: the commitment is rejected without any capacity change.
+	RouteRequired *bool `json:"route_required,omitempty"`
 }
 
 // EmergencyContact is an official dialler target.
@@ -525,6 +532,14 @@ func validatePolicy(p AllocationPolicy) error {
 		}
 	}
 	return nil
+}
+
+// RoutePolicyRequired reports whether the allocation policy requires a
+// route on every operational commitment. The flag is opt-in: an absent
+// RouteRequired means routes are not required, preserving the existing
+// contract for packages that do not opt in.
+func (p AllocationPolicy) RoutePolicyRequired() bool {
+	return p.RouteRequired != nil && *p.RouteRequired
 }
 
 func validateLocation(loc []float64) error {
