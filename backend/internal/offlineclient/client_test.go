@@ -1108,5 +1108,156 @@ func TestKeyRevocationInvalidatesCard(t *testing.T) {
 	}
 }
 
+// TestCorruptTombstonesFailClosed verifies that corrupt tombstones fail closed:
+// stateQuery returns FreshnessUnverifiable with an error rather than silently treating
+// routes and packages as non-revoked.
+func TestCorruptTombstonesFailClosed(t *testing.T) {
+	ts := newTestServer(t, "KL")
+	defer ts.Server.Close()
+	m, card := testFixtures(t, 1)
+	ts.manifest = m
+	ts.card = card
+
+	clock := fakeClock(time.Now())
+	dir := t.TempDir()
+	c := newClient(t, ts.URL, dir, clock)
+
+	_, err := c.Sync(context.Background(), "KL")
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	// Corrupt routes.json
+	routesPath := filepath.Join(dir, "tombstones", "routes.json")
+	if err := os.WriteFile(routesPath, []byte("NOT_VALID_JSON{{{"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, state, err := c.GetActiveCard()
+	if err == nil && state == FreshnessCurrent {
+		t.Fatalf("GetActiveCard reported CURRENT despite corrupted tombstones; must fail closed")
+	}
+	if state != FreshnessUnverifiable {
+		t.Fatalf("state = %v; want FreshnessUnverifiable on corrupt tombstones", state)
+	}
+}
+
+// TestAtomicActivationInterrupted verifies that if card download fails after manifest
+// is downloaded, the client does not commit an inconsistent manifest-without-card.
+func TestAtomicActivationInterrupted(t *testing.T) {
+	cardFail := false
+	mux := http.NewServeMux()
+	m1, card1 := testFixtures(t, 1)
+	m2, card2 := testFixtures(t, 2)
+	card2.PackageID = "pkg-v2"
+	card2.Version = 2
+	m2.CriticalCard.PackageID = "pkg-v2"
+	m2.CriticalCard.Version = 2
+	signCard(card2)
+	m2.CriticalCard.ChecksumSHA256 = card2.ChecksumSHA256
+	m2.CriticalCard.UncompressedBytes = int64(len(mustMarshal(card2)))
+	signManifest(m2)
+
+	currentManifest := m1
+	currentCard := card1
+
+	mux.HandleFunc("/api/v3/regions/KL/manifest", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := json.Marshal(currentManifest)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(b)
+	})
+	mux.HandleFunc("/api/v3/packages/", func(w http.ResponseWriter, r *http.Request) {
+		if cardFail {
+			http.Error(w, "server error", http.StatusInternalServerError)
+			return
+		}
+		b, _ := json.Marshal(currentCard)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(b)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	clock := fakeClock(time.Now())
+	dir := t.TempDir()
+	c := newClient(t, srv.URL, dir, clock)
+
+	// Sync rev 1 successfully
+	_, err := c.Sync(context.Background(), "KL")
+	if err != nil {
+		t.Fatalf("Sync rev 1: %v", err)
+	}
+
+	active1, _, err := c.GetActiveCard()
+	if err != nil || active1.PackageID != "pkg-a" {
+		t.Fatalf("expected pkg-a active, got %v, err=%v", active1, err)
+	}
+
+	// Now offer rev 2 manifest, but fail card download
+	currentManifest = m2
+	currentCard = card2
+	cardFail = true
+
+	_, err = c.Sync(context.Background(), "KL")
+	if err == nil {
+		t.Fatal("Sync rev 2 should fail on card error")
+	}
+
+	// Active state MUST remain rev 1 coherent! It must NOT have rev 2 manifest paired with rev 1 card.
+	manRec, err := c.GetActiveManifest()
+	if err != nil {
+		t.Fatalf("GetActiveManifest: %v", err)
+	}
+	if manRec.Revision != 1 {
+		t.Fatalf("active manifest was updated to revision %d despite failed card download; atomic activation violated", manRec.Revision)
+	}
+	activeCard, _, err := c.GetActiveCard()
+	if err != nil {
+		t.Fatalf("GetActiveCard: %v", err)
+	}
+	if activeCard.PackageID != "pkg-a" {
+		t.Fatalf("active card was corrupted; got package %s", activeCard.PackageID)
+	}
+}
+
+// TestSameRevisionRepair verifies that if active files are deleted or corrupted,
+// a sync against the same manifest revision detects the damage and repairs them.
+func TestSameRevisionRepair(t *testing.T) {
+	ts := newTestServer(t, "KL")
+	defer ts.Server.Close()
+	m, card := testFixtures(t, 1)
+	ts.manifest = m
+	ts.card = card
+
+	clock := fakeClock(time.Now())
+	dir := t.TempDir()
+	c := newClient(t, ts.URL, dir, clock)
+
+	_, err := c.Sync(context.Background(), "KL")
+	if err != nil {
+		t.Fatalf("Sync 1: %v", err)
+	}
+
+	// Delete active card
+	cardPath := filepath.Join(dir, "state", "current_card.bin")
+	_ = os.Remove(cardPath)
+
+	// Sync again at same revision 1
+	_, err = c.Sync(context.Background(), "KL")
+	if err != nil {
+		t.Fatalf("Sync repair failed: %v", err)
+	}
+
+	// Verify card is restored
+	repaired, state, err := c.GetActiveCard()
+	if err != nil {
+		t.Fatalf("GetActiveCard after repair: %v", err)
+	}
+	if repaired == nil || state != FreshnessCurrent {
+		t.Fatalf("repaired card invalid: state = %v", state)
+	}
+}
+
+
 
 

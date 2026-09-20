@@ -266,6 +266,45 @@ func (s *storage) writeActiveCard(canonical []byte) error {
 	return s.writeAtomicBytes(filepath.Join(s.root, "state", "current_card.bin"), canonical)
 }
 
+// writeActiveGeneration atomically stages and commits manifest and card together.
+func (s *storage) writeActiveGeneration(manifestBytes []byte, cardBytes []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stateDir := filepath.Join(s.root, "state")
+	tmpDir, err := os.MkdirTemp(stateDir, ".staging-*")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = os.RemoveAll(tmpDir)
+	}()
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "current_manifest.bin"), manifestBytes, 0o644); err != nil {
+		return err
+	}
+	if len(cardBytes) > 0 {
+		if err := os.WriteFile(filepath.Join(tmpDir, "current_card.bin"), cardBytes, 0o644); err != nil {
+			return err
+		}
+	}
+
+	if err := os.Rename(filepath.Join(tmpDir, "current_manifest.bin"), filepath.Join(stateDir, "current_manifest.bin")); err != nil {
+		return err
+	}
+	if len(cardBytes) > 0 {
+		if err := os.Rename(filepath.Join(tmpDir, "current_card.bin"), filepath.Join(stateDir, "current_card.bin")); err != nil {
+			return err
+		}
+	}
+
+	if d, err := os.Open(stateDir); err == nil {
+		_ = d.Sync()
+		d.Close()
+	}
+	return nil
+}
+
 // writePartMeta persists downloadMeta as <part>.meta.
 func (s *storage) writePartMeta(partPath string, m downloadMeta) error {
 	s.mu.Lock()
@@ -377,10 +416,23 @@ func (t *tombstoneStore) add(name, id string) (added bool, err error) {
 	return true, nil
 }
 
+func (t *tombstoneStore) checkContains(name, id string) (bool, error) {
+	cur, err := t.loadOrInit(name)
+	if err != nil {
+		return false, err
+	}
+	for _, x := range cur {
+		if x == id {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (t *tombstoneStore) contains(name, id string) bool {
 	cur, err := t.loadOrInit(name)
 	if err != nil {
-		return false
+		return true // fail closed
 	}
 	for _, x := range cur {
 		if x == id {
@@ -464,7 +516,7 @@ func (t *tombstoneStore) loadSuperseded() ([]offlinepkg.SupersededVersion, error
 func (t *tombstoneStore) isSuperseded(pkgID string, version int) bool {
 	list, err := t.loadSuperseded()
 	if err != nil {
-		return false
+		return true // fail closed
 	}
 	for _, x := range list {
 		if x.PackageID == pkgID && x.Version == version {
@@ -472,6 +524,19 @@ func (t *tombstoneStore) isSuperseded(pkgID string, version int) bool {
 		}
 	}
 	return false
+}
+
+// verifyIntegrity checks that all tombstone files exist and are well-formed.
+func (t *tombstoneStore) verifyIntegrity() error {
+	for _, name := range []string{"packages.json", "routes.json"} {
+		if _, err := t.loadOrInit(name); err != nil {
+			return err
+		}
+	}
+	if _, err := t.loadSuperseded(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // --- resource store ---

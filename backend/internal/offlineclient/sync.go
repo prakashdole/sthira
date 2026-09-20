@@ -29,6 +29,9 @@ func (c *ProtocolClient) stateQuery() (*offlinepkg.PublicIncidentCard, Freshness
 	if err != nil {
 		return nil, FreshnessUnverifiable, err
 	}
+	if err := c.storage.tombstones().verifyIntegrity(); err != nil {
+		return nil, FreshnessUnverifiable, fmt.Errorf("offlineclient: tombstones corrupt: %w", err)
+	}
 	if card.PackageID != "" && c.isPackageRevoked(card.PackageID) {
 		return card, FreshnessRevoked, nil
 	}
@@ -233,32 +236,37 @@ func (c *ProtocolClient) sync(ctx context.Context, jurisdiction string) (*SyncRe
 		report.Superseded = append(report.Superseded, sv)
 	}
 
-	// Same-revision replay: the server returned the manifest we already
-	// have. Revocations were already applied in phase 2 (idempotent); we
-	// skip the redundant activation write and leave the .part on disk so
-	// a crash can still resume cleanly.
-	if manifestMeta.Revision == stBefore.LastRevision && stBefore.LastRevision > 0 {
+	// Same-revision check: verify active files on disk are intact.
+	activeCardBytes, activeCard, cardErr := c.storage.readActiveCard()
+	_, activeManRec, manErr := c.storage.readActiveManifest()
+	activeIntact := manErr == nil && cardErr == nil && activeCard != nil && activeManRec != nil &&
+		activeManRec.Manifest.Revision == manifestMeta.Revision &&
+		activeCard.PackageID == manifestMeta.CriticalCard.PackageID &&
+		activeCard.Version == manifestMeta.CriticalCard.Version &&
+		activeCard.ChecksumSHA256 == manifestMeta.CriticalCard.ChecksumSHA256
+
+	if manifestMeta.Revision == stBefore.LastRevision && stBefore.LastRevision > 0 && activeIntact {
 		report.ActiveRevision = manifestMeta.Revision
 		c.storage.clearPart(manifestPart)
 		return report, nil
 	}
 
-	// Phase 3: atomic activation of the manifest bytes.
-	if err := c.storage.writeActiveManifest(manifestBytes); err != nil {
-		return nil, fmt.Errorf("offlineclient: activate manifest: %w", err)
-	}
-	report.ManifestUpdated = true
-	report.ActiveRevision = manifestMeta.Revision
-
-	// Phase 4: card, if changed or first sync.
-	cardChanged, err := c.cardNeedsFetch(stBefore, manifestMeta)
-	if err != nil {
-		return nil, err
+	// Phase 3: download card BEFORE activation if changed or missing.
+	// If card download fails, NOTHING is activated; prior coherent generation stays intact.
+	var newCardBytes []byte
+	var cardPart string
+	cardChanged := !activeIntact || stBefore.LastRevision == 0
+	if !cardChanged {
+		changed, err := c.cardNeedsFetch(stBefore, manifestMeta)
+		if err != nil {
+			return nil, err
+		}
+		cardChanged = changed
 	}
 	if cardChanged {
 		cardPath := fmt.Sprintf("/api/v3/packages/%s/versions/%d",
 			manifestMeta.CriticalCard.PackageID, manifestMeta.CriticalCard.Version)
-		cardBytes, _, _, cardPart, err := c.downloadAndVerifyArtifact(ctx, manifestDownload{
+		b, _, _, part, err := c.downloadAndVerifyArtifact(ctx, manifestDownload{
 			Jurisdiction:     jurisdiction,
 			PackageID:        manifestMeta.CriticalCard.PackageID,
 			Version:          manifestMeta.CriticalCard.Version,
@@ -269,16 +277,22 @@ func (c *ProtocolClient) sync(ctx context.Context, jurisdiction string) (*SyncRe
 		if err != nil {
 			return nil, err
 		}
-		if err := c.storage.writeActiveCard(cardBytes); err != nil {
-			return nil, fmt.Errorf("offlineclient: activate card: %w", err)
-		}
-		// Card is now durably committed; the .part is no longer needed
-		// and would only confuse a future restart.
-		c.storage.clearPart(cardPart)
-		report.CardUpdated = true
+		newCardBytes = b
+		cardPart = part
+	} else {
+		newCardBytes = activeCardBytes
 	}
 
-	// Manifest is durably committed; clear its .part too.
+	// Phase 4: atomic activation of manifest and card together using generation staging.
+	if err := c.storage.writeActiveGeneration(manifestBytes, newCardBytes); err != nil {
+		return nil, fmt.Errorf("offlineclient: activate generation: %w", err)
+	}
+	report.ManifestUpdated = true
+	report.ActiveRevision = manifestMeta.Revision
+	if cardChanged {
+		report.CardUpdated = true
+		c.storage.clearPart(cardPart)
+	}
 	c.storage.clearPart(manifestPart)
 
 	// Phase 5: update state.json. This is the last write; if we crash
