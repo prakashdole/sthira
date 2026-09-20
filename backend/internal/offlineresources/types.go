@@ -2,14 +2,13 @@
 // inside a signed manifest and the map style JSON that depends on them.
 //
 // It is the Agent 4 slice of the P5 contract (see plan/p5-contract.md §2.1,
-// §7.4 and §8.1). It depends only on the wire types specified in §7.1 of the
-// contract; the actual offlinepkg package is owned by Agent 1 and is not
-// imported here to avoid a parallel-implementation cycle. While Agent 1's
-// package is not present, this file mirrors the relevant subset of its wire
-// types exactly so the validator runs against the same JSON shape that the
-// integration agent will deserialize via offlinepkg. When offlinepkg lands,
-// these local declarations should be removed and replaced with an import of
-// offlinepkg types (a one-line mechanical edit per type).
+// §7.4 and §8.1). It depends on offlinepkg (Agent 1) for the wire types and
+// re-exports the canonical ResourceType / resource-type constants so the
+// rest of this package can use a single vocabulary. The ResourceDescriptor
+// type embeds offlinepkg.ResourceDescriptor and adds validation-side metadata
+// (license evidence, zoom bounds, bbox, languages) that the contract leaves
+// O06-pending; the JSON wire shape remains byte-identical because embedded
+// fields are promoted.
 //
 // What this package does:
 //   - Structural validation of a single ResourceDescriptor (id, type, digest,
@@ -34,19 +33,21 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+
+	"sthira/backend/internal/offlinepkg"
 )
 
-// ResourceType mirrors offlinepkg.ResourceType from the P5 contract §7.1.
-// Kept here in the same form because Agent 1's package is not present.
-type ResourceType string
+// ResourceType is the canonical P5 wire type from offlinepkg (§7.1).
+// Aliased so existing callers can use the local name without churn.
+type ResourceType = offlinepkg.ResourceType
 
 const (
-	TypeVectorTiles    ResourceType = "VECTOR_TILES"
-	TypeMapStyle       ResourceType = "MAP_STYLE"
-	TypeMapSprite      ResourceType = "MAP_SPRITE"
-	TypeMapGlyphs      ResourceType = "MAP_GLYPHS"
-	TypeGazetteer      ResourceType = "GAZETTEER"
-	TypeEmergencyAudio ResourceType = "EMERGENCY_AUDIO"
+	TypeVectorTiles    = offlinepkg.TypeVectorTiles
+	TypeMapStyle       = offlinepkg.TypeMapStyle
+	TypeMapSprite      = offlinepkg.TypeMapSprite
+	TypeMapGlyphs      = offlinepkg.TypeMapGlyphs
+	TypeGazetteer      = offlinepkg.TypeGazetteer
+	TypeEmergencyAudio = offlinepkg.TypeEmergencyAudio
 )
 
 // RedistributionPermission mirrors the offline redistribution declaration
@@ -84,14 +85,7 @@ type LicenseInfo struct {
 // fields; the new fields are added with omitempty so the wire shape is
 // backward-compatible.
 type ResourceDescriptor struct {
-	ResourceID     string       `json:"resource_id"`
-	Type           ResourceType `json:"type"`
-	URI            string       `json:"uri"`
-	ChecksumSHA256 string       `json:"checksum_sha256"`
-	ByteSize       int64        `json:"byte_size"`
-	ContentType    string       `json:"content_type"`
-	Required       bool         `json:"required"`
-	Attribution    string       `json:"attribution"`
+	offlinepkg.ResourceDescriptor
 
 	// License is not in the v3.0 wire shape; it is validation-side metadata
 	// pending O06 evidence. The validator inspects it when present.
@@ -105,6 +99,13 @@ type ResourceDescriptor struct {
 	MaxZoom   *int     `json:"max_zoom,omitempty"`
 	BBox      *GeoBBox `json:"bbox,omitempty"`
 	Languages []string `json:"languages,omitempty"`
+}
+
+// Wire returns the embedded offlinepkg.ResourceDescriptor with the same field
+// values. Useful for callers that need to pass the canonical wire shape (e.g.
+// when handing off to offlinepkg verification or to offlinedelivery).
+func (d ResourceDescriptor) Wire() offlinepkg.ResourceDescriptor {
+	return d.ResourceDescriptor
 }
 
 // GeoBBox is a four-float64 GeoJSON-style bounding box [minLon,minLat,maxLon,maxLat].
