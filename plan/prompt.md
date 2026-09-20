@@ -593,17 +593,17 @@ complete.
 
 | # | Requirement | Implementation | Regression test | Result |
 |---|------------|----------------|------------------|--------|
-| 1a | Route-required policy gate: missing route fails closed when policy requires | opkg.AllocationPolicy.RouteRequired; StayPolicy.RouteRequired; ErrRouteRequired; RevalidateReservationContext rejects before any capacity change | TestRouteRequiredPolicyRejectsMissingRoute | PASS (no writes; 409 ROUTE_UNVERIFIED) |
-| 1b | Synthetic gate is server-controlled (no caller header/body field opens it) | stay_handlers.handleGuidanceQuery hardcodes RouteGateOpen=false; X-Sthira-Synthetic-Route-Gate header and `route_gate_open` body field both ignored | TestHeaderCannotEnableSyntheticRoute; TestRequestBodyCannotEnableSyntheticRoute | PASS (both 200s report route_gate=false; no destination route_verified) |
-| 1c | Isolated synthetic HTTP exercise completes the intended flow | Direct store-level ChoiceQuerier with RouteGateOpen=true (the only seam that opens the gate) | TestValidIsolatedSyntheticFlowSucceeds | PASS (one RouteVerified destination under isolated gate) |
+| 1a | Route policy authority fail-closed semantics: missing or null route_required rejects with ErrNoStayPolicy; explicit false permits omission; explicit true requires verified route | opkg.AllocationPolicy.RoutePolicyRequired() returns ErrNoStayPolicy on nil; StayPolicy.RoutePolicyRequired() returns ErrNoStayPolicy on nil; RevalidateReservationContext rejects before any capacity change | TestRoutePolicyAbsentFailsClosed; TestRoutePolicyNullFailsClosed; TestRoutePolicyExplicitFalsePermitsOmission; TestRoutePolicyExplicitTrueRequiresRoute; TestRoutePolicyExtendAndTransfer | PASS (absent/null -> 409 VALIDATION_ERROR; explicit true missing route -> 409 ROUTE_UNVERIFIED; explicit false without route -> 201) |
+| 1b | Synthetic route boundary isolation: production configuration rejects synthetic demo packages, source artifacts, and routes | RevalidateReservationContext checks pkg/art evidence class and rejects SYNTHETIC_DEMO/SYNTHETIC evidence and synthetic routes unless allowSynthetic is true; guidance query route_gate defaults false | TestNormalServerRejectsSyntheticDemoCommitment; TestNormalServerHeadersAndBodyCannotEnableSynthetic | PASS (commitments rejected with ErrReservationContext/ErrRouteUnavailable; request headers/body cannot enable synthetic execution) |
+| 1c | Isolated synthetic HTTP exercise completes intended flow via server configuration | Server option WithSyntheticExercise(StaticSyntheticExercise(true)) enables synthetic execution exclusively on configured test servers | TestIsolatedTestConfiguredServerCompletesSyntheticReservation; TestIsolatedTestConfiguredServerRejectsRequiredRouteOmission; TestExtensionAndTransferSyntheticBoundaryIsolation | PASS (201 Created under test server; route omission when required still rejects 409) |
 | 1d | A valid route must match the selected destination | stay.RevalidateReservationContext joins `route_versions.to_safe_zone_id = facilities.safe_zone_id` | TestReservationRouteToWrongDestinationRejected; TestTransferWithOldDestinationRouteRejected | PASS (both rejected with 409; no writes) |
 | 1e | Closed/unavailable destinations and routes cannot create new commitments | RevalidateReservationContext reads zone_versions.status (OPEN/PUBLISHED allowed; CLOSED/FULL/etc rejected); route closure row checked | TestReservationClosedRouteRejected; TestUnavailableDestinationRejected | PASS (409; no writes) |
 | 2  | Transfer persists the validated replacement route | StayStore.Transfer takes `newRouteID *string`; the caller (handleStayEvent) passes `req.NewRouteID`; the replacement stay is persisted with `newRouteID`, never `st.RouteID` | TestTransferReturnsReplacementIDsAndRead (reads `stays.route_id` for the replacement); TestTransferRetryReturnsSameReplacementIDs | PASS |
-| 3  | Snapshot version mandatory where required | revalidateSnapshotVersion rejects expectedVersion <= 0 with snapshotStaleError; createReservationRequest rejects snapshot_version <= 0 at the boundary; handleStayEvent rejects <= 0 for EXTEND/TRANSFER | TestReservationRejectsZeroSnapshotVersion (explicit 0 and absent, both 400 INVALID_VALUE; no writes); TestExtendRejectsZeroSnapshotVersion (same on EXTEND) | PASS |
-| 4a | Concurrency evidence with real DB lock-wait observation (no sleeps) | concurrency_helpers_test.go: openObserverPool (third pool); pollUntilWaiting reads pg_stat_activity.wait_event_type='Lock' | TestSourceLockBlocksWithdrawal; TestConcurrentBarrierCommitmentWins; TestConcurrentBarrierWithdrawalWins | PASS |
-| 4b | Both orderings (commit-wins and withdrawal-wins) exercised deterministically | The two barrier protocols force one side's SQL to acquire the lock first; the observer confirms the OTHER side is in lock-wait state | TestConcurrentBarrierCommitmentWins (commit holds FOR UPDATE first; quarantine UPDATE blocked under lock); TestConcurrentBarrierWithdrawalWins (quarantine UPDATE first; commit SELECT FOR UPDATE blocked under lock) | PASS |
-| 4c | Removing the source lock causes the regression to fail for the intended reason | Demonstrated: deleting `FOR UPDATE OF s, p` from RevalidateReservationContext makes TestSourceLockBlocksWithdrawal / TestConcurrentBarrier* time out (observer never sees lock-wait). Implementation restored before commit. | (manual sanity check; not a Go test) | PASS for the demonstration |
-| 4d | Worker goroutine errors propagate to parent; no t.Fatalf inside goroutines | runRacing helper collects errors on a channel; t.Fatalf only on the main goroutine | All Test*Barrier* / TestSourceLock* | PASS |
+| 3  | Initial reservation snapshot version revalidated under locked snapshot; mandatory where required | handleCreateReservation calls RevalidateReservationContext first to acquire FOR UPDATE locks on s, p; calls revalidateSnapshotVersion under same locks; rejects snapshot_version <= 0 at boundary (400) and in tx | TestSnapshotRaceRejectsStaleVersion (goroutine bumps version under lock; reservation blocks and rejects 409 STALE_VERSION with zero writes; v2 succeeds 201; replay 200); TestReservationRejectsZeroSnapshotVersion; TestExtendRejectsZeroSnapshotVersion | PASS |
+| 4a | Concurrency evidence with targeted DB lock-wait observation | concurrency_helpers_test.go: backendPID captures connection PID on tx; pollUntilBlocked verifies waiter_pid in pg_stat_activity has wait_event_type='Lock' and blocker_pid = ANY(pg_blocking_pids(waiter_pid)) | TestSourceLockBlocksWithdrawal; TestConcurrentBarrierCommitmentWins; TestConcurrentBarrierWithdrawalWins | PASS |
+| 4b | Both orderings (commit-wins and withdrawal-wins) exercised deterministically | Two barrier protocols capture competing PIDs; observer proves intended waiter is blocked specifically by competing blocker connection before holder releases | TestConcurrentBarrierCommitmentWins (quarPID blocked by commitPID); TestConcurrentBarrierWithdrawalWins (commitPID blocked by quarPID) | PASS |
+| 4c | Negative lock contention and missing contention proof | TestObserverRejectsUnrelatedContention creates active contention on unrelated connections (pg_advisory_xact_lock) and proves observer rejects it; TestObserverTimesOutWhenContentionMissing proves missing contention produces bounded timeout | TestObserverRejectsUnrelatedContention; TestObserverTimesOutWhenContentionMissing | PASS |
+| 4d | Worker goroutine errors propagate to parent; no t.Fatalf inside goroutines | runRacing helper collects errors on a channel; t.Fatalf only on the main goroutine | All Test*Barrier* / TestSourceLock* / TestObserver* | PASS |
 | 5a | Audit replay through real HTTP boundary (no error suppression) | audit_integration_test.go (httpserver package): real doAuthed over httptest.Server | TestRetrySameKeyNoDuplicateAuditOrCapacityReplay | PASS (same payload, 1 event, capacity unchanged, VerifyChain ok) |
 | 5b | Audit chain via VerifyChain (global ordering) | store.VerifyChain reads all events ordered by event_seq, recomputes prev/event hashes | TestChainInterleavingAcrossSubjects (interleaved A1,B1,A2,B2 across two stays; VerifyChain passes) | PASS |
 | 5c | Legitimate interleaving from different subjects | Two stays on separate facilities; event_seqs cross between them | TestChainInterleavingAcrossSubjects | PASS |
@@ -612,53 +612,50 @@ complete.
 | 6b | Test isolation: TestExpiryWorker robust against shared-DB pollution | Tick() returns a count over the WHOLE DB; the assertion is on THIS test's stay state (was: `n != 1`) | TestExpiryWorker | PASS |
 | 7  | All tests pass on the first run; no rerun required | `go test ./... -count=1` and `-count=3` both clean | full-suite run | PASS |
 
+### Process test execution evidence
+
+Process tests `TestCrossProcessLastSpace` and `TestCrashAfterCommitBeforeResponse` require build tag `-tags crashtest` and `STHIRA_RUN_PROCESS_TESTS=1` alongside `STHIRA_TEST_DSN`.
+- **State 1 (Without `-tags crashtest`)**: tests are uncompiled (`testing: warning: no tests to run`).
+- **State 2 (With `-tags crashtest`, without `STHIRA_RUN_PROCESS_TESTS=1`)**: tests call `t.Skip` (reported as package PASS, but 2 skipped: `concurrency_process_test.go: requires STHIRA_TEST_DSN and STHIRA_RUN_PROCESS_TESTS=1`, `crash_process_test.go: requires STHIRA_TEST_DSN and STHIRA_RUN_PROCESS_TESTS=1`).
+- **State 3 (With `-tags crashtest` AND `STHIRA_RUN_PROCESS_TESTS=1`)**: both tests execute and pass:
+  - `TestCrossProcessLastSpace`: 6 child processes racing for last space, conservation held (`reserved=1 capacity=1`), exactly 1 wins, audit event recorded atomically.
+  - `TestCrashAfterCommitBeforeResponse`: child server 1 commits reservation and receives SIGKILL mid-response; child server 2 restarts, retries same idempotency key and payload; returns stored result with 0 duplicate reservations, 0 capacity double-decrements, and 0 duplicate audit events.
+
 ### Overstated claims removed from prior records
 
 - **no-sleeps concurrency**: the previous "no sleeps" wording was inaccurate;
   TestConcurrentWithdrawalAndCommitmentBarrier used `time.Sleep(10ms)` /
   `time.Sleep(5ms)` to establish ordering. Replaced with channel-only
-  ordering + pg_stat_activity observation in commit `93135ae`.
+  ordering + pg_stat_activity lock-wait observation (observing the specific
+  waiter PID blocked by the specific blocker PID).
 - **HTTP synthetic isolation**: the previous claim that the synthetic gate
   was reachable only via the store API is now strengthened by
-  TestRequestBodyCannotEnableSyntheticRoute, which smuggles
-  `route_gate_open` / `route_gate` / `synthetic_route_gate` AND the header,
-  and verifies route_gate=false, no destination route_verified.
-- **complete route omission protection**: the previous wording described
-  "missing route → reserved-route validation" but did not enforce a
-  policy-driven `route_required=true`. Now enforced via the new
-  `opkg.AllocationPolicy.RouteRequired` / `StayPolicy.RouteRequired`
-  / `ErrRouteRequired` chain; dedicated test
-  `TestRouteRequiredPolicyRejectsMissingRoute`.
-- **successful replay proof**: the previous TestRetrySameKeyNoDuplicateAuditOrCapacity
-  discarded the operation result (`_ = stays.Extend(...)` with a comment
-  explaining why) and asserted only on audit-event count. Replaced with
-  TestRetrySameKeyNoDuplicateAuditOrCapacityReplay that exercises the
-  real HTTP boundary, asserts the replay returned the same stored
-  payload, asserts no duplicate event, and runs VerifyChain.
-- **P4 closure**: not claimed; P4 remains IN_PROGRESS until the external
-  operator-IdP blocker (O14) is resolved.
+  server-side configuration dependency injection (`WithSyntheticExercise`),
+  ensuring request headers or body fields cannot enable synthetic execution.
+- **route policy fail-closed semantics**: missing or null `route_required`
+  fails closed with `ErrNoStayPolicy` (HTTP 409 `VALIDATION_ERROR`). Explicit
+  `false` remains distinct and permits omission; explicit `true` requires a verified route.
+- **snapshot ordering**: the initial reservation version check runs under
+  the locked package snapshot acquired by `RevalidateReservationContext`,
+  eliminating the gap where concurrent version bumps committed between
+  check and lock.
+- **P4 closure**: not claimed; P4 remains IN_PROGRESS until external
+  blockers are resolved.
 
 ### Internal work left for P4 closure
 
 None for the engineering scope of these bounded corrections. Each
-acceptance row above is exercised by a real-DB Go test against the
-shared `sthira_test` instance (PostgreSQL 18 + PostGIS 3.6,
-`STHIRA_TEST_DSN=postgres://apple@localhost:5432/sthira_test`). The
-single remaining OPEN item in the P4 record (the external operator-IdP
-decision, O14) is not engineering work.
+acceptance row above is exercised by a real-DB Go test against a disposable
+test instance (PostgreSQL 18 + PostGIS 3.6, schema revision 5). The
+operational activation blockers (O01, O05, O07, O14) are external/operational
+dependencies, not unfinished internal engineering.
 
-### External blockers (unchanged)
+### External blockers (explicit)
 
-- **O05** — route authority OPEN; operational routing stays disabled.
-  The synthetic route gate is reachable only via the isolated store API
-  (the ChoiceQuery.RouteGateOpen field, not exposed via HTTP), so the
-  P4 closure cannot enable operational routing on its own.
-- **O07** — stay policy OPEN; the existing synthetic allocation_policy
-  in test fixtures carries authoritative bounds (temporary_stay_min/max,
-  reservation_expiry_seconds, allow_transfers, route_required). Real
-  policy is still operator-supplied.
-- **O14** — operator IdP not selected; production issuance remains
-  fail-closed 503. The OperatorVerifier seam is the integration point.
+- **O01** — approved demo state/district list, official references and user-supplied zones/routes remain OPEN; catalogue acceptance blocked.
+- **O05** — route authority OPEN; operational routing stays disabled. The synthetic route gate is reachable only via server-configured isolated test execution (`WithSyntheticExercise`), never via request headers or body fields; production configuration rejects synthetic evidence.
+- **O07** — stay policy OPEN; authoritative policy must explicitly supply route_required (absent/null fails closed). Real policy is still authority-supplied.
+- **O14** — operator IdP not selected; production issuance remains fail-closed 503. The OperatorVerifier seam is complete, tested, and fails closed in production; live operator IdP integration is BLOCKED_EXTERNAL.
 
 ## Required completion record
 

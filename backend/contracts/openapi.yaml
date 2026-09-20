@@ -153,8 +153,14 @@ paths:
                 party_size: { type: integer, minimum: 1 }
                 start_date: { type: string, format: date }
                 end_date: { type: string, format: date }
-                idempotency_key: { type: string }
-                snapshot_version: { type: integer }
+                snapshot_version:
+                  type: integer
+                  description: >-
+                    Authoritative source snapshot version client confirmed its
+                    choice against; revalidated at commit under the locked
+                    snapshot. Required and must be > 0. Rejected with
+                    INVALID_VALUE (400) if zero or missing. Returns
+                    STALE_VERSION (409) if the locked package snapshot differs.
       responses:
         '201': { $ref: '#/components/responses/DataEnvelope' }
         '400': { $ref: '#/components/responses/ErrorEnvelope' }
