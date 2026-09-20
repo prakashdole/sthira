@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,8 +81,10 @@ func (ts *testServer) serveManifest(w http.ResponseWriter, r *http.Request) {
 	if ts.wantRange {
 		w.Header().Set("Accept-Ranges", "bytes")
 	}
-	// Send canonical JSON so checksum verification works (contract §4.2).
-	mBytes, _ := offlinepkg.CanonicalBytes(ts.manifest)
+	// Send the manifest with its declared checksum and signature on the wire.
+	// The client canonicalizes (stripping those mutable fields) before
+	// re-checking the digest, per contract §4.2.
+	mBytes, _ := json.Marshal(ts.manifest)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(mBytes)))
 	w.Write(mBytes)
 }
@@ -97,8 +100,8 @@ func (ts *testServer) serveCard(w http.ResponseWriter, r *http.Request) {
 	if ts.wantRange {
 		w.Header().Set("Accept-Ranges", "bytes")
 	}
-	// Send canonical JSON so checksum verification works (contract §4.2).
-	cBytes, _ := offlinepkg.CanonicalBytes(ts.card)
+	// Send the card with its declared checksum and signature on the wire.
+	cBytes, _ := json.Marshal(ts.card)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(cBytes)))
 	w.Write(cBytes)
 }
@@ -146,7 +149,7 @@ func makeTestManifest(t *testing.T, revision int, cardChecksum string) *offlinep
 		Provenance: offlinepkg.ManifestProvenance{
 			Authority:     "gov.my.dpd",
 			DatasetID:     "incident-registry",
-			EvidenceClass: "public-incident",
+			EvidenceClass: "SYNTHETIC_DEMO",
 		},
 	}
 	m.ChecksumSHA256 = ""
@@ -161,7 +164,7 @@ func makeTestCard(t *testing.T) *offlinepkg.PublicIncidentCard {
 		PackageID:     "pkg-a",
 		Version:       1,
 		Jurisdiction:  "KL",
-		EvidenceClass: "public-incident",
+		EvidenceClass: "SYNTHETIC_DEMO",
 		EffectiveAt:   "2024-01-01T00:00:00Z",
 		ExpiresAt:     "2099-01-01T00:00:00Z",
 		Alert: offlinepkg.AlertCard{
@@ -173,14 +176,24 @@ func makeTestCard(t *testing.T) *offlinepkg.PublicIncidentCard {
 			Certainty:       "observed",
 			AreaDescription: "Test Area",
 		},
-		RedZones:          []offlinepkg.RedZoneCard{},
-		SafeZones:         []offlinepkg.SafeZoneCard{},
-		ApprovedRoutes:    []offlinepkg.RouteCard{},
-		Facilities:        []offlinepkg.FacilityCard{},
-		Instructions:      []offlinepkg.InstructionCard{},
-		EmergencyContacts: []offlinepkg.EmergencyContact{},
+		RedZones: []offlinepkg.RedZoneCard{
+			{ID: "rz-1", Name: "Test Red Zone"},
+		},
+		SafeZones: []offlinepkg.SafeZoneCard{
+			{ID: "sz-1", Name: "Test Safe Zone", Role: "EMERGENCY_SHELTER", Status: "OPEN", CapacityMode: "DEFINED"},
+		},
+		ApprovedRoutes: []offlinepkg.RouteCard{},
+		Facilities: []offlinepkg.FacilityCard{
+			{ID: "fac-1", SafeZoneID: "sz-1", Name: "Test Facility"},
+		},
+		Instructions: []offlinepkg.InstructionCard{
+			{ID: "ins-1", Language: "en-IN", Title: "Move to safety", Summary: "Move to the nearest safe zone"},
+		},
+		EmergencyContacts: []offlinepkg.EmergencyContact{
+			{Name: "Emergency", Number: "112"},
+		},
 		AllocationPolicy: offlinepkg.PolicyCard{
-			Order: []string{},
+			Order: []string{"sz-1"},
 		},
 	}
 	c.ChecksumSHA256 = ""
@@ -379,6 +392,9 @@ func TestSync_VerificationFailure_BadChecksum(t *testing.T) {
 	ts := newTestServer(t, "KL")
 	defer ts.Server.Close()
 
+	ts.card = makeTestCard(t)
+	signCard(ts.card)
+
 	ts.manifest = &offlinepkg.Manifest{
 		SchemaVersion: "3.0",
 		ManifestID:    "manifest-kl-1",
@@ -390,20 +406,20 @@ func TestSync_VerificationFailure_BadChecksum(t *testing.T) {
 		CriticalCard: offlinepkg.CriticalCardDescriptor{
 			PackageID: "pkg-a", Version: 1,
 			URI:            "/api/v3/packages/pkg-a/versions/1",
-			ChecksumSHA256: "abc123",
+			ChecksumSHA256: ts.card.ChecksumSHA256,
 		},
 		Revocations: offlinepkg.RevocationBlock{},
 		Provenance: offlinepkg.ManifestProvenance{
-			Authority: "gov.my.dpd", DatasetID: "x", EvidenceClass: "y",
+			Authority:     "gov.my.dpd",
+			DatasetID:     "incident-registry",
+			EvidenceClass: "SYNTHETIC_DEMO",
 		},
-		ChecksumSHA256: "totally-wrong-checksum",
+		ChecksumSHA256: strings.Repeat("0", 64),
 	}
 	signManifest(ts.manifest)
-	// Overwrite with the intentionally wrong checksum AFTER signManifest
-	// (signManifest recomputes it correctly, but we want the test to fail
-	// at the checksum check, not at the signature check).
-	ts.manifest.ChecksumSHA256 = "totally-wrong-checksum"
-	ts.card = makeTestCard(t)
+	// Overwrite with the intentionally wrong 64-hex checksum AFTER signManifest
+	// so structural validation passes but checksum verification fails.
+	ts.manifest.ChecksumSHA256 = strings.Repeat("0", 64)
 
 	clock := fakeClock(time.Now())
 	c := newClient(t, ts.URL, t.TempDir(), clock)
@@ -422,26 +438,8 @@ func TestSync_TombstonesPersisted(t *testing.T) {
 	ts.card = makeTestCard(t)
 	signCard(ts.card)
 
-	ts.manifest = &offlinepkg.Manifest{
-		SchemaVersion: "3.0",
-		ManifestID:    "manifest-kl-1",
-		Jurisdiction:  "KL",
-		Revision:      1,
-		GeneratedAt:   "2024-01-01T00:00:00Z",
-		ValidUntil:    "2099-01-01T00:00:00Z",
-		SourceStatus:  "active",
-		CriticalCard: offlinepkg.CriticalCardDescriptor{
-			PackageID: "pkg-a", Version: 1,
-			URI:            "/api/v3/packages/pkg-a/versions/1",
-			ChecksumSHA256: ts.card.ChecksumSHA256,
-		},
-		Revocations: offlinepkg.RevocationBlock{
-			RevokedPackages: []string{"pkg-b"},
-		},
-		Provenance: offlinepkg.ManifestProvenance{
-			Authority: "gov.my.dpd", DatasetID: "x", EvidenceClass: "y",
-		},
-	}
+	ts.manifest = makeTestManifest(t, 1, ts.card.ChecksumSHA256)
+	ts.manifest.Revocations.RevokedPackages = []string{"pkg-b"}
 	ts.manifest.ChecksumSHA256 = ""
 	canonical, _ := offlinepkg.CanonicalBytes(ts.manifest)
 	ts.manifest.ChecksumSHA256 = offlinepkg.ChecksumSHA256(canonical)
@@ -560,29 +558,11 @@ func TestIsRouteCancelled(t *testing.T) {
 	ts.card = makeTestCard(t)
 	signCard(ts.card)
 
-	ts.manifest = &offlinepkg.Manifest{
-		SchemaVersion: "3.0",
-		ManifestID:    "manifest-kl-1",
-		Jurisdiction:  "KL",
-		Revision:      1,
-		GeneratedAt:   "2024-01-01T00:00:00Z",
-		ValidUntil:    "2099-01-01T00:00:00Z",
-		SourceStatus:  "active",
-		CriticalCard: offlinepkg.CriticalCardDescriptor{
-			PackageID: "pkg-a", Version: 1,
-			URI:            "/api/v3/packages/pkg-a/versions/1",
-			ChecksumSHA256: ts.card.ChecksumSHA256,
-		},
-		Revocations: offlinepkg.RevocationBlock{
-			CancelledRoutes: []string{"route-x"},
-		},
-		Provenance: offlinepkg.ManifestProvenance{
-			Authority: "gov.my.dpd", DatasetID: "x", EvidenceClass: "y",
-		},
-	}
+	ts.manifest = makeTestManifest(t, 1, ts.card.ChecksumSHA256)
+	ts.manifest.Revocations.CancelledRoutes = []string{"route-x"}
 	ts.manifest.ChecksumSHA256 = ""
-	manifestCanonical, _ := offlinepkg.CanonicalBytes(ts.manifest)
-	ts.manifest.ChecksumSHA256 = offlinepkg.ChecksumSHA256(manifestCanonical)
+	canonical, _ := offlinepkg.CanonicalBytes(ts.manifest)
+	ts.manifest.ChecksumSHA256 = offlinepkg.ChecksumSHA256(canonical)
 	signManifest(ts.manifest)
 
 	clock := fakeClock(time.Now())
@@ -681,43 +661,29 @@ func TestSyncReport_Fields(t *testing.T) {
 	ts := newTestServer(t, "KL")
 	defer ts.Server.Close()
 
-	ts.card = &offlinepkg.PublicIncidentCard{
-		SchemaVersion: "3.0", PackageID: "pkg-x", Version: 3,
-		Jurisdiction: "KL", EvidenceClass: "public-incident",
-		EffectiveAt: "2024-01-01T00:00:00Z", ExpiresAt: "2099-01-01T00:00:00Z",
-		Alert:            offlinepkg.AlertCard{Identifier: "a", Sender: "s", Headline: "h"},
-		AllocationPolicy: offlinepkg.PolicyCard{Order: []string{}},
-	}
+	ts.card = makeTestCard(t)
+	ts.card.PackageID = "pkg-x"
+	ts.card.Version = 3
+	ts.card.Alert.Identifier = "a"
+	ts.card.Alert.Sender = "s"
+	ts.card.Alert.Headline = "h"
 	ts.card.ChecksumSHA256 = ""
 	cardCanonical, _ := offlinepkg.CanonicalBytes(ts.card)
 	ts.card.ChecksumSHA256 = offlinepkg.ChecksumSHA256(cardCanonical)
 	signCard(ts.card)
 
-	ts.manifest = &offlinepkg.Manifest{
-		SchemaVersion: "3.0",
-		ManifestID:    "manifest-kl-5",
-		Jurisdiction:  "KL",
-		Revision:      5,
-		GeneratedAt:   "2024-01-01T00:00:00Z",
-		ValidUntil:    "2099-01-01T00:00:00Z",
-		SourceStatus:  "active",
-		CriticalCard: offlinepkg.CriticalCardDescriptor{
-			PackageID: "pkg-x", Version: 3,
-			URI:            "/api/v3/packages/pkg-x/versions/3",
-			ChecksumSHA256: ts.card.ChecksumSHA256,
-		},
-		Revocations: offlinepkg.RevocationBlock{
-			RevokedPackages:    []string{"revoked-pkg"},
-			CancelledRoutes:    []string{"cancelled-route"},
-			SupersededVersions: []offlinepkg.SupersededVersion{{PackageID: "old-pkg", Version: 1}},
-		},
-		Provenance: offlinepkg.ManifestProvenance{
-			Authority: "gov.my.dpd", DatasetID: "x", EvidenceClass: "y",
-		},
+	ts.manifest = makeTestManifest(t, 5, ts.card.ChecksumSHA256)
+	ts.manifest.CriticalCard.PackageID = "pkg-x"
+	ts.manifest.CriticalCard.Version = 3
+	ts.manifest.CriticalCard.URI = "/api/v3/packages/pkg-x/versions/3"
+	ts.manifest.Revocations = offlinepkg.RevocationBlock{
+		RevokedPackages:    []string{"revoked-pkg"},
+		CancelledRoutes:    []string{"cancelled-route"},
+		SupersededVersions: []offlinepkg.SupersededVersion{{PackageID: "old-pkg", Version: 1}},
 	}
 	ts.manifest.ChecksumSHA256 = ""
-	manifestCanonical, _ := offlinepkg.CanonicalBytes(ts.manifest)
-	ts.manifest.ChecksumSHA256 = offlinepkg.ChecksumSHA256(manifestCanonical)
+	canonical, _ := offlinepkg.CanonicalBytes(ts.manifest)
+	ts.manifest.ChecksumSHA256 = offlinepkg.ChecksumSHA256(canonical)
 	signManifest(ts.manifest)
 
 	clock := fakeClock(time.Now())
@@ -811,39 +777,21 @@ func TestSync_CardNeedsFetch_PkgChange(t *testing.T) {
 	ts2 := newTestServer(t, "KL")
 	defer ts2.Server.Close()
 
-	ts2.card = &offlinepkg.PublicIncidentCard{
-		SchemaVersion: "3.0", PackageID: "pkg-a", Version: 2,
-		Jurisdiction: "KL", EvidenceClass: "public-incident",
-		EffectiveAt: "2024-01-01T00:00:00Z", ExpiresAt: "2099-01-01T00:00:00Z",
-		Alert:            offlinepkg.AlertCard{Identifier: "a", Sender: "s", Headline: "h v2"},
-		AllocationPolicy: offlinepkg.PolicyCard{Order: []string{}},
-	}
+	ts2.card = makeTestCard(t)
+	ts2.card.Version = 2
+	ts2.card.Alert.Headline = "h v2"
 	ts2.card.ChecksumSHA256 = ""
 	cardCanonical, _ := offlinepkg.CanonicalBytes(ts2.card)
 	ts2.card.ChecksumSHA256 = offlinepkg.ChecksumSHA256(cardCanonical)
 	signCard(ts2.card)
 
-	ts2.manifest = &offlinepkg.Manifest{
-		SchemaVersion: "3.0",
-		ManifestID:    "manifest-kl-2",
-		Jurisdiction:  "KL",
-		Revision:      2,
-		GeneratedAt:   "2024-01-01T00:00:00Z",
-		ValidUntil:    "2099-01-01T00:00:00Z",
-		SourceStatus:  "active",
-		CriticalCard: offlinepkg.CriticalCardDescriptor{
-			PackageID: "pkg-a", Version: 2,
-			URI:            "/api/v3/packages/pkg-a/versions/2",
-			ChecksumSHA256: ts2.card.ChecksumSHA256,
-		},
-		Revocations: offlinepkg.RevocationBlock{},
-		Provenance: offlinepkg.ManifestProvenance{
-			Authority: "gov.my.dpd", DatasetID: "x", EvidenceClass: "y",
-		},
-	}
+	ts2.manifest = makeTestManifest(t, 2, ts2.card.ChecksumSHA256)
+	ts2.manifest.CriticalCard.PackageID = "pkg-a"
+	ts2.manifest.CriticalCard.Version = 2
+	ts2.manifest.CriticalCard.URI = "/api/v3/packages/pkg-a/versions/2"
 	ts2.manifest.ChecksumSHA256 = ""
-	manifestCanonical, _ := offlinepkg.CanonicalBytes(ts2.manifest)
-	ts2.manifest.ChecksumSHA256 = offlinepkg.ChecksumSHA256(manifestCanonical)
+	canonical, _ := offlinepkg.CanonicalBytes(ts2.manifest)
+	ts2.manifest.ChecksumSHA256 = offlinepkg.ChecksumSHA256(canonical)
 	signManifest(ts2.manifest)
 
 	c2 := newClient(t, ts2.URL, dir, clock)
@@ -888,29 +836,11 @@ func TestSupersededTombstone(t *testing.T) {
 	ts.card = makeTestCard(t)
 	signCard(ts.card)
 
-	ts.manifest = &offlinepkg.Manifest{
-		SchemaVersion: "3.0",
-		ManifestID:    "manifest-kl-1",
-		Jurisdiction:  "KL",
-		Revision:      1,
-		GeneratedAt:   "2024-01-01T00:00:00Z",
-		ValidUntil:    "2099-01-01T00:00:00Z",
-		SourceStatus:  "active",
-		CriticalCard: offlinepkg.CriticalCardDescriptor{
-			PackageID: "pkg-a", Version: 1,
-			URI:            "/api/v3/packages/pkg-a/versions/1",
-			ChecksumSHA256: ts.card.ChecksumSHA256,
-		},
-		Revocations: offlinepkg.RevocationBlock{
-			SupersededVersions: []offlinepkg.SupersededVersion{{PackageID: "old", Version: 1}},
-		},
-		Provenance: offlinepkg.ManifestProvenance{
-			Authority: "gov.my.dpd", DatasetID: "x", EvidenceClass: "y",
-		},
-	}
+	ts.manifest = makeTestManifest(t, 1, ts.card.ChecksumSHA256)
+	ts.manifest.Revocations.SupersededVersions = []offlinepkg.SupersededVersion{{PackageID: "old", Version: 1}}
 	ts.manifest.ChecksumSHA256 = ""
-	manifestCanonical, _ := offlinepkg.CanonicalBytes(ts.manifest)
-	ts.manifest.ChecksumSHA256 = offlinepkg.ChecksumSHA256(manifestCanonical)
+	canonical, _ := offlinepkg.CanonicalBytes(ts.manifest)
+	ts.manifest.ChecksumSHA256 = offlinepkg.ChecksumSHA256(canonical)
 	signManifest(ts.manifest)
 
 	clock := fakeClock(time.Now())
