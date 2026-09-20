@@ -90,6 +90,10 @@ To allow five implementation agents to execute in parallel without merge conflic
 - `offlinequeue` depends only on `contracts` and standard library.
 - Integration Agent wires components together at `httpserver` and integration test layers.
 
+### 2.3 Stdlib-Only and No Shared Mutable Globals
+- **Stdlib only.** All five agents implement against the Go standard library only (`crypto/ed25519`, `crypto/sha256`, `encoding/json`, `net/http`, `os`, `path/filepath`, `archive/*`, `compress/gzip`, `sync`, `time`, `log/slog`, etc.). No new third-party modules are added by P5; the integration agent adds **nothing** to `backend/go.mod` or `backend/go.sum` for P5 work. If an agent finds a real need for an external module it returns a blocker rather than silently adding a dependency.
+- **No shared mutable globals.** Each package's state lives behind explicit values passed at construction (e.g., `NewClient(cfg)`, `NewHandler(src, logger)`, `NewReplayWorker(store, dispatcher, now)`) or behind per-request scopes. Nothing in `offlinepkg`/`offlinedelivery`/`offlineclient`/`offlineresources`/`offlinequeue` declares a package-level mutable variable (no `var foo = ...` initialization). Tests construct fresh instances per case; clock is injected (`now func() time.Time`) rather than read directly from `time.Now`.
+
 ---
 
 ## 3. Wire Formats & Schemas
@@ -390,6 +394,15 @@ Errors adhere to `backend/internal/contracts/envelope.go`:
   ]
 }
 ```
+
+### 6.5 OpenAPI Reconciliation
+The existing `backend/contracts/openapi.yaml` documents the P1/P4 `/api/v3` slice — `health/{live,ready}`, `voice/commands`, `sessions`, `places/resolve`, `guidance/query`, `reservations[/...]`, `operations/...` — plus the `Envelope`, `APIError`, `VoiceCommandRequest`, `ModelOutput` and `Action` schemas (lines 22–549 at CLEAN `4b2b08f`). P5 APPENDS three new path groups under the same `/api/v3` prefix:
+
+- `/regions/{id}/manifest`
+- `/packages/{id}/versions/{version}`
+- `/resources/{id}`
+
+The integration agent writes a strict **additive** diff: no existing path, schema, error code, parameter or response is changed. New paths and their request/response schemas appear in the `paths:` and `components/schemas:` blocks alongside the existing entries; the document's top-level `openapi`, `info.version`, `info.description` and the `servers` entry are untouched. The same `Envelope`/`APIError` shapes defined by `backend/internal/contracts/envelope.go` are reused, not redefined. Manifest and card responses are documented as **raw JSON artifacts** (not wrapped in `Envelope`) because they are immutable versioned files; manifest HTTP errors and resource 4xx/5xx paths use the standard `Envelope`/`APIError` shapes.
 
 ---
 
@@ -841,3 +854,5 @@ All offline download and resumption tests must be executed and verified under th
 ## 10. Document Revision History
 
 - **2026-09-20:** Initial P5 shared implementation contract created. Fixed interfaces, wire types, cryptography, and test matrix for Agents 1–5.
+- **2026-09-20 (freeze):** Status set to REVIEWED CONTRACT (common baseline for Agents 1–5) at CLEAN `91a743c`. No technical changes.
+- **2026-09-20 (amend):** Added §2.3 (stdlib-only + no shared mutable globals) and §6.5 (additive OpenAPI reconciliation) to make requirements 4, 7 and 8 explicit. No other edits.
