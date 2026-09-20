@@ -80,10 +80,10 @@ type Config struct {
 // DefaultConfig returns safe, bounded production defaults.
 func DefaultConfig() Config {
 	return Config{
-		MaxCardBytes:     1 << 20,       // 1 MiB
-		MaxManifestBytes: 256 << 10,     // 256 KiB
-		MaxResourceBytes: 100 << 20,     // 100 MiB
-		StreamChunkSize:  32 << 10,      // 32 KiB
+		MaxCardBytes:     1 << 20,   // 1 MiB
+		MaxManifestBytes: 256 << 10, // 256 KiB
+		MaxResourceBytes: 100 << 20, // 100 MiB
+		StreamChunkSize:  32 << 10,  // 32 KiB
 		ManifestCacheTTL: 10 * time.Second,
 		CardCacheTTL:     10 * time.Minute,
 	}

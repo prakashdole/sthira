@@ -9,8 +9,8 @@ import (
 )
 
 var (
-	errNoRangeHeader     = errors.New("range: header not present")
-	errInvalidRange      = errors.New("range: invalid range syntax")
+	errNoRangeHeader      = errors.New("range: header not present")
+	errInvalidRange       = errors.New("range: invalid range syntax")
 	errRangeUnsatisfiable = errors.New("range: unsatisfiable range")
 )
 

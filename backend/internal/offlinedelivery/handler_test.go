@@ -401,7 +401,10 @@ func TestInvalidIdentifiers(t *testing.T) {
 	}
 
 	// Negative/zero version
-	resp2, _ := http.Get(srv.URL + "/api/v3/packages/PKG-1/versions/0")
+	resp2, err := http.Get(srv.URL + "/api/v3/packages/PKG-1/versions/0")
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request for zero version, got %d", resp2.StatusCode)
