@@ -107,6 +107,16 @@ func New(cfg Config, opts ...Option) *Server {
 	mux.HandleFunc("/health/live", s.withRequestID(s.handleLive))
 	mux.HandleFunc("/health/ready", s.withRequestID(s.handleReady))
 	mux.HandleFunc("/api/v3/voice/commands", s.withRequestID(s.handleVoiceCommands))
+
+	// P4 citizen destination/stay routes. Public reads need no session; writes
+	// and the private read path require a live citizen session (Bearer token).
+	mux.HandleFunc("/api/v3/sessions", s.withRequestID(s.handleCreateSession))
+	mux.HandleFunc("/api/v3/places/resolve", s.withRequestID(s.handleResolvePlace))
+	mux.HandleFunc("/api/v3/guidance/query", s.withRequestID(s.handleGuidanceQuery))
+	mux.HandleFunc("/api/v3/reservations", s.withRequestID(s.withSession(s.handleCreateReservation)))
+	mux.HandleFunc("/api/v3/reservations/{id}", s.withRequestID(s.withSession(s.handleGetReservation)))
+	mux.HandleFunc("/api/v3/reservations/{id}/events", s.withRequestID(s.withSession(s.handleStayEvent)))
+
 	// Test-only crash fault-injection endpoint; a no-op unless built with the
 	// `crashtest` tag. Never present in production builds.
 	s.registerCrashHook(mux)

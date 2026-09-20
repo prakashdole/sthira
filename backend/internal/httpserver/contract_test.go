@@ -1,0 +1,51 @@
+package httpserver
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+// TestServedRoutesMatchOpenAPI asserts every path the OpenAPI contract
+// documents is actually routed by the server (a wrong-method request returns
+// 405, not 404). This catches a contract/implementation drift where the spec
+// names an endpoint the server does not serve. It does not exercise behavior;
+// the real-DB suite covers that.
+func TestServedRoutesMatchOpenAPI(t *testing.T) {
+	// Paths from contracts/openapi.yaml, with the wrong method to trigger 405.
+	cases := []struct {
+		path       string
+		wrongVerb  string
+		wantStatus int
+	}{
+		{"/api/v3/health/live", http.MethodPost, http.StatusMethodNotAllowed},
+		{"/api/v3/health/ready", http.MethodPost, http.StatusMethodNotAllowed},
+		{"/api/v3/voice/commands", http.MethodGet, http.StatusMethodNotAllowed},
+		{"/api/v3/sessions", http.MethodGet, http.StatusMethodNotAllowed},
+		{"/api/v3/places/resolve", http.MethodGet, http.StatusMethodNotAllowed},
+		{"/api/v3/guidance/query", http.MethodGet, http.StatusMethodNotAllowed},
+		{"/api/v3/reservations", http.MethodGet, http.StatusMethodNotAllowed},
+		{"/api/v3/reservations/STAY-x", http.MethodDelete, http.StatusMethodNotAllowed},
+		{"/api/v3/reservations/STAY-x/events", http.MethodGet, http.StatusMethodNotAllowed},
+	}
+	srv := httptest.NewServer(newTestServer().Handler())
+	defer srv.Close()
+
+	for _, tc := range cases {
+		req, err := http.NewRequest(tc.wrongVerb, srv.URL+tc.path, strings.NewReader("{}"))
+		if err != nil {
+			t.Fatalf("build request: %v", err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", tc.wrongVerb, tc.path, err)
+		}
+		resp.Body.Close()
+		// 405 means the path is routed but the method is wrong (expected). 404
+		// means the path is not routed at all — contract drift.
+		if resp.StatusCode == http.StatusNotFound {
+			t.Errorf("%s: documented path not routed (404)", tc.path)
+		}
+	}
+}

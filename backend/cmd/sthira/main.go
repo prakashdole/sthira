@@ -35,6 +35,9 @@ func main() {
 	cfg := httpserver.DefaultConfig(addr)
 	opts := []httpserver.Option{httpserver.WithLogger(logger)}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	// Durable storage. When a DSN is provided, open the store and wire the
 	// migration-aware readiness prober; otherwise readiness stays BLOCKED.
 	var st *store.Store
@@ -51,6 +54,12 @@ func main() {
 			httpserver.WithStore(st),
 		)
 		logger.Info("durable store wired", "schema_revision", store.SchemaRevision)
+
+		// Bounded, retry-safe expiry worker: expires RESERVED holds past their
+		// expiry so held capacity returns to free. Runs against the DB (not a
+		// process-local lock) so it races safely with arrival/transfer.
+		expiry := store.NewExpiryWorker(st, store.NewStayStore(store.ChainAuditor{}))
+		go expiry.Run(ctx)
 	} else {
 		logger.Info("no STHIRA_DATABASE_DSN; foundation mode, readiness BLOCKED")
 	}
@@ -74,9 +83,6 @@ func main() {
 	}
 
 	srv := httpserver.New(cfg, opts...)
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	if err := srv.Serve(ctx); err != nil {
 		logger.Error("server exited", "error", err)

@@ -3,16 +3,20 @@ info:
   title: Sthira /api/v3 boundary
   version: 3.0.0
   description: >-
-    Frozen P1 contract slice for the Go backend. This documents the implemented
-    health and middle-model validation boundary only. Destination, reservation,
-    package, place-resolution and speech endpoints are later phases (P2–P6) and
-    are intentionally absent. All operational facts carry source provenance,
+    Contract for the Go backend. Documents the implemented health and
+    middle-model validation boundary plus the P4 citizen destination/stay slice
+    (sessions, place resolution, eligible-destination query, reservations and
+    stay events). Package import/review/publish and speech endpoints are later
+    phases and remain absent. All operational facts carry source provenance,
     evidence class and version; unknown is distinct from empty, zero or current.
+    The P4 addition is deliberate: the P1 slice deferred these endpoints to a
+    later phase; P4 implements the citizen stay flows.
 servers:
   - url: /api/v3
 tags:
   - name: health
   - name: voice
+  - name: stay
 paths:
   /health/live:
     get:
@@ -56,7 +60,174 @@ paths:
         '413': { $ref: '#/components/responses/ErrorEnvelope' }
         '415': { $ref: '#/components/responses/ErrorEnvelope' }
         '422': { $ref: '#/components/responses/ErrorEnvelope' }
+  /sessions:
+    post:
+      tags: [stay]
+      summary: Issue a citizen session
+      description: >-
+        Account-free citizen session issuance (R22): no civil identity is
+        required. Returns an unguessable bearer token once; only its SHA-256
+        hash is stored. Sessions expire and can be revoked. Public.
+      responses:
+        '201': { $ref: '#/components/responses/DataEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /places/resolve:
+    post:
+      tags: [stay]
+      summary: Resolve a place by alias or admin ID
+      description: >-
+        Jurisdiction-aware resolution from known aliases/admin IDs. Multiple
+        candidates yield AMBIGUOUS_PLACE with candidate IDs; unknown yields
+        NOT_FOUND. No LLM geocode. Public.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jurisdiction, query]
+              properties:
+                jurisdiction: { type: string }
+                query: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /guidance/query:
+    post:
+      tags: [stay]
+      summary: Read-only eligible destination query
+      description: >-
+        Read-only preview of eligible destinations for a party and half-open
+        date range. Unknown capacity is reported as unknown and never promised.
+        The operational route gate is closed while route authority (O05) is
+        open; no destination is route-verified for operational use. Performs no
+        write. Public.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jurisdiction, package_id, party_size, start_date, end_date]
+              properties:
+                jurisdiction: { type: string }
+                package_id: { type: string }
+                party_size: { type: integer, minimum: 1 }
+                start_date: { type: string, format: date }
+                end_date: { type: string, format: date }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /reservations:
+    post:
+      tags: [stay]
+      summary: Create an explicit reservation
+      description: >-
+        Explicit confirmed choice, separate from the read-only preview. Binds
+        facility+route+source snapshot+party size and revalidates the source
+        snapshot version at commit (STALE_VERSION on drift). Idempotency-keyed;
+        a capacity conflict is a recoverable CAPACITY_CONFLICT and never
+        silently substitutes another destination. Requires a citizen session.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [facility_id, package_id, party_size, start_date, end_date, idempotency_key, snapshot_version]
+              properties:
+                facility_id: { type: string }
+                package_id: { type: string }
+                route_id: { type: string }
+                party_size: { type: integer, minimum: 1 }
+                start_date: { type: string, format: date }
+                end_date: { type: string, format: date }
+                idempotency_key: { type: string }
+                snapshot_version: { type: integer }
+      responses:
+        '201': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '401': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /reservations/{id}:
+    get:
+      tags: [stay]
+      summary: Read own reservation/stay (restart recovery)
+      description: >-
+        Authenticated owner-only read of a reservation/stay by stay or
+        reservation ID; the authenticated read path to recover state after a
+        restart. Knowing the ID is not authorization (R22). Private, no-store.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '401': { $ref: '#/components/responses/ErrorEnvelope' }
+        '403': { $ref: '#/components/responses/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /reservations/{id}/events:
+    post:
+      tags: [stay]
+      summary: Apply a typed stay event
+      description: >-
+        Typed event ARRIVE/CANCEL/DEPART/EXTEND/TRANSFER on an owned stay.
+        Arrival requires explicit citizen confirmation (R14). Idempotency-keyed;
+        capacity conservation holds across every event. Requires the owning
+        citizen session.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, idempotency_key]
+              properties:
+                type: { type: string, enum: [ARRIVE, CANCEL, DEPART, EXTEND, TRANSFER] }
+                idempotency_key: { type: string }
+                new_end_date: { type: string, format: date }
+                new_facility_id: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '401': { $ref: '#/components/responses/ErrorEnvelope' }
+        '403': { $ref: '#/components/responses/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
   responses:
     DataEnvelope:
       description: Success envelope; exactly `data` is populated.
