@@ -779,6 +779,115 @@ func TestHTTPPrivateDataNotInPublicOutput(t *testing.T) {
 // noSleepHTTP is the worker sleep used by integration tests.
 func noSleepHTTP(_ context.Context, _ time.Duration) error { return nil }
 
+// TestHTTPReconciliationPreservesExactlyOneCommitment: the strongest
+// regression for Area F. The flow:
+//
+//  1. The queue dispatches the reservation; the SERVER commits, but the
+//     client-side dispatcher reports a transport error so the queue
+//     transitions to PENDING_RECONCILIATION. The response is genuinely
+//     lost — no manual duplicate POST after acknowledged success.
+//  2. The client "restarts": a fresh store + worker against the same
+//     queue directory, with a clock advanced past the selection expiry.
+//  3. The new worker drains; the entry surfaces as PENDING_RECONCILIATION
+//     in PeekPending. The worker replays with the SAME idempotency key.
+//  4. The server's idempotency store resolves the duplicate and returns
+//     200 OK with the original committed reservation. The queue marks
+//     COMMITTED.
+//
+// The critical assertion: held capacity on the facility for the affected
+// date is exactly 1 — the server did not double-commit, and the queue did
+// not create a replacement. A manual duplicate POST after acknowledged
+// success would NOT prove queue recovery because the server is already
+// idempotent on its own; this test exercises the queue's "I do not know
+// the server's verdict, so I must ask with my own key/payload" path.
+func TestHTTPReconciliationPreservesExactlyOneCommitment(t *testing.T) {
+	_, ts, st, cleanup := disposableServer(t)
+	t.Cleanup(cleanup)
+	pkgID, facID, snap := seedRealPackage(t, st, 2, httpDayT(1), httpDayT(3))
+	_, token := createSession(t, ts)
+
+	heldBefore := countInventory(t, st.DB(), facID, httpDayT(1), "held")
+
+	// Queue #1: dispatch once, response lost after server commit.
+	dir := t.TempDir()
+	clock := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	s1, _ := NewStore(dir, fixedClock(clock))
+	tokens := NewMemoryTokenStore()
+	tokens.Put("session-A", token)
+	drop := &dropAfterCommitDispatcher{Inner: NewHTTPClientDispatcher(ts.URL, ts.Client())}
+	w1, _ := NewReplayWorker(s1, drop, tokens, ReplayConfig{
+		MaxAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond, PerCallTimeout: 5 * time.Second,
+	}, fixedClock(clock))
+	w1.SetSleep(noSleepHTTP)
+	op := buildOp("OP-RECON", "key-recon-real",
+		reservationBody(facID, pkgID, 2, httpDay(1), httpDay(2), "key-recon-real", snap),
+		snap, "session-A", clock.Add(15*time.Minute))
+	if err := s1.Enqueue(t.Context(), op); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	outcome1, err := w1.Submit(t.Context(), op)
+	if err != nil {
+		t.Fatalf("first Submit: %v", err)
+	}
+	if outcome1 != outcomePendingReconciliation {
+		t.Fatalf("first outcome: got %v, want outcomePendingReconciliation (response lost)", outcome1)
+	}
+	// The server actually committed even though the queue did not see 2xx.
+	heldAfterDrop := countInventory(t, st.DB(), facID, httpDayT(1), "held")
+	if heldAfterDrop != heldBefore+2 {
+		t.Fatalf("server-side capacity after lost response: held before=%d after=%d, want +2",
+			heldBefore, heldAfterDrop)
+	}
+	after1, _ := s1.Get(t.Context(), "OP-RECON")
+	if after1.State != StatePendingReconciliation {
+		t.Fatalf("entry state after drop: got %s, want PENDING_RECONCILIATION", after1.State)
+	}
+
+	// Restart with a clock advanced past SelectionExpiry (15 min → +1h).
+	clock2 := clock.Add(1 * time.Hour)
+	s2, _ := NewStore(dir, fixedClock(clock2))
+	w2, _ := NewReplayWorker(s2, NewHTTPClientDispatcher(ts.URL, ts.Client()), tokens, ReplayConfig{
+		MaxAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond, PerCallTimeout: 5 * time.Second,
+	}, fixedClock(clock2))
+	w2.SetSleep(noSleepHTTP)
+	// DrainQueue picks up the PENDING_RECONCILIATION entry because
+	// PeekPending now includes it. The queue's only dispatch in this drain
+	// confirms the prior server-side commit (idempotent 200 OK) and the
+	// entry lands in COMMITTED.
+	rep, err := w2.DrainQueue(t.Context())
+	if err != nil {
+		t.Fatalf("DrainQueue: %v", err)
+	}
+	if rep.Processed != 1 {
+		t.Fatalf("processed: got %d, want 1", rep.Processed)
+	}
+	if rep.Committed != 1 {
+		t.Fatalf("Committed counter: got %d, want 1 (replay resolved PENDING_RECONCILIATION)", rep.Committed)
+	}
+	if rep.Stale != 0 || rep.Failed != 0 || rep.Reconciliation != 0 || rep.Skipped != 0 {
+		t.Fatalf("unexpected non-committed counters: stale=%d failed=%d recon=%d skipped=%d",
+			rep.Stale, rep.Failed, rep.Reconciliation, rep.Skipped)
+	}
+	after2, _ := s2.Get(t.Context(), "OP-RECON")
+	if after2.State != StateCommitted {
+		t.Fatalf("entry state after reconcile: got %s, want COMMITTED", after2.State)
+	}
+
+	// Critical assertion: held capacity is still heldBefore+2. The server's
+	// idempotency store replayed the same commitment; the queue did NOT
+	// double-commit and did NOT create a replacement operation.
+	heldFinal := countInventory(t, st.DB(), facID, httpDayT(1), "held")
+	if heldFinal != heldBefore+2 {
+		t.Fatalf("reconciliation leaked capacity: held before=%d after-drop=%d final=%d, want +2 then unchanged",
+			heldBefore, heldAfterDrop, heldFinal)
+	}
+	// And the queue directory holds exactly one entry.
+	all, _ := s2.List(t.Context())
+	if len(all) != 1 {
+		t.Fatalf("queue entries: got %d, want 1 (no replacement created)", len(all))
+	}
+}
+
 // recordingHTTPDispatcher wraps a real dispatcher and counts calls. Used in
 // tests that must prove the worker did NOT contact the server (e.g., expired
 // selection path).
@@ -803,4 +912,30 @@ func countInventory(t *testing.T, db *sql.DB, facID string, day time.Time, colum
 		t.Fatalf("count inventory: %v", err)
 	}
 	return v
+}
+
+// dropAfterCommitDispatcher wraps a real HTTPDispatcher and, on its FIRST
+// call only, lets the underlying transport complete the HTTP round-trip so
+// the server actually commits, but then reports a transport error to the
+// queue — simulating a response lost between the server and the client
+// after a successful commit. Every subsequent call is forwarded unchanged
+// so the queue can reconcile by replay.
+type dropAfterCommitDispatcher struct {
+	Inner    HTTPDispatcher
+	calls    int32
+	realBody []byte
+	realCode int
+}
+
+func (r *dropAfterCommitDispatcher) PostJSON(ctx context.Context, method, path, token string, body []byte) (int, []byte, error) {
+	n := atomic.AddInt32(&r.calls, 1)
+	status, b, err := r.Inner.PostJSON(ctx, method, path, token, body)
+	if n == 1 {
+		// First call: the server has been hit and may have committed. Hide
+		// the response from the queue so it transitions to PENDING_RECONCILIATION.
+		r.realBody = append([]byte(nil), b...)
+		r.realCode = status
+		return 0, nil, errors.New("simulated connection reset after server commit")
+	}
+	return status, b, err
 }

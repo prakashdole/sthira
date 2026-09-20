@@ -495,3 +495,278 @@ func readFile(t *testing.T, path string) ([]byte, error) {
 	// Local helper to avoid an extra import in queue_test.go.
 	return readFileOS(path)
 }
+
+// TestUncertainOutcome_ReconciliationReplay: when a network drop occurs during
+// submission, the operation transitions to StatePendingReconciliation.
+// When subsequently replayed after local selection has expired, the worker
+// does NOT fail stale locally; it contacts the server with the identical
+// idempotency key and commits upon 2xx replay.
+func TestUncertainOutcome_ReconciliationReplay(t *testing.T) {
+	enqueueAt := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
+	clock := enqueueAt
+	nowFn := func() time.Time { return clock }
+
+	d := newRecordingDispatcher(t)
+	tokens := NewMemoryTokenStore()
+	tokens.Put("session-A", "tok-A")
+	w, s := newTestWorker(t, d, tokens, nowFn)
+
+	op := validOp(enqueueAt)
+	op.SelectionExpiry = enqueueAt.Add(15 * time.Minute)
+	if err := s.Enqueue(context.Background(), op); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// 1. First attempt fails due to connection drop / network error
+	d.respond = func(call int, status int, body string, err error) (int, []byte, error) {
+		return 0, nil, errors.New("connection reset by peer")
+	}
+
+	_, _ = w.Submit(context.Background(), op)
+
+	// Verify the operation transitioned to StatePendingReconciliation
+	afterDrop, err := s.Get(context.Background(), op.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if afterDrop.State != StatePendingReconciliation {
+		t.Fatalf("state after drop: got %s, want %s", afterDrop.State, StatePendingReconciliation)
+	}
+
+	// 2. Advance clock by 1 hour (past SelectionExpiry of 15 min)
+	clock = enqueueAt.Add(1 * time.Hour)
+
+	// Server is now reachable and confirms the reservation (200 OK)
+	d.respond = func(call int, status int, body string, err error) (int, []byte, error) {
+		return 200, []byte(`{"reservation_id":"RES-RECONCILED","stay_id":"STAY-RECONCILED"}`), nil
+	}
+
+	outcome, err := w.Submit(context.Background(), afterDrop)
+	if err != nil {
+		t.Fatalf("Submit reconciliation: %v", err)
+	}
+	if outcome != outcomeCommitted {
+		t.Fatalf("outcome: got %v, want outcomeCommitted", outcome)
+	}
+
+	afterReconcile, err := s.Get(context.Background(), op.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if afterReconcile.State != StateCommitted {
+		t.Fatalf("state after reconciliation: got %s, want %s", afterReconcile.State, StateCommitted)
+	}
+}
+
+// TestReconciliationSnapshotDriftFailsStale: the previous dispatch's outcome
+// is unknown, the local selection has expired, but the server is reachable.
+// The server returns 409 STALE_VERSION. The queue transitions the uncertain
+// entry to FAILED_STALE — the queue must NOT fail-closed locally without
+// asking the server, even though the local clock says the selection has
+// expired.
+func TestReconciliationSnapshotDriftFailsStale(t *testing.T) {
+	enqueueAt := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
+	clock := enqueueAt
+	nowFn := func() time.Time { return clock }
+
+	d := newRecordingDispatcher(t)
+	tokens := NewMemoryTokenStore()
+	tokens.Put("session-A", "tok-A")
+	w, s := newTestWorker(t, d, tokens, nowFn)
+
+	op := validOp(enqueueAt)
+	op.SelectionExpiry = enqueueAt.Add(15 * time.Minute)
+	if err := s.Enqueue(context.Background(), op); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// 1. First Submit: transport failure → PENDING_RECONCILIATION.
+	d.respond = func(call int, status int, body string, err error) (int, []byte, error) {
+		return 0, nil, errors.New("connection reset by peer")
+	}
+	if _, err := w.Submit(context.Background(), op); err != nil {
+		t.Fatalf("first Submit: %v", err)
+	}
+
+	// 2. Advance the clock past SelectionExpiry (15 min) by 1 hour.
+	clock = enqueueAt.Add(1 * time.Hour)
+
+	// 3. Server now reachable, returns 409 STALE_VERSION.
+	d.respond = func(call int, status int, body string, err error) (int, []byte, error) {
+		return 409, []byte(`{"errors":[{"code":"STALE_VERSION","message":"package expired"}]}`), nil
+	}
+	outcome, err := w.Submit(context.Background(), op)
+	if err != nil {
+		t.Fatalf("second Submit: %v", err)
+	}
+	if outcome != outcomeStale {
+		t.Fatalf("outcome: got %v, want outcomeStale", outcome)
+	}
+
+	after, err := s.Get(context.Background(), op.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if after.State != StateFailedStale {
+		t.Fatalf("state: got %s, want FAILED_STALE", after.State)
+	}
+	if after.LastStatusCode != 409 {
+		t.Fatalf("status: got %d, want 409", after.LastStatusCode)
+	}
+	// The server must have been contacted even though the local selection
+	// window had expired; an outcomeStale driven by a local clock signal
+	// would have skipped the call.
+	if got := len(d.callsSnapshot()); got != 2 {
+		t.Fatalf("dispatch count: got %d, want 2 (first drop, second stale confirmation)", got)
+	}
+}
+
+// TestReconciliationPermanentRejection: the previous dispatch's outcome is
+// unknown; on replay the server definitively rejects the same idempotency
+// key (e.g. an admin-issued IDEMPOTENCY_CONFLICT because the payload no
+// longer matches what the server holds). The queue transitions the
+// uncertain entry to FAILED_PERM.
+func TestReconciliationPermanentRejection(t *testing.T) {
+	enqueueAt := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
+	clock := enqueueAt
+	nowFn := func() time.Time { return clock }
+
+	d := newRecordingDispatcher(t)
+	tokens := NewMemoryTokenStore()
+	tokens.Put("session-A", "tok-A")
+	w, s := newTestWorker(t, d, tokens, nowFn)
+
+	op := validOp(enqueueAt)
+	op.SelectionExpiry = enqueueAt.Add(15 * time.Minute)
+	if err := s.Enqueue(context.Background(), op); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// 1. First Submit: connection drop → PENDING_RECONCILIATION.
+	d.respond = func(call int, status int, body string, err error) (int, []byte, error) {
+		return 0, nil, errors.New("connection reset by peer")
+	}
+	if _, err := w.Submit(context.Background(), op); err != nil {
+		t.Fatalf("first Submit: %v", err)
+	}
+
+	// 2. Advance clock past SelectionExpiry.
+	clock = enqueueAt.Add(1 * time.Hour)
+
+	// 3. Server now returns 409 IDEMPOTENCY_CONFLICT.
+	d.respond = func(call int, status int, body string, err error) (int, []byte, error) {
+		return 409, []byte(`{"errors":[{"code":"IDEMPOTENCY_CONFLICT","message":"payload mismatch"}]}`), nil
+	}
+	outcome, err := w.Submit(context.Background(), op)
+	if err != nil {
+		t.Fatalf("second Submit: %v", err)
+	}
+	if outcome != outcomePerm {
+		t.Fatalf("outcome: got %v, want outcomePerm", outcome)
+	}
+
+	after, _ := s.Get(context.Background(), op.ID)
+	if after.State != StateFailedPerm {
+		t.Fatalf("state: got %s, want FAILED_PERM", after.State)
+	}
+	if after.LastStatusCode != 409 {
+		t.Fatalf("status: got %d, want 409", after.LastStatusCode)
+	}
+}
+
+// TestReconciliationRepeatedDrops: when reconciliation replays and the
+// network is still down, the entry stays in PENDING_RECONCILIATION. The
+// queue does NOT exhaust retries trying to "find out" — each retry would
+// either hit the same outage or duplicate-commit on a previously-committed
+// server-side hold.
+func TestReconciliationRepeatedDrops(t *testing.T) {
+	enqueueAt := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
+	clock := enqueueAt
+	nowFn := func() time.Time { return clock }
+
+	d := newRecordingDispatcher(t)
+	tokens := NewMemoryTokenStore()
+	tokens.Put("session-A", "tok-A")
+	w, s := newTestWorker(t, d, tokens, nowFn)
+
+	op := validOp(enqueueAt)
+	op.SelectionExpiry = enqueueAt.Add(15 * time.Minute)
+	if err := s.Enqueue(context.Background(), op); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Dispatcher always returns connection drop.
+	d.respond = func(call int, status int, body string, err error) (int, []byte, error) {
+		return 0, nil, errors.New("connection reset by peer")
+	}
+
+	// First Submit: PENDING_RECONCILIATION.
+	if _, err := w.Submit(context.Background(), op); err != nil {
+		t.Fatalf("first Submit: %v", err)
+	}
+	after1, _ := s.Get(context.Background(), op.ID)
+	if after1.State != StatePendingReconciliation {
+		t.Fatalf("after first drop: got %s, want PENDING_RECONCILIATION", after1.State)
+	}
+	firstCalls := len(d.callsSnapshot())
+
+	// Second Submit (still down): must remain PENDING_RECONCILIATION,
+	// must NOT have exhausted MaxAttempts retries (the queue should not
+	// have made 3 dispatches for the same dropped call).
+	if _, err := w.Submit(context.Background(), op); err != nil {
+		t.Fatalf("second Submit: %v", err)
+	}
+	after2, _ := s.Get(context.Background(), op.ID)
+	if after2.State != StatePendingReconciliation {
+		t.Fatalf("after second drop: got %s, want PENDING_RECONCILIATION", after2.State)
+	}
+	if got := len(d.callsSnapshot()); got != firstCalls+1 {
+		t.Fatalf("calls: got %d, want %d (one dispatch per Submit, no in-Submit retry storm)",
+			got, firstCalls+1)
+	}
+	if after2.RetryCount <= after1.RetryCount {
+		t.Fatalf("retry count must increase: got %d, was %d", after2.RetryCount, after1.RetryCount)
+	}
+}
+
+// TestEnqueueRefusesReplacementWhileUncertain: while an entry is in
+// PENDING_RECONCILIATION (or any non-terminal state), the queue MUST
+// refuse to create a replacement operation under the same idempotency key,
+// even after the local selection has expired. The user-visible rule: "do
+// not create a replacement operation until the old outcome is resolved or
+// handled through an explicit safe user workflow". The queue enforces this
+// at the storage layer.
+func TestEnqueueRefusesReplacementWhileUncertain(t *testing.T) {
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	s := newTestStore(t, fixedClock(now))
+	op := validOp(now)
+	if err := s.Enqueue(context.Background(), op); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	current, _ := s.Get(context.Background(), op.ID)
+	if err := current.SetInFlight(); err != nil {
+		t.Fatalf("SetInFlight: %v", err)
+	}
+	if err := current.SetPendingReconciliation(now, 0, "simulated drop"); err != nil {
+		t.Fatalf("SetPendingReconciliation: %v", err)
+	}
+	if err := s.UpdateState(context.Background(), current); err != nil {
+		t.Fatalf("UpdateState: %v", err)
+	}
+	// Attempt to create a "replacement" operation with the same key while
+	// the old one is still uncertain. The queue must refuse.
+	replacement := validOp(now)
+	replacement.ID = "OP-REPLACEMENT"
+	if err := s.Enqueue(context.Background(), replacement); !errors.Is(err, ErrOperationConflict) {
+		t.Fatalf("replacement enqueue: got %v, want ErrOperationConflict (uncertain prior submission is not terminal)", err)
+	}
+	// The on-disk entry is the original; no replacement was silently created.
+	got, _ := s.Get(context.Background(), "OP-1")
+	if got.State != StatePendingReconciliation {
+		t.Fatalf("original entry state mutated: got %s", got.State)
+	}
+	list, _ := s.List(context.Background())
+	if len(list) != 1 {
+		t.Fatalf("entry count: got %d, want 1 (no silent replacement)", len(list))
+	}
+}

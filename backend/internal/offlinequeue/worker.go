@@ -108,20 +108,38 @@ func (w *ReplayWorker) SetSleep(sleep func(context.Context, time.Duration) error
 }
 
 // DrainReport summarizes a single DrainQueue invocation. The numbers are
-// stable, monotone counters; "processed" is the total (committed + stale +
-// failed + skipped), "committed" is the server-acknowledged count.
+// stable, monotone counters.
+//
+//	Processed = Committed + Stale + Failed + Skipped + Reconciliation.
+//	Committed = server-acknowledged count (incl. idempotent replays).
+//	Stale     = snapshot drift / hold expired / offline-too-long (FAILED_STALE).
+//	Failed    = permanent denial (FAILED_PERM).
+//	Skipped   = terminal state observed, missing token ref, etc. — the worker
+//	            refused to dispatch.
+//	Reconciliation = a transport failure (or retry exhaustion) left the
+//	                 operation in PENDING_RECONCILIATION; the next drain will
+//	                 replay with the same idempotency key to learn the server's
+//	                 verdict. Reconciliation is NOT a terminal outcome and is
+//	                 counted separately so a run with zero network does not
+//	                 appear to have made progress.
 type DrainReport struct {
-	Processed int
-	Committed int
-	Stale     int
-	Failed    int
-	Skipped   int // expired at read time (worker chose FAILED_STALE without a call)
+	Processed      int
+	Committed      int
+	Stale          int
+	Failed         int
+	Skipped        int
+	Reconciliation int
 }
 
-// DrainQueue processes every PENDING entry in arrival order until either the
-// queue is empty or ctx is cancelled. It does NOT loop forever: after the
+// DrainQueue processes every dispatchable entry in arrival order until either
+// the queue is empty or ctx is cancelled. It does NOT loop forever: after the
 // last entry it returns. The caller decides when to invoke DrainQueue again
 // (e.g. on a timer or after a network-up signal).
+//
+// "Dispatchable" is whatever PeekPending returns: PENDING (never dispatched)
+// plus PENDING_RECONCILIATION (a previous Submit observed an uncertain
+// transport failure). Both must be served by a real dispatch; otherwise an
+// offline-stuck entry would never learn the server's verdict.
 func (w *ReplayWorker) DrainQueue(ctx context.Context) (*DrainReport, error) {
 	pending, err := w.store.PeekPending(ctx)
 	if err != nil {
@@ -135,7 +153,8 @@ func (w *ReplayWorker) DrainQueue(ctx context.Context) (*DrainReport, error) {
 		outcome, err := w.Submit(ctx, op)
 		if err != nil {
 			// A worker-level failure (e.g. token provider error) is not the
-			// operation's fault. Leave the entry PENDING for the next drain.
+			// operation's fault. Leave the entry in its current state for
+			// the next drain.
 			return rep, err
 		}
 		rep.Processed++
@@ -148,6 +167,8 @@ func (w *ReplayWorker) DrainQueue(ctx context.Context) (*DrainReport, error) {
 			rep.Failed++
 		case outcomeSkipped:
 			rep.Skipped++
+		case outcomePendingReconciliation:
+			rep.Reconciliation++
 		}
 	}
 	return rep, nil
@@ -158,15 +179,24 @@ func (w *ReplayWorker) DrainQueue(ctx context.Context) (*DrainReport, error) {
 // concurrently for different operation ids, but not for the same id (the
 // underlying store serializes state writes).
 //
-// Failure categories:
-//   - outcomeCommitted: the server returned 2xx (fresh commit or replay).
+// Outcome categories:
+//   - outcomeCommitted: the server returned 2xx (fresh commit, or replay of
+//     a previously-unknown prior commit that the idempotency store resolves).
 //   - outcomeStale: the server returned a snapshot-drift/hold-expired code,
-//     the local selection window is past, OR the queued payload was
-//     rewritten by a stricter client (defensive).
+//     the local selection window is past (and the entry was not uncertain),
+//     OR the queued payload was rewritten by a stricter client (defensive).
 //   - outcomePerm: the server returned a permanent denial (4xx codes other
-//     than stale/expired) or the retry budget is exhausted.
+//     than stale/expired). Retry-exhaustion is NOT a terminal failure here;
+//     see outcomePendingReconciliation.
 //   - outcomeSkipped: the queue refused the operation before dispatch
 //     (terminal state observed, missing token ref, etc.).
+//   - outcomePendingReconciliation: a transport/timeout error left the
+//     operation's outcome uncertain. The entry is preserved with its
+//     original key and payload so the next drain can replay it; it is NOT
+//     marked failed. Retry exhaustion does not change this: a non-2xx
+//     response with status code and error body still tells us "the server
+//     definitely did not commit", but a callErr only tells us "we never
+//     got an answer".
 type SubmitOutcome int
 
 const (
@@ -174,6 +204,7 @@ const (
 	outcomeStale
 	outcomePerm
 	outcomeSkipped
+	outcomePendingReconciliation
 )
 
 func (o SubmitOutcome) String() string {
@@ -184,6 +215,8 @@ func (o SubmitOutcome) String() string {
 		return "FAILED_STALE"
 	case outcomePerm:
 		return "FAILED_PERM"
+	case outcomePendingReconciliation:
+		return "PENDING_RECONCILIATION"
 	default:
 		return "SKIPPED"
 	}
@@ -192,6 +225,21 @@ func (o SubmitOutcome) String() string {
 // Submit performs the dispatch loop for one operation. It honors ctx
 // cancellation between attempts and inside a single call (via the
 // dispatcher's PerCallTimeout).
+//
+// Transport failure semantics: a callErr (network error, timeout, context
+// cancellation during the call) means we cannot prove the server's verdict.
+// We DO NOT exhaust the retry budget within this Submit trying to find out:
+// each retry within the same Submit would either (a) hit the same outage,
+// wasting wall time, or (b) eventually succeed on a server that already
+// committed the previous attempt, doubling the held capacity. Instead the
+// first callErr transitions the entry to PENDING_RECONCILIATION and returns
+// outcomePendingReconciliation; the next drain (or the next Submit call
+// after a manual reconcile) replays with the SAME idempotency key and the
+// server's idempotency store resolves the duplication.
+//
+// Server-reachable failures (4xx, 5xx with a body) are still retried within
+// the retry budget — the server has answered and the answer can be acted
+// on. Only the absence of an answer produces PENDING_RECONCILIATION.
 func (w *ReplayWorker) Submit(ctx context.Context, op PendingOperation) (SubmitOutcome, error) {
 	// Re-read the on-disk entry: the caller may have stale state.
 	current, err := w.store.Get(ctx, op.ID)
@@ -206,7 +254,13 @@ func (w *ReplayWorker) Submit(ctx context.Context, op PendingOperation) (SubmitO
 	}
 	// Selection window: an offline-too-long entry is FAILED_STALE without
 	// contacting the server. The user must confirm a new selection.
-	if !current.SelectionStillValid(w.now()) {
+	//
+	// EXCEPTION: PENDING_RECONCILIATION entries cannot be failed closed on
+	// a local clock signal alone. The previous dispatch's outcome is unknown
+	// and the server is the only party that can resolve it. Skipping the
+	// expiry check here means "if the server has committed, we replay and
+	// confirm; if the server rejects, we mark stale".
+	if current.State != StatePendingReconciliation && !current.SelectionStillValid(w.now()) {
 		_ = current.SetFailedStale(w.now(), 0, ErrSelectionExpired.Error())
 		if err := w.store.UpdateState(ctx, current); err != nil {
 			return outcomePerm, err
@@ -246,21 +300,21 @@ func (w *ReplayWorker) Submit(ctx context.Context, op PendingOperation) (SubmitO
 
 		switch {
 		case callErr != nil:
+			// Transport/timeout: outcome is unknowable. Preserve uncertainty.
+			// BumpRetry records the attempt; SetPendingReconciliation writes
+			// the PENDING_RECONCILIATION state so the next drain replays.
+			// We do NOT loop within this Submit to "try again" — the queue's
+			// drain cadence owns retry timing, and retrying a dropped request
+			// against a server that may have already committed is exactly
+			// what the idempotency key is for.
 			current.BumpRetry(0, transportErrorMessage(callErr))
+			if err := current.SetPendingReconciliation(w.now(), 0, transportErrorMessage(callErr)); err != nil {
+				return outcomePerm, err
+			}
 			if err := w.store.UpdateState(ctx, current); err != nil {
 				return outcomePerm, err
 			}
-			if attempt+1 == w.cfg.MaxAttempts {
-				_ = current.SetFailedPerm(w.now(), 0, "max attempts reached on transient error")
-				if err := w.store.UpdateState(ctx, current); err != nil {
-					return outcomePerm, err
-				}
-				return outcomePerm, nil
-			}
-			if err := w.sleep(ctx, w.backoff(attempt)); err != nil {
-				return outcomePerm, err
-			}
-			continue
+			return outcomePendingReconciliation, nil
 		case status >= 200 && status < 300:
 			_ = current.SetCommitted(w.now(), status, body)
 			if err := w.store.UpdateState(ctx, current); err != nil {
@@ -283,7 +337,8 @@ func (w *ReplayWorker) Submit(ctx context.Context, op PendingOperation) (SubmitO
 				}
 				return outcomePerm, nil
 			}
-			// 5xx and unknown codes: retry within budget.
+			// 5xx and unknown codes: server answered but is unhealthy.
+			// Retry within budget (the server is reachable, just unhappy).
 			current.BumpRetry(status, serverErrorMessage(status, code, body))
 			if err := w.store.UpdateState(ctx, current); err != nil {
 				return outcomePerm, err

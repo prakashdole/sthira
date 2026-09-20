@@ -313,7 +313,12 @@ func TestRestartRecoversAllEntries(t *testing.T) {
 }
 
 // TestResetStuckInFlight: a worker crash leaves IN_FLIGHT entries behind; on
-// restart the store recovers them to PENDING with RetryCount bumped.
+// restart the store recovers them to PENDING_RECONCILIATION with RetryCount
+// bumped. We do NOT reset to plain PENDING because the previous dispatch's
+// outcome is genuinely unknown: the request may have reached the server
+// and been committed. Returning to PENDING would falsely imply "the server
+// has not seen this"; the next drain would then submit a duplicate and
+// silently double-commit a hold.
 func TestResetStuckInFlight(t *testing.T) {
 	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
 	s := newTestStore(t, fixedClock(now))
@@ -336,11 +341,14 @@ func TestResetStuckInFlight(t *testing.T) {
 		t.Fatalf("reset count: got %d, want 1", reset)
 	}
 	after, _ := s.Get(context.Background(), op.ID)
-	if after.State != StatePending {
-		t.Fatalf("state after reset: got %s, want PENDING", after.State)
+	if after.State != StatePendingReconciliation {
+		t.Fatalf("state after reset: got %s, want PENDING_RECONCILIATION", after.State)
 	}
 	if after.RetryCount != 1 {
 		t.Fatalf("retry count after reset: got %d, want 1", after.RetryCount)
+	}
+	if !strings.Contains(after.LastError, "previous worker did not acknowledge") {
+		t.Fatalf("last error: got %q, want mention of crashed worker", after.LastError)
 	}
 }
 

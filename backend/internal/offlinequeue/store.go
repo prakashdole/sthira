@@ -111,9 +111,19 @@ func (s *Store) List(ctx context.Context) ([]PendingOperation, error) {
 	return s.readAllLocked()
 }
 
-// PeekPending returns the entries currently in PENDING state, oldest first.
-// This is the worker's input; IN_FLIGHT entries left behind by a crashed
-// worker are reset to PENDING on first observation (see ResetStuckInFlight).
+// PeekPending returns the entries the worker should attempt to dispatch on
+// the next drain, oldest first. That set is:
+//
+//   - PENDING (never dispatched), and
+//   - PENDING_RECONCILIATION (dispatched but with an uncertain prior outcome
+//     — a previous Submit observed a transport error and preserved the
+//     uncertainty; the server's verdict is still unknown and must be
+//     resolved by a real replay).
+//
+// IN_FLIGHT entries left behind by a crashed worker are reset to
+// PENDING_RECONCILIATION on first observation (see ResetStuckInFlight) so
+// the uncertainty is preserved across restarts; they then surface here on
+// the next drain.
 func (s *Store) PeekPending(ctx context.Context) ([]PendingOperation, error) {
 	all, err := s.List(ctx)
 	if err != nil {
@@ -121,7 +131,7 @@ func (s *Store) PeekPending(ctx context.Context) ([]PendingOperation, error) {
 	}
 	out := make([]PendingOperation, 0, len(all))
 	for _, op := range all {
-		if op.State == StatePending {
+		if op.State == StatePending || op.State == StatePendingReconciliation {
 			out = append(out, op)
 		}
 	}
@@ -207,11 +217,23 @@ func (s *Store) PurgeCommitted(ctx context.Context, olderThan time.Duration) (in
 	return removed, nil
 }
 
-// ResetStuckInFlight moves every IN_FLIGHT entry back to PENDING so a fresh
-// worker can retry it. The reference harness calls this at startup; an IN_FLIGHT
-// entry left on disk is by definition one whose producer crashed before the
-// server acknowledged. The worker increments RetryCount so the user can tell
-// that a recovery happened.
+// ResetStuckInFlight moves every IN_FLIGHT entry back to PENDING_RECONCILIATION
+// so a fresh worker can re-attempt it. The reference harness calls this at
+// startup; an IN_FLIGHT entry left on disk is by definition one whose
+// producer crashed before the server acknowledged.
+//
+// We deliberately reset to PENDING_RECONCILIATION, not PENDING. A crashed
+// dispatch leaves the operation's outcome genuinely unknown: the request may
+// have reached the server, the server may have committed, the response may
+// have been on its way back. Returning the entry to plain PENDING would
+// imply "the server has not seen this", which the queue cannot prove.
+// PENDING_RECONCILIATION forces the next drain to contact the server with
+// the identical idempotency key; the server's idempotency store resolves
+// the duplication (commit replay / explicit rejection / fresh commit) and
+// the entry lands in a real terminal state.
+//
+// RetryCount is incremented and LastError records the recovery reason so
+// the operator can see "this entry was recovered from a crashed dispatch".
 func (s *Store) ResetStuckInFlight(ctx context.Context) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -224,7 +246,7 @@ func (s *Store) ResetStuckInFlight(ctx context.Context) (int, error) {
 		if op.State != StateInFlight {
 			continue
 		}
-		op.State = StatePending
+		op.State = StatePendingReconciliation
 		op.RetryCount++
 		op.LastError = "reset: previous worker did not acknowledge"
 		if err := s.writeLocked(op); err != nil {

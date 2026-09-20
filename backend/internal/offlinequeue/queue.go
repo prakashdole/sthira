@@ -34,20 +34,36 @@ import (
 //
 // State transitions:
 //
-//	PENDING -> IN_FLIGHT          (worker dispatches)
-//	IN_FLIGHT -> COMMITTED        (server 2xx)
-//	IN_FLIGHT -> FAILED_STALE     (snapshot drift, hold expired, or 4xx selection error)
-//	IN_FLIGHT -> FAILED_PERM      (4xx other than stale/hold, or max attempts exceeded)
+//	PENDING -> IN_FLIGHT                      (worker dispatches)
+//	IN_FLIGHT -> COMMITTED                    (server 2xx)
+//	IN_FLIGHT -> FAILED_STALE                 (snapshot drift, hold expired, or 4xx selection error)
+//	IN_FLIGHT -> FAILED_PERM                  (4xx other than stale/hold, or max attempts exceeded)
+//	IN_FLIGHT -> PENDING_RECONCILIATION       (network/timeout error after dispatch)
+//	PENDING -> IN_FLIGHT                      (next drain attempt)
+//	PENDING_RECONCILIATION -> IN_FLIGHT       (next drain attempt; selection window ignored — must ask server)
+//	PENDING_RECONCILIATION -> COMMITTED       (server confirms prior commit via same idempotency key)
+//	PENDING_RECONCILIATION -> FAILED_STALE    (server confirms snapshot drift / hold expired)
+//	PENDING_RECONCILIATION -> FAILED_PERM     (server explicitly rejects the prior submission)
 //	COMMITTED -> (removed by PurgeCommitted, never auto-retried)
 //	FAILED_STALE/Failed_PERM -> (held for inspection; new operation needed)
+//
+// PENDING_RECONCILIATION preserves uncertainty: a transport failure or
+// retry exhaustion is not proof of server rejection. The server may have
+// committed the operation and the response was lost before the client
+// observed it; only a successful replay (with the same idempotency key)
+// or an explicit server rejection resolves the entry. A local selection
+// expiry does NOT fail-stale an uncertain entry: the client cannot prove
+// the hold expired without asking the server, and the server is the only
+// party that can answer.
 type OpState string
 
 const (
-	StatePending     OpState = "PENDING"
-	StateInFlight    OpState = "IN_FLIGHT"
-	StateCommitted   OpState = "COMMITTED"
-	StateFailedStale OpState = "FAILED_STALE" // snapshot drift or hold expiry
-	StateFailedPerm  OpState = "FAILED_PERM"  // permanent denial, max attempts, etc.
+	StatePending               OpState = "PENDING"
+	StateInFlight              OpState = "IN_FLIGHT"
+	StatePendingReconciliation OpState = "PENDING_RECONCILIATION" // network error or timeout after dispatch; requires server reconciliation
+	StateCommitted             OpState = "COMMITTED"
+	StateFailedStale           OpState = "FAILED_STALE" // snapshot drift or hold expiry
+	StateFailedPerm            OpState = "FAILED_PERM"  // permanent denial, max attempts, etc.
 )
 
 // Sentinel errors surfaced by the queue. Wrapped errors include the
@@ -163,9 +179,12 @@ func (op *PendingOperation) Validate(now time.Time) error {
 // SetCommitted is the single transition to a successful terminal state. It
 // records the captured server response (typically the reservation/stay id map)
 // and sets CommittedAt. Subsequent UpdateState calls reject terminal entries.
+// Allowed from PENDING (first success), IN_FLIGHT (current Submit confirms
+// server) and PENDING_RECONCILIATION (idempotent replay confirms a previously
+// dropped response).
 func (op *PendingOperation) SetCommitted(now time.Time, statusCode int, serverResult json.RawMessage) error {
 	switch op.State {
-	case StatePending, StateInFlight:
+	case StatePending, StateInFlight, StatePendingReconciliation:
 	default:
 		return ErrTerminalState
 	}
@@ -183,9 +202,14 @@ func (op *PendingOperation) SetCommitted(now time.Time, statusCode int, serverRe
 // selection window drifted (or the worker detected offline-too-long). It is
 // terminal: retrying would replay against a different server state. The user
 // must confirm a new selection with a new idempotency key.
+//
+// Allowed from PENDING, IN_FLIGHT and PENDING_RECONCILIATION. Reconciliation
+// entries that the server finally confirms as stale (snapshot/hold drift
+// caught on replay) transition here without raising a "spurious" duplicate
+// commit on the client.
 func (op *PendingOperation) SetFailedStale(now time.Time, statusCode int, errMsg string) error {
 	switch op.State {
-	case StatePending, StateInFlight:
+	case StatePending, StateInFlight, StatePendingReconciliation:
 	default:
 		return ErrTerminalState
 	}
@@ -199,9 +223,13 @@ func (op *PendingOperation) SetFailedStale(now time.Time, statusCode int, errMsg
 // SetFailedPerm marks the operation failed permanently (denial, conflict,
 // max-attempts-exceeded, etc.). The user must inspect the response, then
 // either retry with a new key or correct the request.
+//
+// Allowed from PENDING, IN_FLIGHT and PENDING_RECONCILIATION. Reconciliation
+// entries that the server finally confirms as a permanent rejection (e.g.
+// IDEMPOTENCY_CONFLICT for a payload-allowed forgery) transition here.
 func (op *PendingOperation) SetFailedPerm(now time.Time, statusCode int, errMsg string) error {
 	switch op.State {
-	case StatePending, StateInFlight:
+	case StatePending, StateInFlight, StatePendingReconciliation:
 	default:
 		return ErrTerminalState
 	}
@@ -212,10 +240,41 @@ func (op *PendingOperation) SetFailedPerm(now time.Time, statusCode int, errMsg 
 	return nil
 }
 
+// SetPendingReconciliation marks the operation as "we dispatched it but
+// cannot prove the server's verdict": the request reached the network, the
+// transport responded with an error (timeout, dropped connection, reset,
+// DNS failure), so we cannot tell whether the server committed the hold or
+// rejected it. The queue keeps the original key and payload so the next
+// drain can replay the submission with identical intent.
+//
+// This is NOT a terminal state. It is reversible via SetInFlight (next drain
+// retries), or it transitions to a terminal state via SetCommitted,
+// SetFailedStale or SetFailedPerm once the server answers on replay.
+//
+// The caller is responsible for bumping RetryCount via BumpRetry first; this
+// method only flips State and records the diagnostic.
+func (op *PendingOperation) SetPendingReconciliation(now time.Time, statusCode int, errMsg string) error {
+	switch op.State {
+	case StatePending, StateInFlight, StatePendingReconciliation:
+	default:
+		return ErrTerminalState
+	}
+	op.State = StatePendingReconciliation
+	op.LastStatusCode = statusCode
+	if errMsg != "" {
+		op.LastError = errMsg
+	}
+	return nil
+}
+
 // SetInFlight marks the operation dispatched but not yet acknowledged. It is
-// reversible: a worker crash returns the operation to PENDING on restart.
+// reversible: a worker crash returns the operation to PENDING_RECONCILIATION
+// on restart (because the worker cannot prove whether the server committed).
+//
+// Allowed from PENDING (first dispatch) and PENDING_RECONCILIATION (replay
+// after a previous transport failure).
 func (op *PendingOperation) SetInFlight() error {
-	if op.State != StatePending {
+	if op.State != StatePending && op.State != StatePendingReconciliation {
 		return fmt.Errorf("offlinequeue: cannot move to IN_FLIGHT from %s", op.State)
 	}
 	op.State = StateInFlight
@@ -233,6 +292,11 @@ func (op *PendingOperation) BumpRetry(statusCode int, errMsg string) {
 // IsTerminal reports whether the operation is in a state that should not be
 // retried automatically. Stale failures must be re-confirmed by the user;
 // permanent failures require inspection. Committed entries can be purged.
+//
+// PENDING_RECONCILIATION is NOT terminal: the worker (or a future drain)
+// must still replay it to learn the server's verdict. Only the server
+// (via the next dispatch result) can move a reconciliation entry to a
+// terminal state.
 func (op *PendingOperation) IsTerminal() bool {
 	switch op.State {
 	case StateCommitted, StateFailedStale, StateFailedPerm:
