@@ -847,3 +847,139 @@ func TestHTTPFailedTransferPreservesOriginal(t *testing.T) {
 		t.Fatalf("origin held=%d, want 1 (capacity retained)", got)
 	}
 }
+
+// TestSnapshotRaceRejectsStaleVersion proves that the snapshot version check
+// runs under the package lock acquired by RevalidateReservationContext, NOT
+// before. A concurrent version bump that commits while the reservation waits
+// for the lock is detected deterministically.
+//
+// Sequence:
+//  1. goroutine begins a tx, locks the package row (FOR UPDATE), bumps version 1→2
+//  2. HTTP reservation request with snapshot_version=1 enters its tx and blocks
+//     on the package lock inside RevalidateReservationContext
+//  3. goroutine commits (version now 2 on disk, lock released)
+//  4. the reservation's RevalidateReservationContext acquires the lock (sees v2)
+//  5. revalidateSnapshotVersion compares v2 ≠ 1 → snapshotStaleError → 409
+//
+// This test FAILS against the old ordering (snapshot check before locks)
+// because the SELECT without FOR UPDATE would read v1 BEFORE the goroutine
+// commits, falsely accepting it.
+func TestSnapshotRaceRejectsStaleVersion(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	pkgID, facID, snap := seedHTTPPackageFacility(t, st, 5, httpDayT(1), httpDayT(4))
+	if snap != 1 {
+		t.Fatalf("seed snapshot=%d, want 1", snap)
+	}
+	_, token := createSession(t, srv)
+
+	// A goroutine locks the package row and bumps the version while the
+	// reservation request is in flight. The reservation will block on the
+	// FOR UPDATE inside RevalidateReservationContext.
+	lockAcquired := make(chan struct{})
+	releaseLock := make(chan struct{})
+	bumpErr := make(chan error, 1)
+	go func() {
+		tx, err := st.DB().BeginTx(t.Context(), nil)
+		if err != nil {
+			bumpErr <- err
+			return
+		}
+		defer tx.Rollback()
+		// Lock the source row first (matching RevalidateReservationContext's lock order)
+		// then the package row.
+		var srcID string
+		if err := tx.QueryRowContext(t.Context(),
+			`SELECT source_id FROM packages WHERE package_id = $1`, pkgID).Scan(&srcID); err != nil {
+			bumpErr <- err
+			return
+		}
+		if _, err := tx.ExecContext(t.Context(),
+			`SELECT 1 FROM sources WHERE source_id = $1 FOR UPDATE`, srcID); err != nil {
+			bumpErr <- err
+			return
+		}
+		if _, err := tx.ExecContext(t.Context(),
+			`UPDATE packages SET version = version + 1 WHERE package_id = $1`, pkgID); err != nil {
+			bumpErr <- err
+			return
+		}
+		close(lockAcquired)
+		// Hold the lock until signalled.
+		select {
+		case <-releaseLock:
+		case <-t.Context().Done():
+		}
+		bumpErr <- tx.Commit()
+	}()
+
+	// Wait for the goroutine to acquire the lock and bump the version.
+	select {
+	case <-lockAcquired:
+	case err := <-bumpErr:
+		t.Fatalf("bump goroutine failed before lock: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("goroutine did not acquire lock in time")
+	}
+
+	// Fire the reservation request in a goroutine (it will block on the lock).
+	type httpResult struct {
+		rec response
+	}
+	resultCh := make(chan httpResult, 1)
+	go func() {
+		rec := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token,
+			reservationBody(facID, pkgID, 1, httpDay(1), httpDay(2), "race-key", snap))
+		resultCh <- httpResult{rec: rec}
+	}()
+
+	// Give the HTTP request time to reach the blocked SELECT FOR UPDATE.
+	time.Sleep(200 * time.Millisecond)
+
+	// Release the lock; the goroutine commits version=2.
+	close(releaseLock)
+	if err := <-bumpErr; err != nil {
+		t.Fatalf("version bump commit: %v", err)
+	}
+
+	// The HTTP request should now complete with 409 STALE_VERSION.
+	select {
+	case r := <-resultCh:
+		if r.rec.code != http.StatusConflict {
+			t.Fatalf("snapshot race: code=%d, want 409; body=%s", r.rec.code, r.rec.body)
+		}
+		env := decodeEnvelope(t, r.rec)
+		if len(env.Errors) == 0 || env.Errors[0].Code != contracts.ErrStaleVersion {
+			t.Fatalf("want STALE_VERSION, got %+v", env.Errors)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("reservation request did not complete")
+	}
+
+	// No reservation, stay or capacity change.
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 0 {
+		t.Fatalf("stale race held=%d, want 0 (no writes)", got)
+	}
+
+	// --- Correct-version success: now version=2, use snapshot_version=2 ---
+	rec2 := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token,
+		reservationBody(facID, pkgID, 1, httpDay(1), httpDay(2), "correct-key", 2))
+	if rec2.code != http.StatusCreated {
+		t.Fatalf("correct version: code=%d, want 201; body=%s", rec2.code, rec2.body)
+	}
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 1 {
+		t.Fatalf("correct version held=%d, want 1", got)
+	}
+
+	// --- Committed-request replay ---
+	rec3 := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token,
+		reservationBody(facID, pkgID, 1, httpDay(1), httpDay(2), "correct-key", 2))
+	if rec3.code != http.StatusOK {
+		t.Fatalf("replay: code=%d, want 200; body=%s", rec3.code, rec3.body)
+	}
+	// Capacity unchanged from the first successful reservation.
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 1 {
+		t.Fatalf("replay held=%d, want 1 (no double write)", got)
+	}
+}

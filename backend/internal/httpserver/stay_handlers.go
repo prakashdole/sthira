@@ -275,31 +275,24 @@ func (s *Server) handleCreateReservation(w http.ResponseWriter, r *http.Request)
 			result, replay = res, true
 			return nil
 		}
-		// Revalidate the source snapshot version at commit (stale selection).
-		// A missing/zero confirmation is rejected: every commitment must have a
-		// non-zero snapshot version checked under the locks the revalidation
-		// just acquired.
-		if req.SnapshotVersion <= 0 {
-			return &snapshotStaleError{want: req.SnapshotVersion, got: -1}
-		}
-		var curVersion int
-		if err := tx.QueryRowContext(ctx, `SELECT version FROM packages WHERE package_id = $1`, req.PackageID).Scan(&curVersion); err != nil {
-			return err
-		}
-		if curVersion != req.SnapshotVersion {
-			return &snapshotStaleError{want: req.SnapshotVersion, got: curVersion}
-		}
 		var routeID *string
 		if req.RouteID != "" {
 			routeID = &req.RouteID
 		}
 		// Authoritative eligibility at commit: source OPERATIONAL + authorized,
 		// package effective/unexpired/not superseded, facility in package, route
-		// verified/valid/unclosed. Locks source then package so a concurrent
-		// quarantine/suspension/revocation/supersession serializes against this
-		// reservation.
+		// verified/valid/unclosed. Locks source then package (FOR UPDATE) so a
+		// concurrent quarantine/suspension/revocation/supersession serializes
+		// against this reservation.
 		_, pol, err := store.RevalidateReservationContext(ctx, tx, req.FacilityID, req.PackageID, routeID, now, store.WithAllowSynthetic(s.allowSynthetic()))
 		if err != nil {
+			return err
+		}
+		// Revalidate the snapshot version AFTER the locks are acquired above.
+		// The SELECT reads the same locked package row, so a concurrent version
+		// bump that commits between the client's choice and this reservation is
+		// detected deterministically. Missing/zero version is rejected.
+		if err := revalidateSnapshotVersion(ctx, tx, req.PackageID, req.SnapshotVersion); err != nil {
 			return err
 		}
 		// Enforce the authoritative temporary-stay bounds before allocating or
