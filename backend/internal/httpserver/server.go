@@ -65,6 +65,9 @@ type Server struct {
 	// operatorVerifier is the trusted identity/MFA boundary for operator session
 	// issuance. Nil means issuance fails closed (no self-granted operator tokens).
 	operatorVerifier OperatorVerifier
+	// syntheticExercise is the explicit server-side test/exercise dependency.
+	// Nil in production; synthetic evidence is then rejected for commitments.
+	syntheticExercise SyntheticExercise
 }
 
 // persistedResolver adapts the store's persisted context resolution to the
@@ -133,6 +136,37 @@ func WithStore(st *store.Store) Option { return func(s *Server) { s.store = st }
 // request-body MFA flag is never accepted as evidence.
 func WithOperatorVerifier(v OperatorVerifier) Option {
 	return func(s *Server) { s.operatorVerifier = v }
+}
+
+// SyntheticExercise defines the server-controlled boundary for running
+// synthetic/demo exercise flows through real HTTP. In production this is
+// nil (disabled), which fails closed: synthetic evidence (packages, source
+// artifacts, routes) is rejected for operational commitments. It cannot
+// be enabled by request headers, body fields, query parameters, or an ordinary
+// production request.
+type SyntheticExercise interface {
+	AllowSynthetic() bool
+}
+
+// StaticSyntheticExercise returns a SyntheticExercise dependency with a fixed
+// setting. Used only for isolated test configuration.
+func StaticSyntheticExercise(allow bool) SyntheticExercise {
+	return staticSyntheticExercise{allow: allow}
+}
+
+type staticSyntheticExercise struct{ allow bool }
+
+func (s staticSyntheticExercise) AllowSynthetic() bool { return s.allow }
+
+// WithSyntheticExercise wires the explicit server-side test/exercise dependency
+// needed to run synthetic flows through real HTTP. Without it (or when nil),
+// synthetic evidence is rejected for operational commitments.
+func WithSyntheticExercise(ex SyntheticExercise) Option {
+	return func(s *Server) { s.syntheticExercise = ex }
+}
+
+func (s *Server) allowSynthetic() bool {
+	return s.syntheticExercise != nil && s.syntheticExercise.AllowSynthetic()
 }
 
 // New builds a Server with bounded timeouts and the frozen route set.

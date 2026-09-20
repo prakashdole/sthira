@@ -166,16 +166,16 @@ func (s *Server) handleGuidanceQuery(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, http.StatusBadRequest, contracts.ErrInvalidValue, "invalid party size or date range", "start_date", false)
 		return
 	}
-	// Route authority (O05) is open: the operational route gate is CLOSED.
-	// Synthetic routes are ONLY available via isolated test configuration, never
-	// via a request header. This enforces the fail-closed operational boundary.
+	// Route authority (O05) is open: the operational route gate is CLOSED in production.
+	// Synthetic routes are ONLY available via isolated server test/exercise configuration,
+	// never via request headers or body fields.
 	q := store.ChoiceQuery{
 		Jurisdiction:  req.Jurisdiction,
 		PackageID:     req.PackageID,
 		PartySize:     req.PartySize,
 		StartDate:     start,
 		EndDate:       end,
-		RouteGateOpen: false, // always closed while O05 is open
+		RouteGateOpen: s.allowSynthetic(),
 	}
 	dests, err := store.ChoiceQuerier{}.Eligible(r.Context(), s.store.DB(), q, time.Now().UTC())
 	if err != nil {
@@ -202,7 +202,7 @@ func (s *Server) handleGuidanceQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	s.writeData(w, r, http.StatusOK, req.PackageID, contracts.FreshnessUnknown, map[string]any{
 		"destinations": items,
-		"route_gate":   false,
+		"route_gate":   s.allowSynthetic(),
 	})
 }
 
@@ -298,7 +298,7 @@ func (s *Server) handleCreateReservation(w http.ResponseWriter, r *http.Request)
 		// verified/valid/unclosed. Locks source then package so a concurrent
 		// quarantine/suspension/revocation/supersession serializes against this
 		// reservation.
-		_, pol, err := store.RevalidateReservationContext(ctx, tx, req.FacilityID, req.PackageID, routeID, now)
+		_, pol, err := store.RevalidateReservationContext(ctx, tx, req.FacilityID, req.PackageID, routeID, now, store.WithAllowSynthetic(s.allowSynthetic()))
 		if err != nil {
 			return err
 		}
@@ -523,7 +523,7 @@ func (s *Server) handleStayEvent(w http.ResponseWriter, r *http.Request) {
 			if cerr != nil {
 				return cerr
 			}
-			_, pol, rerr := store.RevalidateReservationContext(ctx, tx, facID, pkgID, routeID, now)
+			_, pol, rerr := store.RevalidateReservationContext(ctx, tx, facID, pkgID, routeID, now, store.WithAllowSynthetic(s.allowSynthetic()))
 			if rerr != nil {
 				return rerr
 			}
@@ -557,7 +557,7 @@ func (s *Server) handleStayEvent(w http.ResponseWriter, r *http.Request) {
 				newRouteID = &req.NewRouteID
 			}
 			// Validate the new facility's context with the new route (not the old one).
-			_, pol, rerr := store.RevalidateReservationContext(ctx, tx, req.NewFacilityID, pkgID, newRouteID, now)
+			_, pol, rerr := store.RevalidateReservationContext(ctx, tx, req.NewFacilityID, pkgID, newRouteID, now, store.WithAllowSynthetic(s.allowSynthetic()))
 			if rerr != nil {
 				return rerr
 			}

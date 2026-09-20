@@ -30,13 +30,13 @@ func seedPackageFacility(t *testing.T, s *Store, capacity int, start, end time.T
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO source_artifacts (artifact_id, source_id, source_version, artifact_sha256,
 				retrieved_at, evidence_class, payload_ref)
-			VALUES ($1,$2,1,$3,$4,'SYNTHETIC','mem://test')`, artID, srcID, hash, now); err != nil {
+			VALUES ($1,$2,1,$3,$4,'AUTHORIZED_OPERATIONAL','mem://test')`, artID, srcID, hash, now); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO packages (package_id, alert_id, source_id, artifact_id, version,
 				jurisdiction, evidence_class, effective_at, expires_at, checksum_sha256, body)
-			VALUES ($1,'ALT',$2,$3,1,'JTEST','SYNTHETIC',$4,$5,$6,'{}')`,
+			VALUES ($1,'ALT',$2,$3,1,'JTEST','AUTHORIZED_OPERATIONAL',$4,$5,$6,'{"allocation_policy":{"reservation_expiry_seconds":3600,"temporary_stay_min_days":1,"temporary_stay_max_days":14,"allow_transfers":true,"route_required":false}}')`,
 			pkgID, srcID, artID, now, now.Add(24*time.Hour), hash); err != nil {
 			return err
 		}

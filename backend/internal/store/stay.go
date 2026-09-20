@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"sthira/backend/internal/opkg"
 )
 
 // StayStore persists the P4 stay lifecycle with date-range capacity
@@ -449,9 +451,14 @@ type StayPolicy struct {
 }
 
 // RoutePolicyRequired reports whether the policy requires a route on every
-// operational commitment. Absent means the policy does not require one.
-func (p StayPolicy) RoutePolicyRequired() bool {
-	return p.RouteRequired != nil && *p.RouteRequired
+// operational commitment. It fails closed: if route_required is absent or null
+// in the authoritative policy, it returns ErrNoStayPolicy rather than inferring
+// a government default.
+func (p StayPolicy) RoutePolicyRequired() (bool, error) {
+	if p.RouteRequired == nil {
+		return false, ErrNoStayPolicy
+	}
+	return *p.RouteRequired, nil
 }
 
 // ErrNoStayPolicy is returned when a required policy field is absent from the
@@ -466,6 +473,23 @@ var ErrRouteRequired = errors.New("store: route required by authoritative policy
 // ErrStayOutOfPolicy is returned when the requested stay dates fall outside the
 // authoritative temporary-stay bounds.
 var ErrStayOutOfPolicy = errors.New("store: stay dates outside the authoritative temporary-stay bounds")
+
+// ReservationContextOption configures RevalidateReservationContext.
+type ReservationContextOption func(*reservationContextConfig)
+
+type reservationContextConfig struct {
+	allowSynthetic bool
+}
+
+// WithAllowSynthetic controls whether synthetic evidence (SYNTHETIC_DEMO
+// packages, source artifacts, and routes) is accepted by
+// RevalidateReservationContext for isolated test/exercise execution.
+// Defaults to false (ordinary production configuration fails closed).
+func WithAllowSynthetic(allow bool) ReservationContextOption {
+	return func(c *reservationContextConfig) {
+		c.allowSynthetic = allow
+	}
+}
 
 // policyBody is the minimal package-body shape for the allocation policy.
 type policyBody struct {
@@ -491,33 +515,55 @@ type policyBody struct {
 // reservation sees a still-operational or already-withdrawn context. The
 // source state is rechecked under the lock. Returns the package jurisdiction
 // and the authoritative stay policy for the caller's use.
-func RevalidateReservationContext(ctx context.Context, db DBTX, facilityID, packageID string, routeID *string, now time.Time) (string, StayPolicy, error) {
+func RevalidateReservationContext(ctx context.Context, db DBTX, facilityID, packageID string, routeID *string, now time.Time, opts ...ReservationContextOption) (string, StayPolicy, error) {
+	var cfg reservationContextConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+
 	var (
 		jurisdiction string
 		body         []byte
 		sourceID     string
+		pkgEvidence  string
+		artEvidence  string
 	)
 	// Lock source first (consistent order with source state transitions), then package.
 	err := db.QueryRowContext(ctx, `
-		SELECT p.jurisdiction, p.body, p.source_id
+		SELECT p.jurisdiction, p.body, p.source_id, p.evidence_class, sa.evidence_class
 		FROM packages p
 		JOIN sources s ON s.source_id = p.source_id
+		JOIN source_artifacts sa ON sa.artifact_id = p.artifact_id
 		WHERE p.package_id = $1
 		  AND s.state = 'OPERATIONAL'
 		  AND p.effective_at <= $2 AND p.expires_at > $2
 		  AND p.superseded_by IS NULL
 		  AND EXISTS (
-			SELECT 1 FROM source_authorizations sa
-			WHERE sa.source_id = p.source_id AND sa.jurisdiction = p.jurisdiction
-			  AND (sa.expires_at IS NULL OR sa.expires_at > $2)
+			SELECT 1 FROM source_authorizations sauth
+			WHERE sauth.source_id = p.source_id AND sauth.jurisdiction = p.jurisdiction
+			  AND (sauth.expires_at IS NULL OR sauth.expires_at > $2)
 		  )
-		FOR UPDATE OF s, p`, packageID, now).Scan(&jurisdiction, &body, &sourceID)
+		FOR UPDATE OF s, p`, packageID, now).Scan(&jurisdiction, &body, &sourceID, &pkgEvidence, &artEvidence)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", StayPolicy{}, ErrReservationContext
 	}
 	if err != nil {
 		return "", StayPolicy{}, err
 	}
+
+	// Ordinary production configuration must reject synthetic evidence for
+	// operational commitments. Check persisted source and package evidence consistently.
+	isSynthetic := pkgEvidence == string(opkg.EvidenceSynthetic) ||
+		pkgEvidence == "SYNTHETIC" ||
+		artEvidence == string(opkg.EvidenceSynthetic) ||
+		artEvidence == "SYNTHETIC"
+
+	if !cfg.allowSynthetic {
+		if isSynthetic || pkgEvidence != string(opkg.EvidenceOperational) || artEvidence != string(opkg.EvidenceOperational) {
+			return "", StayPolicy{}, ErrReservationContext
+		}
+	}
+
 	// Facility must belong to the requested package.
 	var fcount int
 	if err := db.QueryRowContext(ctx, `
@@ -553,11 +599,14 @@ func RevalidateReservationContext(ctx context.Context, db DBTX, facilityID, pack
 	// A requested route must be verified, currently valid, unclosed, AND bound
 	// to the facility's safe zone (to_safe_zone_id matches). The same gate
 	// applies at reserve, extend and transfer: the route must lead to the
-	// selected destination's safe zone. When the policy requires a route and
-	// none is provided, the commitment is rejected with ErrRouteRequired
-	// BEFORE any capacity change.
+	// selected destination's safe zone.
+	// In ordinary production configuration, synthetic routes are rejected and
+	// operational routing is disabled while O05 is open (R08).
 	hasRoute := routeID != nil && *routeID != ""
 	if hasRoute {
+		if !cfg.allowSynthetic {
+			return "", StayPolicy{}, ErrRouteUnavailable
+		}
 		var rcount int
 		if err := db.QueryRowContext(ctx, `
 			SELECT count(*) FROM route_versions rv
@@ -590,11 +639,15 @@ func RevalidateReservationContext(ctx context.Context, db DBTX, facilityID, pack
 		AllowTransfers:           pb.AllocationPolicy.AllowTransfers,
 		RouteRequired:            pb.AllocationPolicy.RouteRequired,
 	}
-	// Fail closed: when the authoritative policy requires a route and the
-	// caller provided none (or an empty route), reject with ErrRouteRequired
-	// before any capacity change. This is the policy-driven counterpart to
-	// the optional-route validation above.
-	if pol.RoutePolicyRequired() && !hasRoute {
+	// Missing route-policy authority must fail closed: missing or null
+	// route_required rejects a new commitment that needs this policy with
+	// ErrNoStayPolicy. Explicit true requires a validated route (ErrRouteRequired
+	// if omitted). Explicit false permits route omission if all other gates pass.
+	routeReq, err := pol.RoutePolicyRequired()
+	if err != nil {
+		return "", StayPolicy{}, err
+	}
+	if routeReq && !hasRoute {
 		return "", StayPolicy{}, ErrRouteRequired
 	}
 	return jurisdiction, pol, nil

@@ -535,11 +535,13 @@ func validatePolicy(p AllocationPolicy) error {
 }
 
 // RoutePolicyRequired reports whether the allocation policy requires a
-// route on every operational commitment. The flag is opt-in: an absent
-// RouteRequired means routes are not required, preserving the existing
-// contract for packages that do not opt in.
-func (p AllocationPolicy) RoutePolicyRequired() bool {
-	return p.RouteRequired != nil && *p.RouteRequired
+// route on every operational commitment. Absent or null fails closed
+// (returns an error) rather than inferring a government default.
+func (p AllocationPolicy) RoutePolicyRequired() (bool, error) {
+	if p.RouteRequired == nil {
+		return false, fail("authoritative allocation_policy is missing route_required")
+	}
+	return *p.RouteRequired, nil
 }
 
 func validateLocation(loc []float64) error {

@@ -350,3 +350,28 @@ func TestValidatePolicyWellFormed(t *testing.T) {
 	recompute(p)
 	validateOK(t, p)
 }
+
+func TestAllocationPolicyRoutePolicyRequired(t *testing.T) {
+	// Absent fails closed
+	var p AllocationPolicy
+	_, err := p.RoutePolicyRequired()
+	if err == nil {
+		t.Fatalf("absent RouteRequired: want error, got nil")
+	}
+
+	// Explicit true
+	reqTrue := true
+	p.RouteRequired = &reqTrue
+	val, err := p.RoutePolicyRequired()
+	if err != nil || !val {
+		t.Fatalf("explicit true RouteRequired: want (true, nil), got (%v, %v)", val, err)
+	}
+
+	// Explicit false
+	reqFalse := false
+	p.RouteRequired = &reqFalse
+	val, err = p.RoutePolicyRequired()
+	if err != nil || val {
+		t.Fatalf("explicit false RouteRequired: want (false, nil), got (%v, %v)", val, err)
+	}
+}

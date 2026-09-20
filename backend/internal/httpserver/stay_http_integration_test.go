@@ -51,7 +51,7 @@ func newStayServer(t *testing.T) (*Server, *store.Store) {
 func seedHTTPPackageFacility(t *testing.T, st *store.Store, capacity int, start, end time.Time) (string, string, int) {
 	t.Helper()
 	return seedHTTPPackageFacilityPolicy(t, st, capacity, start, end,
-		`{"allocation_policy":{"reservation_expiry_seconds":3600,"temporary_stay_min_days":1,"temporary_stay_max_days":14,"allow_transfers":true}}`)
+		`{"allocation_policy":{"reservation_expiry_seconds":3600,"temporary_stay_min_days":1,"temporary_stay_max_days":14,"allow_transfers":true,"route_required":false}}`)
 }
 
 // seedHTTPPackageFacilityPolicy is seedHTTPPackageFacility with a caller-supplied
@@ -71,12 +71,12 @@ func seedHTTPPackageFacilityPolicy(t *testing.T, st *store.Store, capacity int, 
 		}
 		if _, err := tx.ExecContext(t.Context(), `
 			INSERT INTO source_artifacts (artifact_id, source_id, source_version, artifact_sha256, retrieved_at, evidence_class, payload_ref)
-			VALUES ($1,$2,1,$3,$4,'SYNTHETIC','mem://t')`, artID, srcID, hash, now); err != nil {
+			VALUES ($1,$2,1,$3,$4,'AUTHORIZED_OPERATIONAL','mem://t')`, artID, srcID, hash, now); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(t.Context(), `
 			INSERT INTO packages (package_id, alert_id, source_id, artifact_id, version, jurisdiction, evidence_class, effective_at, expires_at, checksum_sha256, body)
-			VALUES ($1,'ALT',$2,$3,1,'JTEST','SYNTHETIC',$4,$5,$6,$7)`, pkgID, srcID, artID, now, now.Add(24*time.Hour), hash, body); err != nil {
+			VALUES ($1,'ALT',$2,$3,1,'JTEST','AUTHORIZED_OPERATIONAL',$4,$5,$6,$7)`, pkgID, srcID, artID, now, now.Add(24*time.Hour), hash, body); err != nil {
 			return err
 		}
 		if err := sources.RecordAuthorization(t.Context(), tx, store.Authorization{
@@ -738,7 +738,7 @@ func TestHTTPExpiryWorkerReleasesHoldOnce(t *testing.T) {
 	defer srv.Close()
 	// 1-second expiry policy so the worker can fire on controlled time.
 	pkgID, facID, snap := seedHTTPPackageFacilityPolicy(t, st, 2, httpDayT(1), httpDayT(4),
-		`{"allocation_policy":{"reservation_expiry_seconds":1,"temporary_stay_min_days":1,"temporary_stay_max_days":14,"allow_transfers":true}}`)
+		`{"allocation_policy":{"reservation_expiry_seconds":1,"temporary_stay_min_days":1,"temporary_stay_max_days":14,"allow_transfers":true,"route_required":false}}`)
 	_, token := createSession(t, srv)
 
 	rec := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token,
