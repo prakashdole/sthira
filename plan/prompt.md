@@ -31,7 +31,7 @@ Status vocabulary: NOT_STARTED, IN_PROGRESS, BLOCKED_EXTERNAL, DONE. Evidence ap
 | P2 | Government-data contracts and scenario ingestion | P1 | PARTIAL | Infra DONE (capfeed/opkg/sourceact/catalogue/context-resolver); catalogue acceptance BLOCKED on O01 user data; see "P2 completion record" below |
 | P3 | Durable storage, authorization and ledger foundation | P1 + P2 contract slice | IN_PROGRESS | Checkpoint A DONE; Checkpoint B storage layer + migration written AND real-DB verified on PostgreSQL 18 + PostGIS 3.6 (11/11 store tests pass); see "P3 Checkpoint B record" and "P3 Checkpoint B real-DB verification" below |
 | P4 | Destination choice and immediate/temporary stays | P2 + P3 | IN_PROGRESS | Citizen stay flows verified; operator auth/idempotency/quarantine/persisted-context gaps reopened and re-verified (schema rev 4); O05/O07 stay OPEN; live operator IdP BLOCKED_EXTERNAL; see "P4 completion record" below |
-| P5 | Offline package and map-delivery protocol | P2 + P3 | NOT_STARTED | None for new implementation |
+| P5 | Offline package and map-delivery protocol | P2 + P3 | NOT_STARTED | Shared implementation contract: [plan/p5-contract.md](p5-contract.md); none for new implementation |
 | P6 | Regional ASR, constrained middle model and TTS | P1 + P4 + P5 | NOT_STARTED | None for new implementation |
 | P7 | Backend security, performance and handoff gate B | P0–P6 acceptance evidence | NOT_STARTED | None for new implementation |
 | P8 | Select and implement Android and iPhone clients | Gate B | NOT_STARTED | None for new implementation |
@@ -803,6 +803,7 @@ End-to-end synthetic choice→reservation→arrival→temporary stay→departure
 ## P5 — Offline package and map-delivery protocol
 
 Prerequisites: P2 + P3. Initial status: NOT_STARTED.
+Shared implementation contract: [plan/p5-contract.md](p5-contract.md).
 
 ### Read and establish
 
