@@ -526,3 +526,154 @@ func TestOperatorQuarantineCrossJurisdiction(t *testing.T) {
 		t.Fatalf("expected AUTHORIZED unchanged, got %s", state)
 	}
 }
+
+// --- Item A: persisted identity + current-grant enforcement ---
+
+// TestOperatorGrantRevokedDeniesOperationAndReplay: a session issued under a
+// valid grant is denied once that grant is revoked — both a fresh operation and
+// the replay of a previously-completed key.
+func TestOperatorGrantRevokedDeniesOperationAndReplay(t *testing.T) {
+	srv, st := newOperatorServer(t, syntheticVerifier{})
+	grantOperator(t, st, "subj-rev", "JTEST")
+	srcID := seedOperatorSource(t, st, "JTEST")
+	_, token, rec := issueOperator(t, srv, "subj-rev")
+	if rec.code != http.StatusCreated {
+		t.Fatalf("operator session: code=%d body=%s", rec.code, rec.body)
+	}
+
+	// Complete a transition so a replayable key exists.
+	ok := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/transitions", token,
+		`{"target":"OPERATIONAL","idempotency_key":"t-1","reason":"publish"}`)
+	if ok.code != http.StatusOK {
+		t.Fatalf("initial transition: code=%d body=%s", ok.code, ok.body)
+	}
+
+	// Revoke the grant out-of-band.
+	now := time.Now().UTC()
+	if err := (store.OperatorGrantStore{}).RevokeOperatorGrant(t.Context(), st.DB(), "subj-rev", "JTEST", now); err != nil {
+		t.Fatalf("revoke grant: %v", err)
+	}
+
+	// Replay of the completed key is denied (no disclosure under a dead grant).
+	rep := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/transitions", token,
+		`{"target":"OPERATIONAL","idempotency_key":"t-1","reason":"publish"}`)
+	if rep.code != http.StatusForbidden {
+		t.Fatalf("replay after revoke: expected 403, got %d body=%s", rep.code, rep.body)
+	}
+	// A fresh operation is denied too.
+	fresh := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/transitions", token,
+		`{"target":"SUSPENDED","idempotency_key":"t-2","reason":"suspend"}`)
+	if fresh.code != http.StatusForbidden {
+		t.Fatalf("fresh op after revoke: expected 403, got %d body=%s", fresh.code, fresh.body)
+	}
+	// Source state unchanged by the denied attempts (still OPERATIONAL from t-1).
+	var state string
+	if err := st.DB().QueryRowContext(t.Context(), `SELECT state FROM sources WHERE source_id=$1`, srcID).Scan(&state); err != nil {
+		t.Fatalf("read source: %v", err)
+	}
+	if state != "OPERATIONAL" {
+		t.Fatalf("expected OPERATIONAL unchanged, got %s", state)
+	}
+}
+
+// TestOperatorGrantExpiredDeniesSession: a session whose grant has expired is
+// denied even though the session itself is unexpired and unrevoked.
+func TestOperatorGrantExpiredDeniesSession(t *testing.T) {
+	srv, st := newOperatorServer(t, syntheticVerifier{})
+	// Grant that expires almost immediately.
+	now := time.Now().UTC()
+	exp := now.Add(2 * time.Second)
+	if err := (store.OperatorGrantStore{}).GrantOperator(t.Context(), st.DB(),
+		"GRANT-subj-exp-JTEST", "subj-exp", "JTEST", "test-admin", &exp, now); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	srcID := seedOperatorSource(t, st, "JTEST")
+	_, token, rec := issueOperator(t, srv, "subj-exp")
+	if rec.code != http.StatusCreated {
+		t.Fatalf("operator session: code=%d body=%s", rec.code, rec.body)
+	}
+	// Let the grant expire.
+	time.Sleep(3 * time.Second)
+	resp := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/transitions", token,
+		`{"target":"OPERATIONAL","idempotency_key":"e-1","reason":"publish"}`)
+	if resp.code != http.StatusForbidden {
+		t.Fatalf("expired grant: expected 403, got %d body=%s", resp.code, resp.body)
+	}
+}
+
+// TestLegacyUnboundOperatorSessionCannotAct: an OPERATOR session with no
+// persisted verified subject (legacy self-attested) cannot act, even if its
+// token is otherwise live. Migration 0005 revokes these; this asserts the store
+// also refuses to treat them as grant-bound.
+func TestLegacyUnboundOperatorSessionCannotAct(t *testing.T) {
+	st := httpTestDB(t)
+	now := time.Now().UTC()
+	// Insert a legacy operator session directly: MFA present but no subject/grant.
+	sessID := "SESS-legacy-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	if _, err := st.DB().ExecContext(t.Context(), `
+		INSERT INTO sessions (session_id, principal_kind, jurisdiction, credential_ref, created_at, expires_at, mfa_verified_at)
+		VALUES ($1,'OPERATOR','JTEST',$2,$3,$4,$5)`,
+		sessID, "legacy-cred", now, now.Add(time.Hour), now); err != nil {
+		t.Fatalf("insert legacy session: %v", err)
+	}
+	// ValidateSessionGrant must reject a session with no subject/grant binding.
+	sess := store.Session{SessionID: sessID, PrincipalKind: "OPERATOR"}
+	err := store.OperatorGrantStore{}.ValidateSessionGrant(sess, store.Grant{}, now)
+	if !errors.Is(err, store.ErrGrantInvalid) {
+		t.Fatalf("expected ErrGrantInvalid for unbound session, got %v", err)
+	}
+}
+
+// TestOperatorAuditResolvesToVerifiedIdentity: the audit actor (operator
+// session) resolves through the session row to the verified identity subject.
+func TestOperatorAuditResolvesToVerifiedIdentity(t *testing.T) {
+	srv, st := newOperatorServer(t, syntheticVerifier{})
+	grantOperator(t, st, "subj-audit", "JTEST")
+	srcID := seedOperatorSource(t, st, "JTEST")
+	opSess, token, rec := issueOperator(t, srv, "subj-audit")
+	if rec.code != http.StatusCreated {
+		t.Fatalf("operator session: code=%d body=%s", rec.code, rec.body)
+	}
+	ok := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/transitions", token,
+		`{"target":"OPERATIONAL","idempotency_key":"a-1","reason":"publish"}`)
+	if ok.code != http.StatusOK {
+		t.Fatalf("transition: code=%d body=%s", ok.code, ok.body)
+	}
+	// Trace event -> session -> verified subject.
+	var subject string
+	err := st.DB().QueryRowContext(t.Context(), `
+		SELECT s.operator_subject FROM audit_events a
+		JOIN sessions s ON s.session_id = a.actor_id
+		WHERE a.subject_id = $1 AND a.to_state = 'OPERATIONAL'`, srcID).Scan(&subject)
+	if err != nil {
+		t.Fatalf("trace audit to subject: %v", err)
+	}
+	if subject != "subj-audit" {
+		t.Fatalf("expected audit to resolve to verified subject subj-audit, got %q (actor session %s)", subject, opSess)
+	}
+}
+
+// TestCitizenSessionUnaffectedByOperatorGrant: a citizen session still works for
+// the citizen path and is denied on operator routes, independent of grants.
+func TestCitizenSessionUnaffectedByOperatorGrant(t *testing.T) {
+	srv, _ := newOperatorServer(t, syntheticVerifier{})
+	// Citizen session via the public endpoint.
+	c := do(t, srv, http.MethodPost, "/api/v3/sessions", "application/json", `{}`)
+	if c.code != http.StatusCreated {
+		t.Fatalf("citizen session: code=%d body=%s", c.code, c.body)
+	}
+	env := decodeEnvelope(t, c)
+	var data struct {
+		Token string `json:"token"`
+	}
+	b, _ := json.Marshal(env.Data)
+	if err := json.Unmarshal(b, &data); err != nil {
+		t.Fatalf("decode citizen session: %v", err)
+	}
+	srcID := "OPSRC-citizen"
+	denied := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/transitions", data.Token,
+		`{"target":"OPERATIONAL","idempotency_key":"c-1"}`)
+	if denied.code != http.StatusForbidden {
+		t.Fatalf("citizen on operator route: expected 403, got %d body=%s", denied.code, denied.body)
+	}
+}

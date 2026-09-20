@@ -11,6 +11,7 @@ package httpserver
 // writes are idempotency-keyed and commit atomically with their audit event.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -55,10 +56,11 @@ func (s *Server) handleCreateOperatorSession(w http.ResponseWriter, r *http.Requ
 		s.writeError(w, r, http.StatusForbidden, contracts.ErrForbidden, "operator MFA not verified", "", false)
 		return
 	}
-	// Derive the permitted jurisdiction from a server-controlled grant bound to
-	// the verified subject. The caller does not choose it.
+	// Derive the permitted jurisdiction and authorizing grant from a
+	// server-controlled grant bound to the verified subject. The caller does not
+	// choose it.
 	now := time.Now().UTC()
-	jurisdiction, err := store.OperatorGrantStore{}.FirstJurisdiction(r.Context(), s.store.DB(), id.Subject, now)
+	grant, err := store.OperatorGrantStore{}.FirstLiveGrant(r.Context(), s.store.DB(), id.Subject, now)
 	if err != nil {
 		if errors.Is(err, store.ErrNoOperatorGrant) {
 			s.writeError(w, r, http.StatusForbidden, contracts.ErrForbidden, "no operator grant for verified identity", "", false)
@@ -68,7 +70,7 @@ func (s *Server) handleCreateOperatorSession(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	sessionID := newID("SESS")
-	token, err := store.IssueOperatorSession(r.Context(), s.store.DB(), sessionID, jurisdiction, id.MFAVerifiedAt, 8*time.Hour, now)
+	token, err := store.IssueOperatorSession(r.Context(), s.store.DB(), sessionID, grant.Jurisdiction, id.Subject, grant.GrantID, id.MFAVerifiedAt, 8*time.Hour, now)
 	if err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, contracts.ErrInternal, "failed to issue operator session", "", false)
 		return
@@ -77,7 +79,7 @@ func (s *Server) handleCreateOperatorSession(w http.ResponseWriter, r *http.Requ
 		"session_id":   sessionID,
 		"token":        token, // shown once; only its hash is stored
 		"principal":    "OPERATOR",
-		"jurisdiction": jurisdiction,
+		"jurisdiction": grant.Jurisdiction,
 		"expires_in":   int((8 * time.Hour).Seconds()),
 	})
 }
@@ -139,6 +141,11 @@ func (s *Server) handleSourceTransition(w http.ResponseWriter, r *http.Request) 
 	err = s.store.InTx(r.Context(), func(tx store.DBTX) error {
 		res, rep, err := idem.Begin(r.Context(), tx, op.SessionID, opName, req.IdempotencyKey, payloadHash, now.Add(24*time.Hour))
 		if err != nil {
+			return err
+		}
+		// Revalidate the session's CURRENT grant (expiry/revocation/jurisdiction)
+		// before any replay disclosure or mutation; a withdrawn grant denies both.
+		if err := revalidateOperatorGrant(r.Context(), tx, op, now); err != nil {
 			return err
 		}
 		// Revalidate current authorization for THIS target before disclosing any
@@ -243,6 +250,11 @@ func (s *Server) handleStayCorrection(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		// Revalidate the session's CURRENT grant before any replay disclosure or
+		// mutation; a withdrawn grant denies both.
+		if err := revalidateOperatorGrant(r.Context(), tx, op, now); err != nil {
+			return err
+		}
 		// Revalidate jurisdiction for THIS stay before disclosing any replay
 		// result or applying a correction.
 		jur, err := stays.StayFacilityJurisdiction(r.Context(), tx, stayID)
@@ -338,6 +350,11 @@ func (s *Server) handleSourceQuarantine(w http.ResponseWriter, r *http.Request) 
 		if err != nil {
 			return err
 		}
+		// Revalidate the session's CURRENT grant before any replay disclosure or
+		// mutation; a withdrawn grant denies both.
+		if err := revalidateOperatorGrant(r.Context(), tx, op, now); err != nil {
+			return err
+		}
 		// Revalidate jurisdiction for THIS source before disclosing a replay or
 		// acting. Scope via the source's current authorization jurisdiction.
 		jur, has, err := sources.AuthorizationJurisdiction(r.Context(), tx, sourceID, now)
@@ -387,11 +404,30 @@ var (
 	errNoAuthorization   = errors.New("source has no valid authorization")
 )
 
+// revalidateOperatorGrant re-checks, inside the operation's transaction, that
+// the session's authorizing grant is still live (unexpired, unrevoked) and still
+// binds the session's verified subject and jurisdiction. The grant row is locked
+// FOR UPDATE so a concurrent revocation commits only after this operation
+// commits — a withdrawn grant cannot be bypassed by a stale authorization check.
+// Runs before any replay disclosure or mutation.
+func revalidateOperatorGrant(ctx context.Context, tx store.DBTX, op store.Session, now time.Time) error {
+	if op.OperatorGrantID == nil {
+		return store.ErrGrantInvalid
+	}
+	g, err := store.OperatorGrantStore{}.LiveGrantForUpdate(ctx, tx, *op.OperatorGrantID)
+	if err != nil {
+		return err
+	}
+	return store.OperatorGrantStore{}.ValidateSessionGrant(op, g, now)
+}
+
 // writeOperatorError maps store/scope errors onto the operator error envelope.
 func (s *Server) writeOperatorError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, errCrossJurisdiction):
 		s.writeError(w, r, http.StatusForbidden, contracts.ErrForbidden, "target outside operator jurisdiction", "", false)
+	case errors.Is(err, store.ErrGrantInvalid):
+		s.writeError(w, r, http.StatusForbidden, contracts.ErrForbidden, "operator grant expired, revoked or no longer matches", "", false)
 	case errors.Is(err, errNoAuthorization):
 		s.writeError(w, r, http.StatusConflict, contracts.ErrValidation, "source has no valid authorization to operate", "", false)
 	case errors.Is(err, store.ErrPayloadConflict), errors.Is(err, store.ErrInProgress):

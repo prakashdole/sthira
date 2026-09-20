@@ -53,24 +53,97 @@ func (OperatorGrantStore) HasOperatorGrant(ctx context.Context, db DBTX, subject
 	return exists, err
 }
 
+// Grant holds a persisted operator grant row.
+type Grant struct {
+	GrantID      string
+	Subject      string
+	Jurisdiction string
+	ExpiresAt    *time.Time
+	RevokedAt    *time.Time
+}
+
+// ErrGrantInvalid is returned when a session's authorizing grant is expired,
+// revoked, or no longer matches the session's subject/jurisdiction.
+var ErrGrantInvalid = errors.New("store: operator grant no longer valid")
+
+// LiveGrantForUpdate locks and reads a grant row by ID inside the caller's
+// transaction. Locking the row serializes a concurrent revocation: a grant
+// withdrawn after this lock is taken commits only after the in-flight operation
+// commits, so an operation never acts on a grant already withdrawn before its
+// own commit. Returns ErrGrantInvalid when the grant does not exist.
+func (OperatorGrantStore) LiveGrantForUpdate(ctx context.Context, db DBTX, grantID string) (Grant, error) {
+	var g Grant
+	err := db.QueryRowContext(ctx, `
+		SELECT grant_id, subject, jurisdiction, expires_at, revoked_at
+		FROM operator_grants WHERE grant_id = $1 FOR UPDATE`, grantID).
+		Scan(&g.GrantID, &g.Subject, &g.Jurisdiction, &g.ExpiresAt, &g.RevokedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Grant{}, ErrGrantInvalid
+	}
+	if err != nil {
+		return Grant{}, err
+	}
+	return g, nil
+}
+
+// ValidateSessionGrant re-checks that the operator session's authorizing grant
+// is still live (unexpired, unrevoked) and still binds the session's verified
+// subject and jurisdiction. Call it inside the operation's transaction (after
+// LiveGrantForUpdate) so a withdrawn grant cannot be bypassed by a stale check.
+func (OperatorGrantStore) ValidateSessionGrant(sess Session, g Grant, now time.Time) error {
+	if sess.OperatorSubject == nil || sess.OperatorGrantID == nil {
+		return ErrGrantInvalid // legacy/unbound session: no trusted identity
+	}
+	if g.GrantID != *sess.OperatorGrantID {
+		return ErrGrantInvalid
+	}
+	if g.RevokedAt != nil {
+		return ErrGrantInvalid
+	}
+	if g.ExpiresAt != nil && !now.Before(*g.ExpiresAt) {
+		return ErrGrantInvalid
+	}
+	if g.Subject != *sess.OperatorSubject {
+		return ErrGrantInvalid
+	}
+	if sess.Jurisdiction == nil || g.Jurisdiction != *sess.Jurisdiction {
+		return ErrGrantInvalid
+	}
+	return nil
+}
+
 // FirstJurisdiction returns the jurisdiction of the subject's live grant, or
 // ErrNoOperatorGrant when none. The verified subject does not choose a
 // jurisdiction; issuance derives it from the server-controlled grant. When a
 // subject holds multiple live grants this returns the earliest-created one; the
 // single-grant case is the supported operator model here.
 func (OperatorGrantStore) FirstJurisdiction(ctx context.Context, db DBTX, subject string, now time.Time) (string, error) {
-	var j string
-	err := db.QueryRowContext(ctx, `
-		SELECT jurisdiction FROM operator_grants
-		WHERE subject = $1
-		  AND revoked_at IS NULL
-		  AND (expires_at IS NULL OR expires_at > $2)
-		ORDER BY created_at ASC LIMIT 1`, subject, now).Scan(&j)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNoOperatorGrant
-	}
+	g, err := OperatorGrantStore{}.FirstLiveGrant(ctx, db, subject, now)
 	if err != nil {
 		return "", err
 	}
-	return j, nil
+	return g.Jurisdiction, nil
+}
+
+// FirstLiveGrant returns the subject's live (unexpired, unrevoked) grant, or
+// ErrNoOperatorGrant when none. The verified subject does not choose a
+// jurisdiction; issuance derives it from the server-controlled grant. When a
+// subject holds multiple live grants this returns the earliest-created one; the
+// single-grant case is the supported operator model here.
+func (OperatorGrantStore) FirstLiveGrant(ctx context.Context, db DBTX, subject string, now time.Time) (Grant, error) {
+	var g Grant
+	err := db.QueryRowContext(ctx, `
+		SELECT grant_id, subject, jurisdiction, expires_at, revoked_at FROM operator_grants
+		WHERE subject = $1
+		  AND revoked_at IS NULL
+		  AND (expires_at IS NULL OR expires_at > $2)
+		ORDER BY created_at ASC LIMIT 1`, subject, now).
+		Scan(&g.GrantID, &g.Subject, &g.Jurisdiction, &g.ExpiresAt, &g.RevokedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Grant{}, ErrNoOperatorGrant
+	}
+	if err != nil {
+		return Grant{}, err
+	}
+	return g, nil
 }

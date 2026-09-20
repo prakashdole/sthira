@@ -31,6 +31,14 @@ type Session struct {
 	// citizens and for operators who have not completed MFA; operational access
 	// requires it non-nil.
 	MFAVerifiedAt *time.Time
+	// OperatorSubject is the verified identity subject this operator session was
+	// issued for. Nil for citizens and for legacy operator sessions issued before
+	// trusted identity was persisted (those are revoked at migration 0005 and can
+	// no longer act). Audit attribution traces event -> session -> this subject.
+	OperatorSubject *string
+	// OperatorGrantID is the grant this session was issued under. The current
+	// validity of that grant is re-checked on every protected operation.
+	OperatorGrantID *string
 }
 
 // ErrMFARequired is returned when an operator session lacks MFA verification.
@@ -61,13 +69,21 @@ func IssueCitizenSession(ctx context.Context, db DBTX, sessionID string, ttl tim
 	return token, nil
 }
 
-// IssueOperatorSession creates a jurisdiction-scoped OPERATOR session. It
-// requires verified MFA evidence: mfaVerifiedAt must be non-nil (the caller has
-// verified the second factor through a real identity/MFA boundary before
-// calling). Jurisdiction is required. Only the token hash is persisted.
-func IssueOperatorSession(ctx context.Context, db DBTX, sessionID, jurisdiction string, mfaVerifiedAt *time.Time, ttl time.Duration, now time.Time) (token string, err error) {
+// IssueOperatorSession creates a jurisdiction-scoped OPERATOR session bound to
+// a verified identity and the grant that authorized it. It requires verified
+// MFA evidence (mfaVerifiedAt non-nil), the verified subject, and the grant ID.
+// Jurisdiction is required and must match the grant's. Only the token hash is
+// persisted. Persisting subject + grant lets every protected operation re-check
+// the CURRENT grant and lets audit trace event -> session -> verified identity.
+func IssueOperatorSession(ctx context.Context, db DBTX, sessionID, jurisdiction, subject, grantID string, mfaVerifiedAt *time.Time, ttl time.Duration, now time.Time) (token string, err error) {
 	if jurisdiction == "" {
 		return "", errors.New("store: operator jurisdiction required")
+	}
+	if subject == "" {
+		return "", errors.New("store: operator verified subject required")
+	}
+	if grantID == "" {
+		return "", errors.New("store: operator grant id required")
 	}
 	if mfaVerifiedAt == nil {
 		return "", ErrMFARequired
@@ -78,9 +94,9 @@ func IssueOperatorSession(ctx context.Context, db DBTX, sessionID, jurisdiction 
 	}
 	token = hex.EncodeToString(raw)
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO sessions (session_id, principal_kind, jurisdiction, credential_ref, created_at, expires_at, mfa_verified_at)
-		VALUES ($1, 'OPERATOR', $2, $3, $4, $5, $6)`,
-		sessionID, jurisdiction, hashToken(token), now, now.Add(ttl), mfaVerifiedAt)
+		INSERT INTO sessions (session_id, principal_kind, jurisdiction, credential_ref, created_at, expires_at, mfa_verified_at, operator_subject, operator_grant_id)
+		VALUES ($1, 'OPERATOR', $2, $3, $4, $5, $6, $7, $8)`,
+		sessionID, jurisdiction, hashToken(token), now, now.Add(ttl), mfaVerifiedAt, subject, grantID)
 	if err != nil {
 		return "", err
 	}
@@ -93,9 +109,11 @@ func Authenticate(ctx context.Context, db DBTX, token string, now time.Time) (Se
 	var s Session
 	var revokedAt *time.Time
 	err := db.QueryRowContext(ctx, `
-		SELECT session_id, principal_kind, jurisdiction, expires_at, revoked_at, mfa_verified_at
+		SELECT session_id, principal_kind, jurisdiction, expires_at, revoked_at, mfa_verified_at,
+		       operator_subject, operator_grant_id
 		FROM sessions WHERE credential_ref = $1`, hashToken(token)).
-		Scan(&s.SessionID, &s.PrincipalKind, &s.Jurisdiction, &s.ExpiresAt, &revokedAt, &s.MFAVerifiedAt)
+		Scan(&s.SessionID, &s.PrincipalKind, &s.Jurisdiction, &s.ExpiresAt, &revokedAt, &s.MFAVerifiedAt,
+			&s.OperatorSubject, &s.OperatorGrantID)
 	if err != nil {
 		return Session{}, ErrSessionInvalid
 	}
