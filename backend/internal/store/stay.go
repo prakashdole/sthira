@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -707,7 +708,7 @@ func (s *StayStore) Correct(ctx context.Context, db DBTX, stayID string, newPart
 		return nil
 	}
 	return s.audit.Record(ctx, db, AuditEvent{
-		EventID:   auditEventID(stayID, "STAY_CORRECT", idemKey),
+		EventID:   auditEventID(stayID, "STAY_CORRECT", operatorSessionID, idemKey),
 		OccuredAt: now,
 		ActorID:   operatorSessionID,
 		Action:    "STAY_CORRECT",
@@ -720,16 +721,20 @@ func (s *StayStore) Correct(ctx context.Context, db DBTX, stayID string, newPart
 }
 
 // auditEventID builds a unique audit event ID by combining the subject ID,
-// action, and optional idempotency key. When idemKey is provided, it is
-// included to give each distinct committed operation a unique identity. This
-// prevents collisions on repeated legitimate operations (e.g., two extensions
-// with different keys) while preserving exactly-once behavior for retries of
-// the same operation (same key produces same EventID).
-func auditEventID(subjectID, action, idemKey string) string {
+// action, actor and optional idempotency key. When idemKey is provided, it
+// is included to give each distinct committed operation a unique identity.
+// This prevents collisions on repeated legitimate operations (e.g., two
+// extensions with different keys) while preserving exactly-once behavior
+// for retries of the same operation (same key + same actor produces same
+// EventID). Different authorized operator sessions using the same key for
+// distinct corrections do NOT collide because their ActorID is part of the
+// identity.
+func auditEventID(subjectID, action, actorID, idemKey string) string {
+	parts := []string{subjectID, action, actorID}
 	if idemKey != "" {
-		return subjectID + ":" + action + ":" + idemKey
+		parts = append(parts, idemKey)
 	}
-	return subjectID + ":" + action
+	return strings.Join(parts, ":")
 }
 
 // record appends an audit event for a stay transition. idemKey is the
@@ -740,7 +745,7 @@ func (s *StayStore) record(ctx context.Context, db DBTX, stayID, sessionID, acti
 		return nil
 	}
 	return s.audit.Record(ctx, db, AuditEvent{
-		EventID:   auditEventID(stayID, action, idemKey),
+		EventID:   auditEventID(stayID, action, sessionID, idemKey),
 		OccuredAt: now,
 		ActorID:   sessionID,
 		Action:    action,

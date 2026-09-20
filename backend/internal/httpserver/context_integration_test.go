@@ -16,6 +16,15 @@ import (
 	"sthira/backend/internal/store"
 )
 
+// uniqueJTEST returns a per-test-run unique jurisdiction identifier so the
+// persisted context resolver cannot collide with packages left in the
+// shared DB by earlier runs. The persisted resolver is jurisdiction-scoped
+// (D36); giving each test its own jurisdiction is the smallest isolation
+// seam that works against the shared-DB fixture state.
+func uniqueJTEST() string {
+	return "JTEST-" + fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
 // seedOperationalPackage seeds a package whose source is OPERATIONAL with a
 // valid authorization, so the persisted resolver can resolve it. The body
 // carries known IDs and languages. Returns (packageID, sourceID).
@@ -99,15 +108,18 @@ func resolveDataVersion(t *testing.T, st *store.Store, jurisdiction string) stor
 }
 
 // TestPersistedContextResolves: a valid persisted snapshot resolves and a valid
-// proposal validates against it.
+// proposal validates against it. The test uses a per-run unique jurisdiction
+// so it does not depend on the (shared) DB's state for the canonical JTEST
+// jurisdiction; the persisted resolver is jurisdiction-scoped.
 func TestPersistedContextResolves(t *testing.T) {
 	st := httpTestDB(t)
 	s := New(DefaultConfig("127.0.0.1:0"), WithStore(st), WithPersistedContextResolver(st))
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
-	seedOperationalPackage(t, st, "JTEST")
-	snap := resolveDataVersion(t, st, "JTEST")
+	jur := uniqueJTEST()
+	seedOperationalPackage(t, st, jur)
+	snap := resolveDataVersion(t, st, jur)
 	// Use a known ID from the resolved snapshot.
 	var knownID string
 	for id := range snap.KnownIDs {
@@ -119,7 +131,7 @@ func TestPersistedContextResolves(t *testing.T) {
 	}
 
 	rec := do(t, srv, http.MethodPost, "/api/v3/voice/commands", "application/json",
-		voiceProposal("req-1", snap.DataVersion, "JTEST", knownID))
+		voiceProposal("req-1", snap.DataVersion, jur, knownID))
 	if rec.code != http.StatusOK {
 		t.Fatalf("expected 200 valid proposal, got %d body=%s", rec.code, rec.body)
 	}
@@ -143,15 +155,16 @@ func TestPersistedContextStaleClientVersion(t *testing.T) {
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
-	seedOperationalPackage(t, st, "JTEST")
-	snap := resolveDataVersion(t, st, "JTEST")
+	jur := uniqueJTEST()
+	seedOperationalPackage(t, st, jur)
+	snap := resolveDataVersion(t, st, jur)
 	var knownID string
 	for id := range snap.KnownIDs {
 		knownID = id
 		break
 	}
 	rec := do(t, srv, http.MethodPost, "/api/v3/voice/commands", "application/json",
-		voiceProposal("req-1", "stale-version:99", "JTEST", knownID))
+		voiceProposal("req-1", "stale-version:99", jur, knownID))
 	if rec.code != http.StatusConflict {
 		t.Fatalf("expected 409 stale version, got %d body=%s", rec.code, rec.body)
 	}
@@ -197,10 +210,11 @@ func TestPersistedContextUnknownIDRejected(t *testing.T) {
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
-	seedOperationalPackage(t, st, "JTEST")
-	snap := resolveDataVersion(t, st, "JTEST")
+	jur := uniqueJTEST()
+	seedOperationalPackage(t, st, jur)
+	snap := resolveDataVersion(t, st, jur)
 	rec := do(t, srv, http.MethodPost, "/api/v3/voice/commands", "application/json",
-		voiceProposal("req-1", snap.DataVersion, "JTEST", "FAC-DOES-NOT-EXIST"))
+		voiceProposal("req-1", snap.DataVersion, jur, "FAC-DOES-NOT-EXIST"))
 	if rec.code != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422 unknown ID, got %d body=%s", rec.code, rec.body)
 	}

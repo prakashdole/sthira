@@ -191,18 +191,6 @@ func TestRequestBodyCannotEnableSyntheticRoute(t *testing.T) {
 func TestValidIsolatedSyntheticFlowSucceeds(t *testing.T) {
 	st := httpDB(t)
 	pkgID, _, _ := seedHTTPPackageFacility(t, st, 3, httpDayT(1), httpDayT(4))
-	// Seed a zone_versions row for the facility's safe zone so Eligible joins
-	// succeed; seedHTTPPackageFacility only inserts facility_inventory.
-	now := time.Now().UTC()
-	if err := st.InTx(context.Background(), func(tx store.DBTX) error {
-		_, err := tx.ExecContext(context.Background(), `
-			INSERT INTO zone_versions (zone_id, package_id, kind, role, status, capacity, location, version, updated_at)
-			VALUES ('SZ', $1, 'SAFE', NULL, 'OPEN', NULL, NULL, 1, $2)`,
-			pkgID, now)
-		return err
-	}); err != nil {
-		t.Fatalf("seed zone_versions: %v", err)
-	}
 	seedRoute(t, st, pkgID, "RT-ISO", "RZA", "SZ", "SYNTHETIC_DEMO")
 
 	q := store.ChoiceQuery{

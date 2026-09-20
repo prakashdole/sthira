@@ -237,6 +237,9 @@ func TestExpiryArrivalRace(t *testing.T) {
 }
 
 // TestExpiryWorker: the running worker expires a due hold against the DB.
+// The Tick returns a count over the WHOLE DB (the worker has no per-tick
+// filter), so the assertion checks that THIS test's stay was expired
+// regardless of any other concurrently-due stays left by earlier runs.
 func TestExpiryWorker(t *testing.T) {
 	s := testDB(t)
 	ctx := context.Background()
@@ -254,12 +257,8 @@ func TestExpiryWorker(t *testing.T) {
 	}
 
 	w := NewExpiryWorker(s, stays)
-	n, err := w.Tick(ctx)
-	if err != nil {
+	if _, err := w.Tick(ctx); err != nil {
 		t.Fatalf("Tick: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("worker expired %d, want 1", n)
 	}
 	var state string
 	if err := s.db.QueryRowContext(ctx, `SELECT state FROM stays WHERE stay_id=$1`, st.StayID).Scan(&state); err != nil {
