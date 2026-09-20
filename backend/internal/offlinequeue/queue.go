@@ -33,12 +33,13 @@ import (
 // OpState is the durable state of a pending operation.
 //
 // State transitions:
-//   PENDING -> IN_FLIGHT          (worker dispatches)
-//   IN_FLIGHT -> COMMITTED        (server 2xx)
-//   IN_FLIGHT -> FAILED_STALE     (snapshot drift, hold expired, or 4xx selection error)
-//   IN_FLIGHT -> FAILED_PERM      (4xx other than stale/hold, or max attempts exceeded)
-//   COMMITTED -> (removed by PurgeCommitted, never auto-retried)
-//   FAILED_STALE/Failed_PERM -> (held for inspection; new operation needed)
+//
+//	PENDING -> IN_FLIGHT          (worker dispatches)
+//	IN_FLIGHT -> COMMITTED        (server 2xx)
+//	IN_FLIGHT -> FAILED_STALE     (snapshot drift, hold expired, or 4xx selection error)
+//	IN_FLIGHT -> FAILED_PERM      (4xx other than stale/hold, or max attempts exceeded)
+//	COMMITTED -> (removed by PurgeCommitted, never auto-retried)
+//	FAILED_STALE/Failed_PERM -> (held for inspection; new operation needed)
 type OpState string
 
 const (
@@ -70,13 +71,13 @@ var (
 // never touch disk. (See plan/p5-contract.md §1.2 invariant 1: public/private
 // separation.)
 type PendingOperation struct {
-	ID              string          `json:"id"`
-	CreatedAt       time.Time       `json:"created_at"`
-	IdempotencyKey  string          `json:"idempotency_key"`
-	Endpoint        string          `json:"endpoint"` // e.g. "/api/v3/reservations"
-	Method          string          `json:"method"`   // "POST" for reservation.create/stay events
-	TokenRef        string          `json:"token_ref"`
-	Payload         json.RawMessage `json:"payload"`
+	ID             string          `json:"id"`
+	CreatedAt      time.Time       `json:"created_at"`
+	IdempotencyKey string          `json:"idempotency_key"`
+	Endpoint       string          `json:"endpoint"` // e.g. "/api/v3/reservations"
+	Method         string          `json:"method"`   // "POST" for reservation.create/stay events
+	TokenRef       string          `json:"token_ref"`
+	Payload        json.RawMessage `json:"payload"`
 	// PayloadHash is sha256 over (IdempotencyKey + "\n" + Payload). It binds
 	// the operation to one exact intended submission. The store refuses a
 	// re-enqueue with the same key but a different hash (ErrPayloadChanged):
