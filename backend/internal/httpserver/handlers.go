@@ -46,19 +46,24 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 // voiceCommandRequest is the typed chat/transcript command body. The model
 // proposal it carries is validated independently against the server snapshot.
 // The client-supplied request_id/data_version are NOT trusted: they are only
-// correlated against the server-resolved snapshot.
+// correlated against the server-resolved snapshot. The jurisdiction is an
+// untrusted lookup input selecting WHICH jurisdiction's snapshot to resolve;
+// it never proves authorization or snapshot contents.
 type voiceCommandRequest struct {
-	RequestID   string                `json:"request_id"`
-	DataVersion string                `json:"data_version"`
-	Proposal    contracts.ModelOutput `json:"proposal"`
+	RequestID    string                `json:"request_id"`
+	DataVersion  string                `json:"data_version"`
+	Jurisdiction string                `json:"jurisdiction"`
+	Proposal     contracts.ModelOutput `json:"proposal"`
 }
 
 // handleVoiceCommands validates a middle-model proposal against the
 // server-resolved snapshot. It performs no write, call or capacity mutation.
 //
 // Trust boundary: the authoritative data version, jurisdiction and permitted
-// IDs are resolved server-side via the ContextResolver. Client-echoed
-// request_id/data_version are never treated as proof of a trusted snapshot.
+// IDs are resolved server-side via the ContextResolver, scoped to the requested
+// jurisdiction. Client-echoed request_id/data_version are never treated as
+// proof of a trusted snapshot, and the requested jurisdiction is an untrusted
+// lookup input — it selects which snapshot to resolve, never its contents.
 // Until a resolver is wired (P4 binds a real source snapshot), this endpoint
 // fails closed with 503 rather than validating against client-supplied values.
 func (s *Server) handleVoiceCommands(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +94,15 @@ func (s *Server) handleVoiceCommands(w http.ResponseWriter, r *http.Request) {
 			"no authoritative context resolver configured; proposal cannot be validated", "", true)
 		return
 	}
-	snap, rerr := s.resolver.Resolve(r.Context())
+	// The jurisdiction is required to select which snapshot to resolve. Without
+	// it the resolver would have to guess across jurisdictions; that is rejected,
+	// never defaulted to the highest-version package.
+	if req.Jurisdiction == "" {
+		s.writeError(w, r, http.StatusBadRequest, contracts.ErrValidation,
+			"jurisdiction is required to resolve the authoritative context", "jurisdiction", false)
+		return
+	}
+	snap, rerr := s.resolver.Resolve(r.Context(), req.Jurisdiction)
 	if rerr != nil {
 		s.logger.Warn("context resolution failed", "request_id", requestID(r), "reason", rerr.Error())
 		s.writeError(w, r, http.StatusServiceUnavailable, contracts.ErrDataUnavailable,

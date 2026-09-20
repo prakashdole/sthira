@@ -135,7 +135,7 @@ func TestLivenessRejectsWrongMethod(t *testing.T) {
 }
 
 func validCommandBody() string {
-	return `{"request_id":"REQ-DEMO-1","data_version":"EXERCISE-7","proposal":` +
+	return `{"request_id":"REQ-DEMO-1","data_version":"EXERCISE-7","jurisdiction":"JTEST","proposal":` +
 		`{"schema_version":"3.0","request_id":"REQ-DEMO-1","data_version":"EXERCISE-7","status":"OK","intent":"FOCUS_PLACE","language":"ml-IN","actions":[{"type":"FOCUS_FEATURE","target_id":"PLACE-DEMO-1"}],"speech_key":null,"clarification_ids":[],"evidence_ids":["PLACE-DEMO-1"]}}`
 }
 
@@ -201,7 +201,7 @@ func TestVoiceCommandsRejectsUnknownField(t *testing.T) {
 func TestVoiceCommandsRejectsProhibitedAction(t *testing.T) {
 	srv := httptest.NewServer(newTestServer().Handler())
 	defer srv.Close()
-	body := `{"request_id":"REQ-DEMO-1","data_version":"EXERCISE-7","proposal":` +
+	body := `{"request_id":"REQ-DEMO-1","data_version":"EXERCISE-7","jurisdiction":"JTEST","proposal":` +
 		`{"schema_version":"3.0","request_id":"REQ-DEMO-1","data_version":"EXERCISE-7","status":"OK","intent":"OPEN_CONFIRMATION","language":"en-IN","actions":[{"type":"DIAL_112","target_id":"112"}],"speech_key":null,"clarification_ids":[],"evidence_ids":[]}}`
 	rec := do(t, srv, http.MethodPost, "/api/v3/voice/commands", "application/json", body)
 	if rec.code != http.StatusUnprocessableEntity {

@@ -419,11 +419,18 @@ components:
         retryable: { type: boolean }
     VoiceCommandRequest:
       type: object
-      required: [request_id, data_version, proposal]
+      required: [request_id, data_version, jurisdiction, proposal]
       additionalProperties: false
       properties:
         request_id: { type: string }
         data_version: { type: string }
+        jurisdiction:
+          type: string
+          description: >-
+            Untrusted lookup input selecting WHICH jurisdiction's authoritative
+            snapshot to resolve. Never proof of authorization or snapshot
+            contents. Required; an unknown/empty jurisdiction resolves nothing
+            (fail closed) rather than substituting another jurisdiction.
         proposal: { $ref: '#/components/schemas/ModelOutput' }
     ModelOutput:
       type: object

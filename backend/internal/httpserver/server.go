@@ -39,12 +39,16 @@ type ContextSnapshot struct {
 }
 
 // ContextResolver resolves the authoritative snapshot for one request. It is
-// the seam where P4 will bind a real source snapshot; until one is wired the
+// the seam where P4 binds a real source snapshot; until one is wired the
 // voice-commands endpoint fails closed rather than trusting client echoes.
 type ContextResolver interface {
-	// Resolve returns the current snapshot, or an error if no authoritative
-	// context is available. The error text is redacted before the response.
-	Resolve(ctx context.Context) (ContextSnapshot, error)
+	// Resolve returns the current snapshot for the requested jurisdiction, or an
+	// error if no authoritative context is available for it. The jurisdiction is
+	// an untrusted lookup input: it selects WHICH snapshot to resolve, never
+	// proves authorization or snapshot contents. An empty/unknown jurisdiction
+	// yields no snapshot (fail closed); the resolver never substitutes another
+	// jurisdiction's package. The error text is redacted before the response.
+	Resolve(ctx context.Context, jurisdiction string) (ContextSnapshot, error)
 }
 
 // Server is the bounded /api/v3 HTTP boundary.
@@ -64,12 +68,14 @@ type Server struct {
 }
 
 // persistedResolver adapts the store's persisted context resolution to the
-// ContextResolver seam. It resolves from the current authorized OPERATIONAL
-// package and fails closed when none exists.
+// ContextResolver seam. It resolves the snapshot for the REQUESTED jurisdiction
+// only — never the highest-version package across unrelated jurisdictions — and
+// fails closed when that jurisdiction has no current authorized OPERATIONAL
+// package.
 type persistedResolver struct{ st *store.Store }
 
-func (p persistedResolver) Resolve(ctx context.Context) (ContextSnapshot, error) {
-	snap, err := store.ResolveAnyOperationalContext(ctx, p.st.DB(), time.Now().UTC())
+func (p persistedResolver) Resolve(ctx context.Context, jurisdiction string) (ContextSnapshot, error) {
+	snap, err := store.ResolveContext(ctx, p.st.DB(), jurisdiction, time.Now().UTC())
 	if err != nil {
 		return ContextSnapshot{}, err
 	}
@@ -91,15 +97,15 @@ func WithPersistedContextResolver(st *store.Store) Option {
 }
 
 // StaticContextResolver returns a ContextResolver that always serves the same
-// snapshot. It is for the demo/test slice only; P4 binds a real source
-// snapshot resolver.
+// snapshot regardless of jurisdiction. It is for the demo/test slice only; P4
+// binds a real source snapshot resolver.
 func StaticContextResolver(snap ContextSnapshot) ContextResolver {
 	return staticResolver{snap: snap}
 }
 
 type staticResolver struct{ snap ContextSnapshot }
 
-func (s staticResolver) Resolve(ctx context.Context) (ContextSnapshot, error) {
+func (s staticResolver) Resolve(ctx context.Context, _ string) (ContextSnapshot, error) {
 	return s.snap, nil
 }
 

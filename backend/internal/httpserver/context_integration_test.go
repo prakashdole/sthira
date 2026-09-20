@@ -21,17 +21,23 @@ import (
 // carries known IDs and languages. Returns (packageID, sourceID).
 func seedOperationalPackage(t *testing.T, st *store.Store, jurisdiction string) (string, string) {
 	t.Helper()
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
-	srcID, artID, pkgID := "CSRC-"+suffix, "CART-"+suffix, "CPKG-"+suffix
-	hash := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	body := `{
+	return seedOperationalPackageBody(t, st, jurisdiction, `{
 		"red_zones":[{"id":"RZ-1"}],
 		"safe_zones":[{"id":"SZ-1"}],
 		"approved_routes":[{"id":"RT-1"}],
 		"facilities":[{"id":"FAC-1"}],
 		"instruction_assets":[{"id":"IA-1","language":"en-IN"},{"id":"IA-2","language":"hi-IN"}]
-	}`
+	}`)
+}
+
+// seedOperationalPackageBody is seedOperationalPackage with a caller-supplied
+// package body, so tests can give each jurisdiction distinct known IDs.
+func seedOperationalPackageBody(t *testing.T, st *store.Store, jurisdiction, body string) (string, string) {
+	t.Helper()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	srcID, artID, pkgID := "CSRC-"+suffix, "CART-"+suffix, "CPKG-"+suffix
+	hash := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	sources := store.NewSourceStore(store.ChainAuditor{})
 	err := st.InTx(t.Context(), func(tx store.DBTX) error {
 		if _, err := tx.ExecContext(t.Context(), `
@@ -66,25 +72,26 @@ func seedOperationalPackage(t *testing.T, st *store.Store, jurisdiction string) 
 }
 
 // voiceProposal builds a minimal valid ModelOutput proposal referencing a known
-// ID via a FOCUS_FEATURE action, in the enabled language en-IN.
-func voiceProposal(requestID, dataVersion, knownID string) string {
+// ID via a FOCUS_FEATURE action, in the enabled language en-IN, scoped to a
+// jurisdiction.
+func voiceProposal(requestID, dataVersion, jurisdiction, knownID string) string {
 	return fmt.Sprintf(`{
-		"request_id":%q,"data_version":%q,
+		"request_id":%q,"data_version":%q,"jurisdiction":%q,
 		"proposal":{
 			"schema_version":"3.0","request_id":%q,"data_version":%q,
 			"status":"OK","intent":"PREVIEW_DESTINATION","language":"en-IN",
 			"actions":[{"type":"FOCUS_FEATURE","target_id":%q}],
 			"speech_key":null,"clarification_ids":[],"evidence_ids":[]
 		}
-	}`, requestID, dataVersion, requestID, dataVersion, knownID)
+	}`, requestID, dataVersion, jurisdiction, requestID, dataVersion, knownID)
 }
 
-// resolveDataVersion reads the snapshot the persisted resolver currently
-// resolves, so a test validates against the actual current package rather than
-// assuming its own seed wins in the shared DB.
-func resolveDataVersion(t *testing.T, st *store.Store) store.ContextSnapshot {
+// resolveDataVersion reads the snapshot the persisted resolver resolves for a
+// jurisdiction, so a test validates against the actual current package rather
+// than assuming its own seed wins in the shared DB.
+func resolveDataVersion(t *testing.T, st *store.Store, jurisdiction string) store.ContextSnapshot {
 	t.Helper()
-	snap, err := store.ResolveAnyOperationalContext(t.Context(), st.DB(), time.Now().UTC())
+	snap, err := store.ResolveContext(t.Context(), st.DB(), jurisdiction, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("resolve context: %v", err)
 	}
@@ -100,7 +107,7 @@ func TestPersistedContextResolves(t *testing.T) {
 	defer srv.Close()
 
 	seedOperationalPackage(t, st, "JTEST")
-	snap := resolveDataVersion(t, st)
+	snap := resolveDataVersion(t, st, "JTEST")
 	// Use a known ID from the resolved snapshot.
 	var knownID string
 	for id := range snap.KnownIDs {
@@ -112,7 +119,7 @@ func TestPersistedContextResolves(t *testing.T) {
 	}
 
 	rec := do(t, srv, http.MethodPost, "/api/v3/voice/commands", "application/json",
-		voiceProposal("req-1", snap.DataVersion, knownID))
+		voiceProposal("req-1", snap.DataVersion, "JTEST", knownID))
 	if rec.code != http.StatusOK {
 		t.Fatalf("expected 200 valid proposal, got %d body=%s", rec.code, rec.body)
 	}
@@ -137,14 +144,14 @@ func TestPersistedContextStaleClientVersion(t *testing.T) {
 	defer srv.Close()
 
 	seedOperationalPackage(t, st, "JTEST")
-	snap := resolveDataVersion(t, st)
+	snap := resolveDataVersion(t, st, "JTEST")
 	var knownID string
 	for id := range snap.KnownIDs {
 		knownID = id
 		break
 	}
 	rec := do(t, srv, http.MethodPost, "/api/v3/voice/commands", "application/json",
-		voiceProposal("req-1", "stale-version:99", knownID))
+		voiceProposal("req-1", "stale-version:99", "JTEST", knownID))
 	if rec.code != http.StatusConflict {
 		t.Fatalf("expected 409 stale version, got %d body=%s", rec.code, rec.body)
 	}
@@ -191,10 +198,142 @@ func TestPersistedContextUnknownIDRejected(t *testing.T) {
 	defer srv.Close()
 
 	seedOperationalPackage(t, st, "JTEST")
-	snap := resolveDataVersion(t, st)
+	snap := resolveDataVersion(t, st, "JTEST")
 	rec := do(t, srv, http.MethodPost, "/api/v3/voice/commands", "application/json",
-		voiceProposal("req-1", snap.DataVersion, "FAC-DOES-NOT-EXIST"))
+		voiceProposal("req-1", snap.DataVersion, "JTEST", "FAC-DOES-NOT-EXIST"))
 	if rec.code != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422 unknown ID, got %d body=%s", rec.code, rec.body)
+	}
+}
+
+// --- Item D: voice context scoped to the requested jurisdiction ---
+
+// TestVoiceContextScopedPerJurisdiction: two jurisdictions with different
+// package versions each resolve their OWN snapshot; neither is resolved from
+// the other's package.
+func TestVoiceContextScopedPerJurisdiction(t *testing.T) {
+	st := httpTestDB(t)
+	s := New(DefaultConfig("127.0.0.1:0"), WithStore(st), WithPersistedContextResolver(st))
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	jurA := "JA-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	jurB := "JB-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	seedOperationalPackageBody(t, st, jurA, `{"facilities":[{"id":"FAC-A"}],"instruction_assets":[{"id":"IA","language":"en-IN"}]}`)
+	seedOperationalPackageBody(t, st, jurB, `{"facilities":[{"id":"FAC-B"}],"instruction_assets":[{"id":"IA","language":"en-IN"}]}`)
+
+	snapA := resolveDataVersion(t, st, jurA)
+	snapB := resolveDataVersion(t, st, jurB)
+	if snapA.DataVersion == snapB.DataVersion {
+		t.Fatalf("jurisdictions resolved the same snapshot %q", snapA.DataVersion)
+	}
+	if !snapA.KnownIDs["FAC-A"] || snapA.KnownIDs["FAC-B"] {
+		t.Fatalf("jurA snapshot has wrong IDs: %+v", snapA.KnownIDs)
+	}
+	if !snapB.KnownIDs["FAC-B"] || snapB.KnownIDs["FAC-A"] {
+		t.Fatalf("jurB snapshot has wrong IDs: %+v", snapB.KnownIDs)
+	}
+
+	// A proposal scoped to jurA validates against jurA's snapshot.
+	rec := do(t, srv, http.MethodPost, "/api/v3/voice/commands", "application/json",
+		voiceProposal("req-a", snapA.DataVersion, jurA, "FAC-A"))
+	if rec.code != http.StatusOK {
+		t.Fatalf("jurA proposal: code=%d body=%s", rec.code, rec.body)
+	}
+	// A proposal scoped to jurB validates against jurB's snapshot.
+	rec = do(t, srv, http.MethodPost, "/api/v3/voice/commands", "application/json",
+		voiceProposal("req-b", snapB.DataVersion, jurB, "FAC-B"))
+	if rec.code != http.StatusOK {
+		t.Fatalf("jurB proposal: code=%d body=%s", rec.code, rec.body)
+	}
+}
+
+// TestVoiceContextMissingJurisdictionRejected: an empty jurisdiction is
+// rejected (400), never defaulted to another jurisdiction's package.
+func TestVoiceContextMissingJurisdictionRejected(t *testing.T) {
+	st := httpTestDB(t)
+	s := New(DefaultConfig("127.0.0.1:0"), WithStore(st), WithPersistedContextResolver(st))
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	jur := "JM-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	seedOperationalPackage(t, st, jur)
+	snap := resolveDataVersion(t, st, jur)
+
+	rec := do(t, srv, http.MethodPost, "/api/v3/voice/commands", "application/json",
+		voiceProposal("req-m", snap.DataVersion, "", "FAC-1"))
+	if rec.code != http.StatusBadRequest {
+		t.Fatalf("missing jurisdiction: code=%d, want 400; body=%s", rec.code, rec.body)
+	}
+}
+
+// TestVoiceContextUnknownJurisdictionFailsClosed: a jurisdiction with no
+// operational package resolves nothing (503), never another jurisdiction's.
+func TestVoiceContextUnknownJurisdictionFailsClosed(t *testing.T) {
+	st := httpTestDB(t)
+	s := New(DefaultConfig("127.0.0.1:0"), WithStore(st), WithPersistedContextResolver(st))
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	// A real jurisdiction with a package exists, but we query a different one.
+	seedOperationalPackage(t, st, "JREAL-"+fmt.Sprintf("%d", time.Now().UnixNano()))
+
+	rec := do(t, srv, http.MethodPost, "/api/v3/voice/commands", "application/json",
+		voiceProposal("req-u", "any:1", "JURISDICTION-NONE-"+fmt.Sprintf("%d", time.Now().UnixNano()), "FAC-1"))
+	if rec.code != http.StatusServiceUnavailable {
+		t.Fatalf("unknown jurisdiction: code=%d, want 503; body=%s", rec.code, rec.body)
+	}
+}
+
+// TestVoiceContextCrossJurisdictionIDRejected: an ID known in jurisdiction A is
+// rejected when the request is scoped to jurisdiction B (wrong-jurisdiction IDs
+// fail; no cross-jurisdiction leakage).
+func TestVoiceContextCrossJurisdictionIDRejected(t *testing.T) {
+	st := httpTestDB(t)
+	s := New(DefaultConfig("127.0.0.1:0"), WithStore(st), WithPersistedContextResolver(st))
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	jurA := "JCA-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	jurB := "JCB-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	seedOperationalPackageBody(t, st, jurA, `{"facilities":[{"id":"FAC-A"}],"instruction_assets":[{"id":"IA","language":"en-IN"}]}`)
+	seedOperationalPackageBody(t, st, jurB, `{"facilities":[{"id":"FAC-B"}],"instruction_assets":[{"id":"IA","language":"en-IN"}]}`)
+
+	snapB := resolveDataVersion(t, st, jurB)
+	// FAC-A is known in jurA but the request is scoped to jurB: must be 422.
+	rec := do(t, srv, http.MethodPost, "/api/v3/voice/commands", "application/json",
+		voiceProposal("req-x", snapB.DataVersion, jurB, "FAC-A"))
+	if rec.code != http.StatusUnprocessableEntity {
+		t.Fatalf("cross-jurisdiction ID: code=%d, want 422; body=%s", rec.code, rec.body)
+	}
+}
+
+// TestVoiceContextRevocationInvalidatesSubsequent: quarantining a
+// jurisdiction's source invalidates subsequent requests scoped to it.
+func TestVoiceContextRevocationInvalidatesSubsequent(t *testing.T) {
+	st := httpTestDB(t)
+	s := New(DefaultConfig("127.0.0.1:0"), WithStore(st), WithPersistedContextResolver(st))
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	jur := "JR-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	_, srcID := seedOperationalPackage(t, st, jur)
+	snap := resolveDataVersion(t, st, jur)
+
+	// Resolves and validates before quarantine.
+	rec := do(t, srv, http.MethodPost, "/api/v3/voice/commands", "application/json",
+		voiceProposal("req-pre", snap.DataVersion, jur, "FAC-1"))
+	if rec.code != http.StatusOK {
+		t.Fatalf("pre-quarantine: code=%d body=%s", rec.code, rec.body)
+	}
+
+	quarantineSource(t, st, srcID)
+
+	// Same request now fails closed (503): the jurisdiction has no operational
+	// context, and no other jurisdiction is substituted.
+	rec = do(t, srv, http.MethodPost, "/api/v3/voice/commands", "application/json",
+		voiceProposal("req-post", snap.DataVersion, jur, "FAC-1"))
+	if rec.code != http.StatusServiceUnavailable {
+		t.Fatalf("post-quarantine: code=%d, want 503; body=%s", rec.code, rec.body)
 	}
 }
