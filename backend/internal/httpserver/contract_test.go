@@ -19,8 +19,10 @@ func TestServedRoutesMatchOpenAPI(t *testing.T) {
 		wrongVerb  string
 		wantStatus int
 	}{
-		{"/api/v3/health/live", http.MethodPost, http.StatusMethodNotAllowed},
-		{"/api/v3/health/ready", http.MethodPost, http.StatusMethodNotAllowed},
+		// Health endpoints are served unprefixed (existing convention); the
+		// OpenAPI `servers: /api/v3` prefix does not apply to them.
+		{"/health/live", http.MethodPost, http.StatusMethodNotAllowed},
+		{"/health/ready", http.MethodPost, http.StatusMethodNotAllowed},
 		{"/api/v3/voice/commands", http.MethodGet, http.StatusMethodNotAllowed},
 		{"/api/v3/sessions", http.MethodGet, http.StatusMethodNotAllowed},
 		{"/api/v3/places/resolve", http.MethodGet, http.StatusMethodNotAllowed},

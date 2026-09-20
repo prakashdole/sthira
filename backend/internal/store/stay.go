@@ -352,7 +352,14 @@ func (s *StayStore) Transfer(ctx context.Context, db DBTX, stayID, newStayID, ne
 			return err
 		}
 	}
-	// Create the replacement stay in RESERVED, linked to its origin.
+	// Create the replacement reservation then the replacement stay in RESERVED,
+	// linked to its origin. The reservation row must exist for the stay FK.
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO reservations (reservation_id, session_id, facility_id, service_date, party_size, state, version, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,'RESERVED',1,$6,$6)`,
+		newReservationID, st.SessionID, newFacilityID, st.StartDate, st.PartySize, now); err != nil {
+		return err
+	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO stays (stay_id, reservation_id, session_id, facility_id, party_size,
 			start_date, end_date, state, package_id, route_id, transferred_from, version, created_at, updated_at, expires_at)

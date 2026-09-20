@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,9 +40,13 @@ func testDB(t *testing.T) *Store {
 	return s
 }
 
+// uidCounter makes uid collision-proof across concurrent goroutines in the
+// same nanosecond.
+var uidCounter atomic.Int64
+
 // uid returns a run-unique id with the given prefix.
 func uid(prefix string) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())))
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", prefix, time.Now().UnixNano(), uidCounter.Add(1))))
 	return prefix + "-" + hex.EncodeToString(sum[:6])
 }
 
