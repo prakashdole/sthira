@@ -30,7 +30,7 @@ Status vocabulary: NOT_STARTED, IN_PROGRESS, BLOCKED_EXTERNAL, DONE. Evidence ap
 | P1 | Go foundation and executable contracts | P0 | DONE | Go 1.27.1 pinned; bounded `/api/v3` slice in `backend/`; see "P1 completion record" below |
 | P2 | Government-data contracts and scenario ingestion | P1 | PARTIAL | Infra DONE (capfeed/opkg/sourceact/catalogue/context-resolver); catalogue acceptance BLOCKED on O01 user data; see "P2 completion record" below |
 | P3 | Durable storage, authorization and ledger foundation | P1 + P2 contract slice | IN_PROGRESS | Checkpoint A DONE; Checkpoint B storage layer + migration written AND real-DB verified on PostgreSQL 18 + PostGIS 3.6 (11/11 store tests pass); see "P3 Checkpoint B record" and "P3 Checkpoint B real-DB verification" below |
-| P4 | Destination choice and immediate/temporary stays | P2 + P3 | NOT_STARTED | None for new implementation |
+| P4 | Destination choice and immediate/temporary stays | P2 + P3 | DONE | Citizen stay flows + operator APIs real-DB verified (PostgreSQL 18 + PostGIS 3.6, schema rev 3); O05/O07 stay OPEN; see "P4 completion record" below |
 | P5 | Offline package and map-delivery protocol | P2 + P3 | NOT_STARTED | None for new implementation |
 | P6 | Regional ASR, constrained middle model and TTS | P1 + P4 + P5 | NOT_STARTED | None for new implementation |
 | P7 | Backend security, performance and handoff gate B | P0–P6 acceptance evidence | NOT_STARTED | None for new implementation |
@@ -405,6 +405,73 @@ Next eligible step: P4 Part A — P3 closure (crash-recovery and backup/restore
   evidence, main.go DB wiring, cross-process concurrency), then P4 citizen stay
   flows. P4 stay workflows and P5 remain out of scope until then.
 ```
+
+## P4 completion record (2026-09-20) — destination choice and stays
+
+Phase / status: P4 — Destination choice and immediate/temporary stays — DONE
+  (citizen stay flows + operator APIs, real-DB verified). Route authority O05
+  and stay policy O07 remain OPEN; only isolated synthetic fixtures exercised.
+Starting and checked revision: CLEAN branch; final commit fdc24d1.
+Scope completed and changed files:
+  Part A (P3 closure, commit 2b33fa7): real-server crash-after-commit retry
+    (build-tag `crashtest` fault injection, never in production), pg_dump/
+    pg_restore backup/restore into uniquely-named disposable DBs, main.go DB
+    wiring + readiness prober (required-revision check), cross-process
+    concurrency for last-space. Ledger A1 honesty correction applied above.
+  Part B (citizen stays, commits 7056e4b, 71532f9, 6aefbb5): citizen session
+    auth (crypto/rand bearer, SHA-256 hash stored, expiry+revocation); scoped
+    place/alias resolution with explicit ambiguity; eligible destination choice
+    (route gate false while O05 open; unknown capacity shown unknown, never
+    promised); read-only preview separate from explicit reservation with
+    source-snapshot revalidation at commit; full stay state machine
+    (reserve/arrive/cancel/expire/depart/extend/transfer) with date-range
+    capacity conservation (E = free+held+occupied; arrival held->occupied with
+    no second decrement; failed transfer retains original); half-open [start,
+    end) facility-local dates + deterministic lock ordering; bounded retry-safe
+    expiry worker; versioned route validation (operational routing disabled).
+    Files: internal/store/stay.go, internal/httpserver/stay_handlers.go,
+    auth.go, server.go, cmd/sthira/main.go, migrations/0002_p4_stays.sql,
+    contracts/openapi.yaml, contract_test.go, stay_integration_test.go,
+    stay_http_integration_test.go.
+  Part C (operator APIs, commit fdc24d1): OPERATOR session issuance gated on
+    MFA evidence (sessions.mfa_verified_at, migration 0003, SchemaRevision 3);
+    withOperator middleware (OPERATOR kind + MFA non-nil); jurisdiction-scoped
+    source publish/suspend/revoke (AUTHORIZED->OPERATIONAL->RETIRED via
+    source_authorizations) and auditable downward-only stay correction (actor =
+    operator session). Cross-jurisdiction -> FORBIDDEN. Files:
+    internal/httpserver/operator.go, operator_handlers.go,
+    operator_http_integration_test.go, internal/store/session.go
+    (IssueOperatorSession, MFAVerifiedAt), source.go (AuthorizationJurisdiction),
+    stay.go (Correct, StayFacilityJurisdiction), migrations/0003_p4_operator.sql.
+Tests/commands, environment and results (PostgreSQL 18.6 + PostGIS 3.6, DSN
+  postgres://apple@localhost:5432/sthira_test, schema revision 3):
+  - Store suite (stay_integration_test.go): 11/11 pass — lifecycle conservation,
+    concurrent last-space (8 goroutines, exactly 1 wins), expiry/arrival race,
+    expiry worker, failed/successful transfer, overlapping intervals, multi-date
+    deadlock-free, extend-adds-only-new-dates, cancel-releases-hold.
+  - HTTP citizen suite (stay_http_integration_test.go): 8/8 pass — reserve+read,
+    session required (401), cross-session denial (403), duplicate-confirmation
+    replay (same stay_id, no double hold), stale snapshot (409 STALE_VERSION),
+    capacity conflict no-substitution (409), arrive/depart conservation, honest
+    unknown capacity with route gate false.
+  - HTTP operator suite (operator_http_integration_test.go): 6/6 pass — MFA
+    required (403 without), citizen-token denial on operator route (403),
+    publish/revoke supersession to RETIRED v3 with idempotent replay,
+    cross-jurisdiction source denial (source unchanged), correction audit
+    attributed to operator session with held 3->1, cross-jurisdiction correction
+    denial (held unchanged).
+  - Contract test: every OpenAPI-documented path routed (405 not 404).
+  - Full suite `go test ./... -count=1`: all packages ok.
+  Real bugs found and fixed by real-DB tests: Transfer missing replacement
+    reservation insert (stays_reservation_id_fkey); uid() nanosecond collision
+    under concurrency (atomic counter).
+Unresolved internal work: none for P4 scope.
+External dependency, owner and exact evidence needed: O05 route authority and
+  O07 stay policy remain OPEN (plan/open-decisions.md); operational routing and
+  real stay policy stay disabled. P2 catalogue acceptance remains blocked on O01.
+  Live government integration remains disabled (P11).
+Next eligible step: P5 — offline package and map-delivery protocol. No native
+  frontend, no permanent relocation, no geofencing; .txt preserved.
 
 ## Required completion record
 

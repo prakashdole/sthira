@@ -27,6 +27,11 @@
 | D21 | Accepted | Go 1.27.1 pinned as the backend toolchain; stdlib-only P1 slice builds offline | P1; revisit on supported-release cadence |
 | D22 | Accepted | `/api/v3` contract slice frozen in `backend/contracts/openapi.yaml`; v2 kept only as reference for the old demo client during migration | P1; P10 retires v2 compatibility |
 | D23 | Accepted | Strict JSON boundary rejects duplicate keys, unknown fields, trailing data, oversized bodies and excess depth before typed decoding | P1; R05 trust boundary |
+| D24 | Accepted | Citizen sessions are account-free capability tokens: crypto/rand bearer, only SHA-256 hash stored, expiry + revocation; knowing an ID is not authorization (R22) | P4; no mandatory civil identity |
+| D25 | Accepted | Operator authority requires verified identity + MFA (sessions.mfa_verified_at), not the OPERATOR label alone; operations jurisdiction-scoped, cross-jurisdiction FORBIDDEN | P4; R22; synthetic MFA attestation in this slice, real MFA boundary at P11 |
+| D26 | Accepted | Stay dates are half-open [start, end) in facility-local-date semantics (facilities.timezone); capacity E = free+held+occupied conserved per service_date; arrival converts held->occupied with no second decrement | P4; equations.md |
+| D27 | Accepted | Operator stay correction is downward-only (releases space, always conservation-safe); an increase needs new capacity and is rejected rather than silently overbooking | P4; capacity conservation |
+| D28 | Accepted | Multi-date reservations/transfers lock inventory in deterministic (facility_id, service_date) sorted order to avoid deadlock | P4; concurrency evidence |
 
 ## Material changes from the previous plan
 
