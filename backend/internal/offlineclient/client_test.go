@@ -1,6 +1,7 @@
 package offlineclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1257,6 +1258,211 @@ func TestSameRevisionRepair(t *testing.T) {
 		t.Fatalf("repaired card invalid: state = %v", state)
 	}
 }
+
+// TestResumableTransferRealConnectionDrop verifies that when a real connection drops
+// mid-download, the client has streamed partial bytes into the .part file on disk,
+// and a subsequent request resumes from that offset and succeeds.
+func TestResumableTransferRealConnectionDrop(t *testing.T) {
+	fullPayload := make([]byte, 10000)
+	for i := range fullPayload {
+		fullPayload[i] = byte(i % 251)
+	}
+	expectedHash := offlinepkg.ChecksumSHA256(fullPayload)
+
+	attempt := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempt++
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.Header().Set("ETag", `"res-v1"`)
+
+		if attempt == 1 {
+			// First attempt: stream 3000 bytes then drop connection violently
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fullPayload)))
+			w.WriteHeader(http.StatusOK)
+
+			// Write 3000 bytes
+			_, _ = w.Write(fullPayload[:3000])
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			// Hijack and close raw connection to simulate mid-transfer drop
+			if hj, ok := w.(http.Hijacker); ok {
+				conn, _, err := hj.Hijack()
+				if err == nil {
+					conn.Close()
+					return
+				}
+			}
+			return
+		}
+
+		// Second attempt: handle Range request
+		rangeHdr := r.Header.Get("Range")
+		if !strings.HasPrefix(rangeHdr, "bytes=") {
+			t.Errorf("expected Range header on resumed attempt, got %q", rangeHdr)
+			http.Error(w, "bad range", http.StatusBadRequest)
+			return
+		}
+		var start int64
+		fmt.Sscanf(rangeHdr, "bytes=%d-", &start)
+		if start != 3000 {
+			t.Errorf("resumed start offset = %d, want 3000", start)
+		}
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, len(fullPayload)-1, len(fullPayload)))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fullPayload)-int(start)))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(fullPayload[start:])
+	}))
+	defer srv.Close()
+
+	clock := fakeClock(time.Now())
+	dir := t.TempDir()
+	c := newClient(t, srv.URL, dir, clock)
+
+	desc := offlinepkg.ResourceDescriptor{
+		ResourceID:     "res-stream-test",
+		URI:            "/res-stream-test",
+		ChecksumSHA256: expectedHash,
+		ByteSize:       int64(len(fullPayload)),
+		ContentType:    "application/octet-stream",
+	}
+
+	// First attempt must fail due to connection drop
+	err1 := c.DownloadResource(context.Background(), desc, true)
+	if err1 == nil {
+		t.Fatal("expected error on connection drop, got nil")
+	}
+
+	// Verify that the partial file was streamed to disk and NOT discarded
+	partPath := c.partPathForResource("res-stream-test")
+	partBytes, err := os.ReadFile(partPath)
+	if err != nil {
+		t.Fatalf("partial file %s missing after connection drop: %v", partPath, err)
+	}
+	if len(partBytes) != 3000 {
+		t.Fatalf("partial file size = %d, want 3000", len(partBytes))
+	}
+
+	// Second attempt should resume and succeed
+	err2 := c.DownloadResource(context.Background(), desc, true)
+	if err2 != nil {
+		t.Fatalf("resumed download failed: %v", err2)
+	}
+
+	has, err := c.HasResource("res-stream-test")
+	if err != nil || !has {
+		t.Fatalf("HasResource = %v, err = %v, want true", has, err)
+	}
+}
+
+// TestResumableTransferETagDriftFallback verifies that if the server's ETag changes
+// between partial download and resume, the client discards the partial file and
+// downloads the full updated payload.
+func TestResumableTransferETagDriftFallback(t *testing.T) {
+	fullV2 := []byte("updated-full-content-from-server-v2-after-drift")
+	hashV2 := offlinepkg.ChecksumSHA256(fullV2)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Server detects If-Range "old-etag" mismatch and returns 200 OK with full body
+		w.Header().Set("ETag", `"v2"`)
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fullV2)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(fullV2)
+	}))
+	defer srv.Close()
+
+	clock := fakeClock(time.Now())
+	dir := t.TempDir()
+	c := newClient(t, srv.URL, dir, clock)
+
+	// Pre-seed a stale .part with old ETag
+	partPath := c.partPathForResource("res-drift")
+	_ = os.WriteFile(partPath, []byte("stale-partial-bytes"), 0o644)
+	_ = c.storage.writePartMeta(partPath, downloadMeta{
+		URL:            srv.URL + "/res-drift",
+		ExpectedETag:   "old-etag",
+		ExpectedSize:   100,
+		BytesWritten:   int64(len("stale-partial-bytes")),
+		RangeSupported: true,
+	})
+
+	desc := offlinepkg.ResourceDescriptor{
+		ResourceID:     "res-drift",
+		URI:            "/res-drift",
+		ChecksumSHA256: hashV2,
+		ByteSize:       int64(len(fullV2)),
+		ContentType:    "application/octet-stream",
+	}
+
+	err := c.DownloadResource(context.Background(), desc, true)
+	if err != nil {
+		t.Fatalf("DownloadResource with ETag drift failed: %v", err)
+	}
+
+	has, err := c.HasResource("res-drift")
+	if err != nil || !has {
+		t.Fatalf("HasResource = %v, err = %v, want true", has, err)
+	}
+}
+
+// TestResumableTransfer416Reset verifies that when a server returns 416 Range Not Satisfiable,
+// the client resets the .part file and restarts fresh.
+func TestResumableTransfer416Reset(t *testing.T) {
+	fullPayload := []byte("fresh-content-after-416-reset")
+	hash := offlinepkg.ChecksumSHA256(fullPayload)
+
+	attempt := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempt++
+		if r.Header.Get("Range") != "" {
+			// Reject range with 416
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", len(fullPayload)))
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		// Subsequent fresh request succeeds with 200 OK
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fullPayload)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(fullPayload)
+	}))
+	defer srv.Close()
+
+	clock := fakeClock(time.Now())
+	dir := t.TempDir()
+	c := newClient(t, srv.URL, dir, clock)
+
+	// Pre-seed an invalid range .part with matching size
+	partPath := c.partPathForResource("res-416")
+	_ = os.WriteFile(partPath, bytes.Repeat([]byte("x"), 1000), 0o644)
+	_ = c.storage.writePartMeta(partPath, downloadMeta{
+		URL:            srv.URL + "/res-416",
+		ExpectedETag:   "v1",
+		ExpectedSize:   int64(len(fullPayload)),
+		BytesWritten:   1000,
+		RangeSupported: true,
+	})
+
+	desc := offlinepkg.ResourceDescriptor{
+		ResourceID:     "res-416",
+		URI:            "/res-416",
+		ChecksumSHA256: hash,
+		ByteSize:       int64(len(fullPayload)),
+		ContentType:    "application/octet-stream",
+	}
+
+	err := c.DownloadResource(context.Background(), desc, true)
+	if err != nil {
+		t.Fatalf("DownloadResource after 416 reset failed: %v", err)
+	}
+
+	has, err := c.HasResource("res-416")
+	if err != nil || !has {
+		t.Fatalf("HasResource = %v, err = %v, want true", has, err)
+	}
+}
+
+
 
 
 

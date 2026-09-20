@@ -90,187 +90,258 @@ func (c *ProtocolClient) downloadAndVerifyCard(ctx context.Context, req manifest
 	return bytes, &card, n, partPath, nil
 }
 
+// parseContentRange parses "bytes <start>-<end>/<total>" or "bytes <start>-<end>/*".
+func parseContentRange(hdr string) (start, end, total int64, err error) {
+	hdr = strings.TrimSpace(hdr)
+	if !strings.HasPrefix(hdr, "bytes ") {
+		return 0, 0, 0, fmt.Errorf("invalid Content-Range header: %q", hdr)
+	}
+	spec := strings.TrimPrefix(hdr, "bytes ")
+	slashIdx := strings.IndexByte(spec, '/')
+	if slashIdx == -1 {
+		return 0, 0, 0, fmt.Errorf("missing slash in Content-Range: %q", hdr)
+	}
+	rangePart := spec[:slashIdx]
+	totalPart := spec[slashIdx+1:]
+
+	hyphenIdx := strings.IndexByte(rangePart, '-')
+	if hyphenIdx == -1 {
+		return 0, 0, 0, fmt.Errorf("missing hyphen in Content-Range: %q", hdr)
+	}
+	start, err = strconv.ParseInt(rangePart[:hyphenIdx], 10, 64)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("invalid start in Content-Range: %w", err)
+	}
+	end, err = strconv.ParseInt(rangePart[hyphenIdx+1:], 10, 64)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("invalid end in Content-Range: %w", err)
+	}
+	if start < 0 || end < start {
+		return 0, 0, 0, fmt.Errorf("invalid range span in Content-Range: %q", hdr)
+	}
+	if totalPart != "*" {
+		total, err = strconv.ParseInt(totalPart, 10, 64)
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("invalid total in Content-Range: %w", err)
+		}
+		if total >= 0 && end >= total {
+			return 0, 0, 0, fmt.Errorf("end exceeds total in Content-Range: %q", hdr)
+		}
+	} else {
+		total = -1
+	}
+	return start, end, total, nil
+}
+
+type streamResult struct {
+	Bytes        []byte
+	BytesFromNet int64
+	ETag         string
+	PartPath     string
+	RangeSupport bool
+}
+
+// downloadStreaming downloads an artifact chunk-by-chunk directly into a .part file
+// on disk. On network interruption, partial bytes remain on disk and metadata is
+// flushed. On resumption, Range / If-Range is sent. ETag drift or 416 resets and retries.
+func (c *ProtocolClient) downloadStreaming(ctx context.Context, u, partPath string, resume, isCard bool, maxBytes int64) (*streamResult, error) {
+	if err := os.MkdirAll(filepath.Dir(partPath), 0o755); err != nil {
+		return nil, fmt.Errorf("offlineclient: mkdir for .part: %w", err)
+	}
+
+	var existingMeta downloadMeta
+	hadPart := false
+	if resume {
+		if b, err := os.ReadFile(partPath + ".meta"); err == nil {
+			if err := json.Unmarshal(b, &existingMeta); err == nil {
+				if fi, err := os.Stat(partPath); err == nil && fi.Size() == existingMeta.BytesWritten && existingMeta.BytesWritten > 0 {
+					hadPart = true
+				} else {
+					c.storage.clearPart(partPath)
+				}
+			} else {
+				c.storage.clearPart(partPath)
+			}
+		}
+	}
+
+	var resp *http.Response
+	var isResume bool
+
+	if hadPart && existingMeta.BytesWritten > 0 && (existingMeta.ExpectedSize == 0 || existingMeta.BytesWritten < existingMeta.ExpectedSize) && existingMeta.RangeSupported {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, err
+		}
+		if isCard {
+			req.Header.Set("Accept", "application/json")
+		}
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", existingMeta.BytesWritten))
+		if existingMeta.ExpectedETag != "" {
+			req.Header.Set("If-Range", `"`+stripETagQuotes(existingMeta.ExpectedETag)+`"`)
+		}
+		r, err := c.http.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if r.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+			_, _ = io.Copy(io.Discard, r.Body)
+			r.Body.Close()
+			c.storage.clearPart(partPath)
+			return c.downloadStreaming(ctx, u, partPath, false, isCard, maxBytes)
+		} else if r.StatusCode == http.StatusPartialContent {
+			cr := r.Header.Get("Content-Range")
+			start, _, total, perr := parseContentRange(cr)
+			if perr != nil || start != existingMeta.BytesWritten {
+				_, _ = io.Copy(io.Discard, r.Body)
+				r.Body.Close()
+				c.storage.clearPart(partPath)
+				return c.downloadStreaming(ctx, u, partPath, false, isCard, maxBytes)
+			}
+			if total > 0 {
+				existingMeta.ExpectedSize = total
+			}
+			resp = r
+			isResume = true
+		} else if r.StatusCode == http.StatusOK {
+			resp = r
+			isResume = false
+		} else {
+			_, _ = io.Copy(io.Discard, r.Body)
+			r.Body.Close()
+			return nil, fmt.Errorf("offlineclient: GET %s: status %d", u, r.StatusCode)
+		}
+	}
+
+	if resp == nil {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, err
+		}
+		if isCard {
+			req.Header.Set("Accept", "application/json")
+		}
+		r, err := c.http.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if r.StatusCode != http.StatusOK {
+			_, _ = io.Copy(io.Discard, r.Body)
+			r.Body.Close()
+			return nil, fmt.Errorf("offlineclient: GET %s: status %d", u, r.StatusCode)
+		}
+		resp = r
+		isResume = false
+	}
+	defer resp.Body.Close()
+
+	etag := stripETagQuotes(resp.Header.Get("ETag"))
+	_, rangeSupport := resp.Header["Accept-Ranges"]
+
+	var meta downloadMeta
+	var flags int
+	if isResume {
+		meta = existingMeta
+		if etag != "" {
+			meta.ExpectedETag = etag
+		}
+		flags = os.O_WRONLY | os.O_CREATE | os.O_APPEND
+	} else {
+		var expectedSize int64
+		if cl := resp.Header.Get("Content-Length"); cl != "" {
+			expectedSize, _ = strconv.ParseInt(cl, 10, 64)
+		}
+		meta = downloadMeta{
+			URL:            u,
+			ExpectedETag:   etag,
+			ExpectedSize:   expectedSize,
+			BytesWritten:   0,
+			RangeSupported: rangeSupport,
+		}
+		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	}
+
+	f, err := os.OpenFile(partPath, flags, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("offlineclient: open .part file: %w", err)
+	}
+	defer f.Close()
+
+	buf := make([]byte, 32*1024)
+	var bytesFromNet int64
+
+	for {
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 {
+			if maxBytes > 0 && meta.BytesWritten+int64(n) > maxBytes {
+				_ = f.Sync()
+				_ = c.storage.writePartMeta(partPath, meta)
+				return nil, ErrTooLarge
+			}
+			if _, werr := f.Write(buf[:n]); werr != nil {
+				_ = f.Sync()
+				_ = c.storage.writePartMeta(partPath, meta)
+				return nil, fmt.Errorf("offlineclient: write .part: %w", werr)
+			}
+			bytesFromNet += int64(n)
+			meta.BytesWritten += int64(n)
+			_ = f.Sync()
+			_ = c.storage.writePartMeta(partPath, meta)
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			_ = f.Sync()
+			_ = c.storage.writePartMeta(partPath, meta)
+			return nil, rerr
+		}
+	}
+
+	if err := f.Sync(); err != nil {
+		return nil, err
+	}
+	if err := c.storage.writePartMeta(partPath, meta); err != nil {
+		return nil, err
+	}
+
+	finalBytes, err := os.ReadFile(partPath)
+	if err != nil {
+		return nil, fmt.Errorf("offlineclient: read completed .part: %w", err)
+	}
+
+	return &streamResult{
+		Bytes:        finalBytes,
+		BytesFromNet: bytesFromNet,
+		ETag:         meta.ExpectedETag,
+		PartPath:     partPath,
+		RangeSupport: meta.RangeSupported,
+	}, nil
+}
+
 // downloadBytes runs the standard protocol: GET (or Range GET if .part
-// exists with a matching ETag), write to .part + .part.meta, on success
-// validate checksum and return the bytes. The .part files persist after
-// downloadBytes returns so an interrupted activation can resume on next
-// call. Returns the part path so the caller can clear it after activation.
+// exists with a matching ETag), writes directly into .part + .part.meta via streaming,
+// and returns canonical bytes.
 func (c *ProtocolClient) downloadBytes(ctx context.Context, req manifestDownload) ([]byte, int64, string, error) {
 	u, err := c.absoluteURL(req.Path)
 	if err != nil {
 		return nil, 0, "", err
 	}
 	partPath := c.partPathFor(req)
-	var existingMeta downloadMeta
-	hadPart := false
-	if b, err := os.ReadFile(partPath + ".meta"); err == nil {
-		if err := json.Unmarshal(b, &existingMeta); err != nil {
-			// Corrupt meta: discard and restart fresh.
-			c.storage.clearPart(partPath)
-		} else {
-			hadPart = true
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, 0, "", fmt.Errorf("offlineclient: stat part meta: %w", err)
+	maxBytes := c.maxResourceBytes
+	if req.IsCard {
+		maxBytes = 65536
 	}
-
-	var (
-		bytes        []byte
-		bytesFromNet int64
-		etag         string
-		rangeSupport bool
-	)
-	if hadPart && existingMeta.BytesWritten > 0 && existingMeta.BytesWritten < existingMeta.ExpectedSize && existingMeta.RangeSupported {
-		// Resume with Range + If-Range.
-		resumed, et, ok, err := c.fetchRange(ctx, u, existingMeta.BytesWritten, existingMeta.ExpectedETag, req.IsCard, existingMeta.ExpectedSize)
-		if err != nil {
-			return nil, 0, "", err
-		}
-		if !ok {
-			// ETag drifted: server returned 200 OK with the full body.
-			// Restart fresh.
-			c.storage.clearPart(partPath)
-			hadPart = false
-		} else {
-			bytesFromNet = int64(len(resumed))
-			etag = et
-			rangeSupport = true
-			// Append resumed bytes to the existing .part.
-			combined, err := c.appendOrReplacePart(partPath, existingMeta, resumed)
-			if err != nil {
-				return nil, 0, "", err
-			}
-			bytes = combined
-		}
-	}
-	if !hadPart || len(bytes) == 0 {
-		// Fresh download.
-		fresh, et, supports, err := c.fetchFull(ctx, u, req.IsCard)
-		if err != nil {
-			return nil, 0, "", err
-		}
-		bytesFromNet = int64(len(fresh))
-		etag = et
-		rangeSupport = supports
-		bytes = fresh
-	}
-
-	// Validate the cumulative .part byte size against the server's
-	// declared total before checksum verification.
-	if expected := expectedTotal(req, etag, bytes); expected > 0 && int64(len(bytes)) != expected {
-		return nil, 0, "", fmt.Errorf("offlineclient: size mismatch: got %d expected %d", len(bytes), expected)
-	}
-
-	// Persist .part and .part.meta so an interrupted activation resumes
-	// on the next Sync. The .part is removed by the activation caller
-	// after atomic swap; transport only persists, never deletes.
-	if err := os.WriteFile(partPath, bytes, 0o644); err != nil {
-		return nil, 0, "", fmt.Errorf("offlineclient: write .part: %w", err)
-	}
-	meta := downloadMeta{
-		URL:            u,
-		ExpectedETag:   etag,
-		ExpectedSize:   int64(len(bytes)),
-		BytesWritten:   int64(len(bytes)),
-		RangeSupported: rangeSupport,
-	}
-	if err := c.storage.writePartMeta(partPath, meta); err != nil {
+	res, err := c.downloadStreaming(ctx, u, partPath, true, req.IsCard, maxBytes)
+	if err != nil {
 		return nil, 0, "", err
 	}
-	return bytes, bytesFromNet, partPath, nil
-}
 
-// appendOrReplacePart appends resumed bytes to the on-disk .part. The
-// caller has already verified that the resumed bytes start at offset
-// existingMeta.BytesWritten.
-func (c *ProtocolClient) appendOrReplacePart(partPath string, existingMeta downloadMeta, resumed []byte) ([]byte, error) {
-	prev, err := os.ReadFile(partPath)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return nil, err
-		}
-		prev = nil
+	if expected := expectedTotal(req, res.ETag, res.Bytes); expected > 0 && int64(len(res.Bytes)) != expected {
+		return nil, 0, "", fmt.Errorf("offlineclient: size mismatch: got %d expected %d", len(res.Bytes), expected)
 	}
-	if int64(len(prev)) != existingMeta.BytesWritten {
-		// On-disk .part disagrees with meta. Discard and restart the
-		// resume by writing a fresh combined buffer of just the resumed
-		// bytes (caller will detect this and treat as restart).
-		return resumed, nil
-	}
-	out := make([]byte, 0, len(prev)+len(resumed))
-	out = append(out, prev...)
-	out = append(out, resumed...)
-	return out, nil
-}
 
-// fetchFull performs a plain GET. Returns body, ETag, range support.
-func (c *ProtocolClient) fetchFull(ctx context.Context, u string, isCard bool) ([]byte, string, bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, "", false, err
-	}
-	if isCard {
-		req.Header.Set("Accept", "application/json")
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, "", false, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, "", false, fmt.Errorf("offlineclient: GET %s: status %d", u, resp.StatusCode)
-	}
-	body, err := readAllBounded(resp.Body, c.maxResourceBytes)
-	if err != nil {
-		return nil, "", false, err
-	}
-	etag := stripETagQuotes(resp.Header.Get("ETag"))
-	_, rangeSupport := resp.Header["Accept-Ranges"]
-	return body, etag, rangeSupport, nil
-}
-
-// fetchRange performs a Range GET with If-Range. Returns:
-//   - resumed bytes + ETag + ok=true if the server honored the partial
-//     request and the ETag matched (206 Partial Content)
-//   - nil + ok=false if the ETag drifted (200 OK returned); caller
-//     restarts the download
-//   - error on transport failure
-func (c *ProtocolClient) fetchRange(ctx context.Context, u string, start int64, ifRangeETag string, isCard bool, totalHint int64) ([]byte, string, bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, "", false, err
-	}
-	rangeHdr := "bytes=" + strconv.FormatInt(start, 10) + "-"
-	req.Header.Set("Range", rangeHdr)
-	if ifRangeETag != "" {
-		req.Header.Set("If-Range", `"`+ifRangeETag+`"`)
-	}
-	if isCard {
-		req.Header.Set("Accept", "application/json")
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, "", false, err
-	}
-	defer resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusPartialContent:
-		body, err := readAllBounded(resp.Body, c.maxResourceBytes)
-		if err != nil {
-			return nil, "", false, err
-		}
-		etag := stripETagQuotes(resp.Header.Get("ETag"))
-		return body, etag, true, nil
-	case http.StatusOK:
-		// ETag drifted; server returned the full body. Caller discards
-		// the .part and restarts.
-		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil, "", false, nil
-	case http.StatusRequestedRangeNotSatisfiable:
-		return nil, "", false, fmt.Errorf("offlineclient: range unsatisfiable for %s", u)
-	default:
-		return nil, "", false, fmt.Errorf("offlineclient: range GET %s: status %d", u, resp.StatusCode)
-	}
+	return res.Bytes, res.BytesFromNet, res.PartPath, nil
 }
 
 // readAllBounded caps the read at max bytes; ErrTooLarge is returned on
@@ -534,63 +605,29 @@ func (c *ProtocolClient) downloadResource(ctx context.Context, desc offlinepkg.R
 	if desc.ByteSize > 0 && desc.ByteSize < maxRes {
 		maxRes = desc.ByteSize
 	}
-	var (
-		bytes        []byte
-		rangeSupport bool
-		etag         string
-	)
-	if resume {
-		if m, err := c.storage.readPartMeta(partPath); err == nil && m.BytesWritten > 0 && m.BytesWritten < m.ExpectedSize && m.RangeSupported {
-			resumed, et, ok, ferr := c.fetchRange(ctx, u, m.BytesWritten, m.ExpectedETag, false, m.ExpectedSize)
-			if ferr != nil {
-				return ferr
-			}
-			if ok {
-				prev, _ := os.ReadFile(partPath)
-				if int64(len(prev)) == m.BytesWritten {
-					combined := make([]byte, 0, len(prev)+len(resumed))
-					combined = append(combined, prev...)
-					combined = append(combined, resumed...)
-					bytes = combined
-					etag = et
-					rangeSupport = true
-				}
-			}
-		}
+
+	res, err := c.downloadStreaming(ctx, u, partPath, resume, false, maxRes)
+	if err != nil {
+		return err
 	}
-	if len(bytes) == 0 {
-		fresh, et, supports, err := c.fetchFull(ctx, u, false)
-		if err != nil {
-			return err
-		}
-		bytes = fresh
-		etag = et
-		rangeSupport = supports
-	}
-	if int64(len(bytes)) > maxRes {
+
+	if int64(len(res.Bytes)) > maxRes {
 		return ErrTooLarge
 	}
-	if got := offlinepkg.ChecksumSHA256(bytes); got != desc.ChecksumSHA256 {
-		// Persist .part anyway so the next attempt can resume from the
-		// previous offset (bytes match the server's view, just not the
-		// declared digest). On any later retry the caller can decide
-		// whether to discard.
-		_ = os.WriteFile(partPath, bytes, 0o644)
-		_ = c.storage.writePartMeta(partPath, downloadMeta{
-			URL: u, ExpectedETag: etag, ExpectedSize: int64(len(bytes)),
-			BytesWritten: int64(len(bytes)), RangeSupported: rangeSupport,
-		})
+
+	if got := offlinepkg.ChecksumSHA256(res.Bytes); got != desc.ChecksumSHA256 {
 		return offlinepkg.ErrChecksumMismatch
 	}
+
 	// Atomic activation of the resource.
 	meta := resourceMeta{
-		ETag:            etag,
+		ETag:            res.ETag,
 		ChecksumSHA256:  desc.ChecksumSHA256,
-		ByteSize:        int64(len(bytes)),
+		ByteSize:        int64(len(res.Bytes)),
 		ContentType:     desc.ContentType,
 		FetchedAtUnixMS: c.now().UnixMilli(),
 	}
-	if err := c.storage.writeResource(desc.ResourceID, bytes, meta); err != nil {
+	if err := c.storage.writeResource(desc.ResourceID, res.Bytes, meta); err != nil {
 		return fmt.Errorf("offlineclient: activate resource: %w", err)
 	}
 	c.storage.clearPart(partPath)
