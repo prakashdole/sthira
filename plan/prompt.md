@@ -411,11 +411,60 @@ Next eligible step: P4 Part A — P3 closure (crash-recovery and backup/restore
 Phase / status: P4 — Destination choice and immediate/temporary stays —
   IN_PROGRESS. Citizen stay flows are real-DB verified. The operator slice was
   reopened on 2026-09-20 after review found four verified closure gaps; those
-  gaps are now fixed and re-verified (schema revision 4). Route authority O05
-  and stay policy O07 remain OPEN. Live operator authentication is
-  BLOCKED_EXTERNAL on a real identity-provider decision (below); engineering is
-  complete but P4 is not marked DONE while that boundary is externally blocked.
-Starting and checked revision: CLEAN branch; latest commit fdfeb04.
+  gaps are now fixed and re-verified (schema revision 4). A second review the
+  same day found four further engineering defects (not just the external IdP
+  blocker); those remediation items A–D are now implemented and real-DB
+  verified (schema revision 5), and item E re-ran the full + process +
+  migration evidence. Route authority O05 and stay policy O07 remain OPEN.
+  Live operator authentication is BLOCKED_EXTERNAL on a real identity-provider
+  decision (below); P4 is not marked DONE while that boundary is externally
+  blocked.
+Starting and checked revision: CLEAN branch; latest commit cc1e6fb.
+Remediation (second review, 2026-09-20) — items A–E:
+  A. Persisted operator identity + current-grant enforcement (commit df1637e,
+     migration 0005): sessions carry operator_subject + operator_grant_id;
+     every protected operation revalidates the session's CURRENT grant
+     (LiveGrantForUpdate FOR UPDATE row lock + ValidateSessionGrant) before any
+     replay disclosure or mutation, so a withdrawn/expired grant denies both and
+     cannot be bypassed by a stale check. Audit attribution traces
+     event→session→verified subject via JOIN. Migration 0005 revokes legacy
+     unbound (self-attested) operator sessions rather than inferring identity;
+     citizen sessions preserved. Real-DB tests: revoke-grant denies op+replay;
+     expired grant denies a live session; legacy unbound session can't act;
+     audit resolves to verified subject; citizen unaffected.
+  B. Authoritative eligibility at reservation commit (commit 01f969d): the
+     reservation transaction revalidates source OPERATIONAL + live jurisdiction
+     authorization + package effective/unexpired/not-superseded (FOR UPDATE to
+     serialize against concurrent quarantine/revocation/supersession) +
+     facility-in-package + route verified/valid/unclosed. Quarantine, suspend,
+     revoke-authorization and supersede each deny a NEW reservation with
+     capacity unchanged; facility/package mismatch rejected. Existing stays are
+     NOT cancelled nor capacity released on quarantine. Replay of an
+     already-committed reservation still returns the stored result without a
+     new commitment.
+  C. Reservation expiry + stay policy wired to HTTP (commit 01f969d): hold
+     expiry derived from authoritative allocation_policy + server time and
+     persisted atomically on reservation + stay so the expiry worker releases
+     holds. Missing/invalid policy rejected (no invented defaults); out-of-policy
+     dates/extensions can't allocate; extension/transfer revalidate context;
+     transfer writes a FRESH policy-derived deadline, never the old stay's due
+     one. Real-DB tests: deadline stored; worker releases a hold exactly once;
+     missing-policy and out-of-policy rejections; failed transfer preserves the
+     original stay and capacity.
+  D. Voice context scoped to requested jurisdiction (commit cc1e6fb): the
+     ContextResolver seam takes a jurisdiction (untrusted lookup input); the
+     persisted resolver calls store.ResolveContext (jurisdiction-scoped), never
+     ResolveAnyOperationalContext. Missing jurisdiction 400; unknown
+     jurisdiction 503; no arbitrary/highest-version substitution; cross-
+     jurisdiction known IDs rejected; quarantine invalidates subsequent scoped
+     requests. OpenAPI VoiceCommandRequest now requires jurisdiction.
+  E. Verification + ledger (this record): regressions fail against the prior
+     defects before relying on them; full `go test ./... -count=1` green;
+     process tests (TestCrossProcessLastSpace, TestCrashAfterCommitBeforeResponse)
+     re-run green at schema revision 5 under -tags crashtest; migration 0005
+     exercised on a populated disposable DB (legacy unbound OPERATOR session
+     revoked, citizen preserved, revision reaches 5) via
+     scripts/p4_mig0005_test.sh.
 What the earlier record overstated (corrected): the prior DONE entry described
   operator MFA as verified. It was not: issuance trusted a caller-supplied
   request-body `mfa_verified:true` flag and a caller-chosen jurisdiction. That
@@ -483,7 +532,7 @@ Scope completed and changed files:
       contract_test.go, operator_http_integration_test.go,
       context_integration_test.go.
 Tests/commands, environment and results (PostgreSQL 18.6 + PostGIS 3.6, DSN
-  postgres://apple@localhost:5432/sthira_test, schema revision 4):
+  postgres://apple@localhost:5432/sthira_test, schema revision 5):
   - Store suite (stay_integration_test.go): lifecycle conservation, concurrent
     last-space (8 goroutines, exactly 1 wins), expiry/arrival race, expiry
     worker, failed/successful transfer, overlapping intervals, multi-date
