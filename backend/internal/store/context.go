@@ -36,10 +36,18 @@ type ContextSnapshot struct {
 // derive known IDs and languages. The body is the canonical opkg.Package; we
 // read only the ID/language fields and tolerate absent optional sections.
 type packageBody struct {
-	RedZones   []struct{ ID string `json:"id"` } `json:"red_zones"`
-	SafeZones  []struct{ ID string `json:"id"` } `json:"safe_zones"`
-	Routes     []struct{ ID string `json:"id"` } `json:"approved_routes"`
-	Facilities []struct{ ID string `json:"id"` } `json:"facilities"`
+	RedZones []struct {
+		ID string `json:"id"`
+	} `json:"red_zones"`
+	SafeZones []struct {
+		ID string `json:"id"`
+	} `json:"safe_zones"`
+	Routes []struct {
+		ID string `json:"id"`
+	} `json:"approved_routes"`
+	Facilities []struct {
+		ID string `json:"id"`
+	} `json:"facilities"`
 	Instructions []struct {
 		ID       string `json:"id"`
 		Language string `json:"language"`

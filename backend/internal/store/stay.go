@@ -51,18 +51,18 @@ var ErrStayNotFound = errors.New("store: stay not found")
 
 // Stay is the durable stay record.
 type Stay struct {
-	StayID       string
+	StayID        string
 	ReservationID string
-	SessionID    string
-	FacilityID   string
-	PartySize    int
-	StartDate    time.Time // local date, half-open [StartDate, EndDate)
-	EndDate      time.Time
-	State        StayState
-	PackageID    string
-	RouteID      *string
-	Version      int
-	ExpiresAt    *time.Time
+	SessionID     string
+	FacilityID    string
+	PartySize     int
+	StartDate     time.Time // local date, half-open [StartDate, EndDate)
+	EndDate       time.Time
+	State         StayState
+	PackageID     string
+	RouteID       *string
+	Version       int
+	ExpiresAt     *time.Time
 }
 
 // dateRange returns the half-open list of service dates [start, end).

@@ -207,13 +207,13 @@ func (s *Server) handleGuidanceQuery(w http.ResponseWriter, r *http.Request) {
 // --- reservations (create + read) ---
 
 type createReservationRequest struct {
-	FacilityID  string `json:"facility_id"`
-	PackageID   string `json:"package_id"`
-	RouteID     string `json:"route_id,omitempty"`
-	PartySize   int    `json:"party_size"`
-	StartDate   string `json:"start_date"`
-	EndDate     string `json:"end_date"`
-	IdemKey     string `json:"idempotency_key"`
+	FacilityID string `json:"facility_id"`
+	PackageID  string `json:"package_id"`
+	RouteID    string `json:"route_id,omitempty"`
+	PartySize  int    `json:"party_size"`
+	StartDate  string `json:"start_date"`
+	EndDate    string `json:"end_date"`
+	IdemKey    string `json:"idempotency_key"`
 	// SnapshotVersion is the source/package snapshot the client validated its
 	// choice against; revalidated at commit (stale-selection detection).
 	SnapshotVersion int `json:"snapshot_version"`
@@ -387,9 +387,9 @@ func (s *Server) handleGetReservation(w http.ResponseWriter, r *http.Request) {
 // --- reservation events (arrive/cancel/depart/extend/transfer) ---
 
 type stayEventRequest struct {
-	Type       string `json:"type"` // ARRIVE|CANCEL|DEPART|EXTEND|TRANSFER
-	IdemKey    string `json:"idempotency_key"`
-	NewEndDate string `json:"new_end_date,omitempty"`  // EXTEND
+	Type          string `json:"type"` // ARRIVE|CANCEL|DEPART|EXTEND|TRANSFER
+	IdemKey       string `json:"idempotency_key"`
+	NewEndDate    string `json:"new_end_date,omitempty"`    // EXTEND
 	NewFacilityID string `json:"new_facility_id,omitempty"` // TRANSFER
 }
 
