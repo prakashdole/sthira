@@ -117,6 +117,13 @@ func New(cfg Config, opts ...Option) *Server {
 	mux.HandleFunc("/api/v3/reservations/{id}", s.withRequestID(s.withSession(s.handleGetReservation)))
 	mux.HandleFunc("/api/v3/reservations/{id}/events", s.withRequestID(s.withSession(s.handleStayEvent)))
 
+	// P4 operator operations routes. Issuance is MFA-gated at the boundary;
+	// operational routes require a live OPERATOR session with verified MFA and
+	// are jurisdiction-scoped per handler.
+	mux.HandleFunc("/api/v3/operations/sessions", s.withRequestID(s.handleCreateOperatorSession))
+	mux.HandleFunc("/api/v3/operations/sources/{id}/transitions", s.withRequestID(s.withOperator(s.handleSourceTransition)))
+	mux.HandleFunc("/api/v3/operations/stays/{id}/corrections", s.withRequestID(s.withOperator(s.handleStayCorrection)))
+
 	// Test-only crash fault-injection endpoint; a no-op unless built with the
 	// `crashtest` tag. Never present in production builds.
 	s.registerCrashHook(mux)

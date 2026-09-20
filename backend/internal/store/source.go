@@ -97,6 +97,24 @@ func (s *SourceStore) RecordAuthorization(ctx context.Context, db DBTX, a Author
 	return err
 }
 
+// AuthorizationJurisdiction reports the jurisdiction of a source's currently-
+// valid authorization, or false if none. Used to scope an operator publish/
+// revoke to the operator's own jurisdiction.
+func (s *SourceStore) AuthorizationJurisdiction(ctx context.Context, db DBTX, sourceID string, now time.Time) (string, bool, error) {
+	var j string
+	err := db.QueryRowContext(ctx, `
+		SELECT jurisdiction FROM source_authorizations
+		WHERE source_id = $1 AND (expires_at IS NULL OR expires_at > $2)
+		ORDER BY granted_at DESC LIMIT 1`, sourceID, now).Scan(&j)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return j, true, nil
+}
+
 // HasAuthorization reports whether a source has a currently-valid authorization
 // record for the jurisdiction. Used to gate the OPERATIONAL transition.
 func (s *SourceStore) HasAuthorization(ctx context.Context, db DBTX, sourceID, jurisdiction string, now time.Time) (bool, error) {

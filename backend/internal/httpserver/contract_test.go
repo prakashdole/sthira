@@ -30,6 +30,9 @@ func TestServedRoutesMatchOpenAPI(t *testing.T) {
 		{"/api/v3/reservations", http.MethodGet, http.StatusMethodNotAllowed},
 		{"/api/v3/reservations/STAY-x", http.MethodDelete, http.StatusMethodNotAllowed},
 		{"/api/v3/reservations/STAY-x/events", http.MethodGet, http.StatusMethodNotAllowed},
+		{"/api/v3/operations/sessions", http.MethodGet, http.StatusMethodNotAllowed},
+		{"/api/v3/operations/sources/SRC-x/transitions", http.MethodGet, http.StatusMethodNotAllowed},
+		{"/api/v3/operations/stays/STAY-x/corrections", http.MethodGet, http.StatusMethodNotAllowed},
 	}
 	srv := httptest.NewServer(newTestServer().Handler())
 	defer srv.Close()

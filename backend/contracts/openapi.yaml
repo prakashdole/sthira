@@ -17,6 +17,7 @@ tags:
   - name: health
   - name: voice
   - name: stay
+  - name: operations
 paths:
   /health/live:
     get:
@@ -212,6 +213,111 @@ paths:
                 idempotency_key: { type: string }
                 new_end_date: { type: string, format: date }
                 new_facility_id: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '401': { $ref: '#/components/responses/ErrorEnvelope' }
+        '403': { $ref: '#/components/responses/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /operations/sessions:
+    post:
+      tags: [operations]
+      summary: Issue an operator session
+      description: >-
+        Issues a jurisdiction-scoped OPERATOR session. Operator authority comes
+        from a verified identity plus a second factor (MFA), not the OPERATOR
+        label alone (R22); mfa_verified attests the second-factor boundary was
+        completed. Without it no operator session is issued. The bearer token is
+        shown once; only its hash is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jurisdiction, mfa_verified]
+              properties:
+                jurisdiction: { type: string }
+                mfa_verified: { type: boolean }
+      responses:
+        '201': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '403': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /operations/sources/{id}/transitions:
+    post:
+      tags: [operations]
+      summary: Publish, suspend or revoke a source
+      description: >-
+        Moves a source to OPERATIONAL (publish), SUSPENDED or RETIRED (revoke).
+        Requires an OPERATOR session with verified MFA. Jurisdiction-scoped: the
+        source must hold a currently-valid authorization in the operator's own
+        jurisdiction, else FORBIDDEN. Idempotency-keyed; the transition and its
+        audit event commit atomically.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target, idempotency_key]
+              properties:
+                target: { type: string, enum: [OPERATIONAL, SUSPENDED, RETIRED] }
+                idempotency_key: { type: string }
+                reason: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '401': { $ref: '#/components/responses/ErrorEnvelope' }
+        '403': { $ref: '#/components/responses/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /operations/stays/{id}/corrections:
+    post:
+      tags: [operations]
+      summary: Auditable operator stay correction
+      description: >-
+        Applies an auditable operator correction to a stay's party size
+        (downward only, releasing space; an increase would require new capacity
+        and is rejected rather than silently overbooking). Requires an OPERATOR
+        session with verified MFA. Jurisdiction-scoped: the stay's facility must
+        sit in the operator's jurisdiction, else FORBIDDEN. The correction, its
+        audit event (actor = operator session) and the inventory adjustment
+        commit atomically. Idempotency-keyed.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_party_size, idempotency_key, reason]
+              properties:
+                new_party_size: { type: integer, minimum: 1 }
+                idempotency_key: { type: string }
+                reason: { type: string }
       responses:
         '200': { $ref: '#/components/responses/DataEnvelope' }
         '400': { $ref: '#/components/responses/ErrorEnvelope' }

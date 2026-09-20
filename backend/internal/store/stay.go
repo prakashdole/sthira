@@ -391,6 +391,85 @@ func (s *StayStore) Transfer(ctx context.Context, db DBTX, stayID, newStayID, ne
 	return s.record(ctx, db, newStayID, st.SessionID, "STAY_TRANSFER_IN", "", string(StayReserved), now)
 }
 
+// StayFacilityJurisdiction reports the jurisdiction of the facility a stay
+// belongs to. Used to scope an operator correction to the operator's own
+// jurisdiction (cross-jurisdiction assistance is forbidden).
+func (s *StayStore) StayFacilityJurisdiction(ctx context.Context, db DBTX, stayID string) (string, error) {
+	var j string
+	err := db.QueryRowContext(ctx, `
+		SELECT p.jurisdiction FROM stays st
+		JOIN facilities f ON f.facility_id = st.facility_id
+		JOIN packages p ON p.package_id = f.package_id
+		WHERE st.stay_id = $1`, stayID).Scan(&j)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrStayNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	return j, nil
+}
+
+// Correct applies an auditable operator correction to a stay's party size.
+// Only a live (RESERVED or ARRIVED) stay may be corrected, and only downward
+// (releasing space). Releasing space is always conservation-safe: held/occupied
+// fall and free rises. An upward correction would require new capacity and is
+// rejected here rather than silently overbooking. The correction, its audit
+// event (actor = operator session) and the inventory adjustment commit in the
+// caller's transaction.
+func (s *StayStore) Correct(ctx context.Context, db DBTX, stayID string, newPartySize int, operatorSessionID, reason string, now time.Time) error {
+	st, err := s.getStayForUpdate(ctx, db, stayID)
+	if err != nil {
+		return err
+	}
+	if st.State != StayReserved && st.State != StayArrived {
+		return ErrInvalidTransition
+	}
+	if newPartySize < 1 {
+		return fmt.Errorf("store: corrected party size must be at least 1")
+	}
+	if newPartySize > st.PartySize {
+		return fmt.Errorf("store: operator correction cannot increase party size")
+	}
+	if newPartySize == st.PartySize {
+		return nil // no-op; nothing to release
+	}
+	delta := st.PartySize - newPartySize
+	dates := dateRange(st.StartDate, st.EndDate)
+	if err := lockInventory(ctx, db, st.FacilityID, dates); err != nil {
+		return err
+	}
+	heldDelta, occDelta := -delta, 0
+	if st.State == StayArrived {
+		heldDelta, occDelta = 0, -delta
+	}
+	for _, d := range dates {
+		if err := adjustInventory(ctx, db, st.FacilityID, d, heldDelta, occDelta, now); err != nil {
+			return err
+		}
+	}
+	if err := execConditional(ctx, db, false, `
+		UPDATE stays SET party_size = $3, version = version + 1, updated_at = $4
+		WHERE stay_id = $1 AND version = $2`,
+		stayID, st.Version, newPartySize, now); err != nil {
+		return err
+	}
+	if s.audit == nil {
+		return nil
+	}
+	return s.audit.Record(ctx, db, AuditEvent{
+		EventID:   stayID + ":STAY_CORRECT",
+		OccuredAt: now,
+		ActorID:   operatorSessionID,
+		Action:    "STAY_CORRECT",
+		SubjectID: stayID,
+		Outcome:   "OK",
+		Reason:    reason,
+		FromState: string(st.State),
+		ToState:   string(st.State),
+	})
+}
+
 // record appends an audit event for a stay transition.
 func (s *StayStore) record(ctx context.Context, db DBTX, stayID, sessionID, action, from, to string, now time.Time) error {
 	if s.audit == nil {

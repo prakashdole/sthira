@@ -27,7 +27,14 @@ type Session struct {
 	PrincipalKind string // CITIZEN | OPERATOR
 	Jurisdiction  *string
 	ExpiresAt     time.Time
+	// MFAVerifiedAt is when the operator's second factor was verified. Nil for
+	// citizens and for operators who have not completed MFA; operational access
+	// requires it non-nil.
+	MFAVerifiedAt *time.Time
 }
+
+// ErrMFARequired is returned when an operator session lacks MFA verification.
+var ErrMFARequired = errors.New("store: operator MFA not verified")
 
 // hashToken hashes a bearer token for storage. The raw token is never stored.
 func hashToken(token string) string {
@@ -54,15 +61,41 @@ func IssueCitizenSession(ctx context.Context, db DBTX, sessionID string, ttl tim
 	return token, nil
 }
 
+// IssueOperatorSession creates a jurisdiction-scoped OPERATOR session. It
+// requires verified MFA evidence: mfaVerifiedAt must be non-nil (the caller has
+// verified the second factor through a real identity/MFA boundary before
+// calling). Jurisdiction is required. Only the token hash is persisted.
+func IssueOperatorSession(ctx context.Context, db DBTX, sessionID, jurisdiction string, mfaVerifiedAt *time.Time, ttl time.Duration, now time.Time) (token string, err error) {
+	if jurisdiction == "" {
+		return "", errors.New("store: operator jurisdiction required")
+	}
+	if mfaVerifiedAt == nil {
+		return "", ErrMFARequired
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	token = hex.EncodeToString(raw)
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO sessions (session_id, principal_kind, jurisdiction, credential_ref, created_at, expires_at, mfa_verified_at)
+		VALUES ($1, 'OPERATOR', $2, $3, $4, $5, $6)`,
+		sessionID, jurisdiction, hashToken(token), now, now.Add(ttl), mfaVerifiedAt)
+	if err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
 // Authenticate resolves a raw bearer token to a live session. It returns
 // ErrSessionInvalid for an unknown, expired or revoked token.
 func Authenticate(ctx context.Context, db DBTX, token string, now time.Time) (Session, error) {
 	var s Session
 	var revokedAt *time.Time
 	err := db.QueryRowContext(ctx, `
-		SELECT session_id, principal_kind, jurisdiction, expires_at, revoked_at
+		SELECT session_id, principal_kind, jurisdiction, expires_at, revoked_at, mfa_verified_at
 		FROM sessions WHERE credential_ref = $1`, hashToken(token)).
-		Scan(&s.SessionID, &s.PrincipalKind, &s.Jurisdiction, &s.ExpiresAt, &revokedAt)
+		Scan(&s.SessionID, &s.PrincipalKind, &s.Jurisdiction, &s.ExpiresAt, &revokedAt, &s.MFAVerifiedAt)
 	if err != nil {
 		return Session{}, ErrSessionInvalid
 	}
