@@ -983,3 +983,100 @@ func TestSnapshotRaceRejectsStaleVersion(t *testing.T) {
 		t.Fatalf("replay held=%d, want 1 (no double write)", got)
 	}
 }
+
+// TestHTTPReservationPayloadBinding_ChangedPayloadConflicts verifies D2:
+// Replaying the same idempotency key with changed party_size or snapshot_version
+// must return 409 IDEMPOTENCY_CONFLICT, without mutating capacity or audit.
+// Identical replay succeeds with 200 and the original stay.
+func TestHTTPReservationPayloadBinding_ChangedPayloadConflicts(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	pkgID, facID, snap := seedHTTPPackageFacility(t, st, 10, httpDayT(1), httpDayT(3))
+	_, token := createSession(t, srv)
+
+	// 1. Initial reservation: party_size=2, snapshot=snap
+	body1 := reservationBody(facID, pkgID, 2, httpDay(1), httpDay(2), "d2-key-1", snap)
+	first := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token, body1)
+	if first.code != http.StatusCreated {
+		t.Fatalf("first reservation: code=%d body=%s", first.code, first.body)
+	}
+	env1 := decodeEnvelope(t, first)
+	var d1 struct {
+		StayID string `json:"stay_id"`
+	}
+	b1, _ := json.Marshal(env1.Data)
+	_ = json.Unmarshal(b1, &d1)
+
+	// Verify held capacity is 2
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 2 {
+		t.Fatalf("held after first=%d, want 2", got)
+	}
+
+	// 2. Retry same key with changed party_size 2 -> 5
+	bodyChangedParty := reservationBody(facID, pkgID, 5, httpDay(1), httpDay(2), "d2-key-1", snap)
+	retryParty := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token, bodyChangedParty)
+	if retryParty.code == http.StatusOK {
+		t.Fatalf("DEFECT D2 REPRODUCED: changed party_size replayed as 200 instead of 409: body=%s", retryParty.body)
+	}
+	if retryParty.code != http.StatusConflict {
+		t.Fatalf("expected 409 conflict on changed party size, got %d body=%s", retryParty.code, retryParty.body)
+	}
+	envParty := decodeEnvelope(t, retryParty)
+	if len(envParty.Errors) == 0 || envParty.Errors[0].Code != contracts.ErrIdempotencyConflict {
+		t.Fatalf("expected ERR_IDEMPOTENCY_CONFLICT, got %+v", envParty.Errors)
+	}
+	// Capacity must be unchanged (still 2)
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 2 {
+		t.Fatalf("held after changed party=%d, want 2 (no mutation)", got)
+	}
+
+	// 3. Retry same key with changed snapshot_version snap -> snap + 7
+	bodyChangedSnap := reservationBody(facID, pkgID, 2, httpDay(1), httpDay(2), "d2-key-1", snap+7)
+	retrySnap := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token, bodyChangedSnap)
+	if retrySnap.code == http.StatusOK {
+		t.Fatalf("DEFECT D2 REPRODUCED: changed snapshot_version replayed as 200 instead of 409: body=%s", retrySnap.body)
+	}
+	if retrySnap.code != http.StatusConflict {
+		t.Fatalf("expected 409 conflict on changed snapshot_version, got %d body=%s", retrySnap.code, retrySnap.body)
+	}
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 2 {
+		t.Fatalf("held after changed snap=%d, want 2 (no mutation)", got)
+	}
+
+	// 4. Identical replay: same party_size=2, snapshot=snap
+	retryIdentical := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token, body1)
+	if retryIdentical.code != http.StatusOK {
+		t.Fatalf("identical replay: expected 200, got %d body=%s", retryIdentical.code, retryIdentical.body)
+	}
+	var dIdentical struct {
+		StayID string `json:"stay_id"`
+	}
+	envIdentical := decodeEnvelope(t, retryIdentical)
+	bId, _ := json.Marshal(envIdentical.Data)
+	_ = json.Unmarshal(bId, &dIdentical)
+	if dIdentical.StayID != d1.StayID {
+		t.Fatalf("identical replay returned different stay: %s vs %s", dIdentical.StayID, d1.StayID)
+	}
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 2 {
+		t.Fatalf("held after identical replay=%d, want 2", got)
+	}
+
+	// 5. Intentional identical committed-reservation replay after source withdrawal
+	// Quarantine the source
+	if _, err := st.DB().ExecContext(t.Context(),
+		`UPDATE sources SET state = 'QUARANTINED' WHERE source_id IN (SELECT source_id FROM packages WHERE package_id = $1)`, pkgID); err != nil {
+		t.Fatalf("quarantine source: %v", err)
+	}
+	// Identical replay of the committed reservation must still succeed with 200 and return original stay
+	retryAfterQuarantine := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token, body1)
+	if retryAfterQuarantine.code != http.StatusOK {
+		t.Fatalf("identical replay after quarantine: expected 200, got %d body=%s", retryAfterQuarantine.code, retryAfterQuarantine.body)
+	}
+	// A new reservation under the quarantined source must fail
+	bodyNew := reservationBody(facID, pkgID, 2, httpDay(1), httpDay(2), "new-key-after-quarantine", snap)
+	resNew := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token, bodyNew)
+	if resNew.code == http.StatusCreated {
+		t.Fatalf("new reservation after quarantine should fail, got 201")
+	}
+}

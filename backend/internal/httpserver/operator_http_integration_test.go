@@ -679,3 +679,87 @@ func TestCitizenSessionUnaffectedByOperatorGrant(t *testing.T) {
 		t.Fatalf("citizen on operator route: expected 403, got %d body=%s", denied.code, denied.body)
 	}
 }
+
+// TestOperatorQuarantine_AbsentOrExpiredAuthz_Denied verifies D1:
+// Quarantining a source with expired or absent authorization must be denied
+// before replay disclosure or mutation, matching handleSourceTransition.
+func TestOperatorQuarantine_AbsentOrExpiredAuthz_Denied(t *testing.T) {
+	srv, st := newOperatorServer(t, syntheticVerifier{})
+	grantOperator(t, st, "subj-d1", "OTHER-JURISDICTION")
+	srcID := seedOperatorSource(t, st, "MH-JURISDICTION") // live authz in MH
+	_, token, rec := issueOperator(t, srv, "subj-d1")
+	if rec.code != http.StatusCreated {
+		t.Fatalf("issue: %d %s", rec.code, rec.body)
+	}
+
+	// 1. Expire the authorization in MH
+	if _, err := st.DB().ExecContext(t.Context(),
+		`UPDATE source_authorizations SET expires_at = $2 WHERE source_id = $1`,
+		srcID, time.Now().UTC().Add(-time.Hour)); err != nil {
+		t.Fatalf("expire authz: %v", err)
+	}
+
+	// Control: sibling transition handler denies the same condition.
+	ctr := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/transitions", token,
+		`{"target":"SUSPENDED","idempotency_key":"d1-ctr","reason":"probe"}`)
+	if ctr.code != http.StatusConflict {
+		t.Fatalf("control transition: expected 409, got %d body=%s", ctr.code, ctr.body)
+	}
+
+	// Attempt quarantine by foreign operator when authorization is expired
+	q := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+srcID+"/quarantine", token,
+		`{"idempotency_key":"d1-exp","reason":"probe attempt"}`)
+	if q.code == http.StatusOK {
+		t.Fatalf("DEFECT D1 REPRODUCED: foreign operator quarantined source with expired authz: code=%d body=%s", q.code, q.body)
+	}
+	if q.code != http.StatusConflict && q.code != http.StatusForbidden {
+		t.Fatalf("expected 409 or 403 on expired authz quarantine, got %d body=%s", q.code, q.body)
+	}
+
+	// Verify source state unchanged
+	var state string
+	if err := st.DB().QueryRowContext(t.Context(), `SELECT state FROM sources WHERE source_id=$1`, srcID).Scan(&state); err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if state == "QUARANTINED" {
+		t.Fatalf("DEFECT D1: source state mutated to QUARANTINED on denied quarantine")
+	}
+
+	// 2. Source that NEVER had an authorization row
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	neverID := fmt.Sprintf("SRC-NEVERAUTHZ-%d", now.UnixNano())
+	if _, err := st.DB().ExecContext(t.Context(), `
+		INSERT INTO sources (source_id, government_owner, official_domain, state, version, created_at, updated_at)
+		VALUES ($1,'gov','gov.example','AUTHORIZED',1,$2,$2)`, neverID, now); err != nil {
+		t.Fatalf("seed never authorized: %v", err)
+	}
+
+	q2 := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+neverID+"/quarantine", token,
+		`{"idempotency_key":"d1-never","reason":"probe attempt 2"}`)
+	if q2.code == http.StatusOK {
+		t.Fatalf("DEFECT D1 REPRODUCED: foreign operator quarantined never-authorized source: code=%d body=%s", q2.code, q2.body)
+	}
+	if q2.code != http.StatusConflict && q2.code != http.StatusForbidden {
+		t.Fatalf("expected 409 or 403 on never-authorized quarantine, got %d body=%s", q2.code, q2.body)
+	}
+
+	// 3. Live authorization in correct jurisdiction succeeds
+	grantOperator(t, st, "subj-d1-auth", "MH-JURISDICTION")
+	liveSrcID := seedOperatorSource(t, st, "MH-JURISDICTION")
+	_, liveToken, recLive := issueOperator(t, srv, "subj-d1-auth")
+	if recLive.code != http.StatusCreated {
+		t.Fatalf("issue live: %d %s", recLive.code, recLive.body)
+	}
+	qLive := doAuthed(t, srv, http.MethodPost, "/api/v3/operations/sources/"+liveSrcID+"/quarantine", liveToken,
+		`{"idempotency_key":"d1-live","reason":"authorized quarantine"}`)
+	if qLive.code != http.StatusOK {
+		t.Fatalf("expected 200 on authorized quarantine, got %d body=%s", qLive.code, qLive.body)
+	}
+	var liveState string
+	if err := st.DB().QueryRowContext(t.Context(), `SELECT state FROM sources WHERE source_id=$1`, liveSrcID).Scan(&liveState); err != nil {
+		t.Fatalf("read live state: %v", err)
+	}
+	if liveState != "QUARANTINED" {
+		t.Fatalf("expected state QUARANTINED, got %s", liveState)
+	}
+}

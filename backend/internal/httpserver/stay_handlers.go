@@ -221,8 +221,38 @@ type createReservationRequest struct {
 	SnapshotVersion int `json:"snapshot_version"`
 }
 
+type canonicalReservationPayload struct {
+	SessionID       string `json:"session_id"`
+	FacilityID      string `json:"facility_id"`
+	PackageID       string `json:"package_id"`
+	RouteID         string `json:"route_id"`
+	PartySize       int    `json:"party_size"`
+	StartDate       string `json:"start_date"`
+	EndDate         string `json:"end_date"`
+	IdemKey         string `json:"idempotency_key"`
+	SnapshotVersion int    `json:"snapshot_version"`
+}
+
 func reservationPayloadHash(sessID string, req createReservationRequest) string {
-	h := sha256.Sum256([]byte(sessID + "|" + req.FacilityID + "|" + req.PackageID + "|" + req.RouteID + "|" + req.StartDate + "|" + req.EndDate + "|" + req.IdemKey))
+	p := canonicalReservationPayload{
+		SessionID:       sessID,
+		FacilityID:      req.FacilityID,
+		PackageID:       req.PackageID,
+		RouteID:         req.RouteID,
+		PartySize:       req.PartySize,
+		StartDate:       req.StartDate,
+		EndDate:         req.EndDate,
+		IdemKey:         req.IdemKey,
+		SnapshotVersion: req.SnapshotVersion,
+	}
+	b, err := json.Marshal(p)
+	if err != nil {
+		raw := fmt.Sprintf("v2|sess:%d:%s|fac:%d:%s|pkg:%d:%s|route:%d:%s|party:%d|start:%s|end:%s|key:%d:%s|snap:%d",
+			len(sessID), sessID, len(req.FacilityID), req.FacilityID, len(req.PackageID), req.PackageID,
+			len(req.RouteID), req.RouteID, req.PartySize, req.StartDate, req.EndDate, len(req.IdemKey), req.IdemKey, req.SnapshotVersion)
+		b = []byte(raw)
+	}
+	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }
 
