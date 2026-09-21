@@ -128,8 +128,10 @@ func (s *SubprocessRuntime) LoadModel() error {
 }
 
 // transcribeViaAdapter sends a transcribe request to the loaded
-// Python subprocess.
-func (s *SubprocessRuntime) transcribeViaAdapter(ctx context.Context, req TranscribeRequest) (TranscribeResult, error) {
+// Python subprocess. The dispatcher is passed in explicitly (it
+// was captured under the runtime lock by Transcribe) so a
+// concurrent Close cannot swap or nil the pointer mid-flight.
+func (s *SubprocessRuntime) transcribeViaAdapter(demux *ipcDispatcher, ctx context.Context, req TranscribeRequest) (TranscribeResult, error) {
 	if !hasLanguage(s, req.Language) {
 		return TranscribeResult{}, fmt.Errorf("%w: %s", ErrLanguageUnsupported, req.Language)
 	}
@@ -154,7 +156,7 @@ func (s *SubprocessRuntime) transcribeViaAdapter(ctx context.Context, req Transc
 		}
 	}
 
-	resp, err := s.demux.SendRequest(adReq, req.RequestID, deadline, ctx)
+	resp, err := demux.SendRequest(adReq, req.RequestID, deadline, ctx)
 	if err != nil {
 		return TranscribeResult{}, err
 	}
@@ -193,11 +195,11 @@ func (s *SubprocessRuntime) Transcribe(ctx context.Context, req TranscribeReques
 		s.mu.Unlock()
 		return TranscribeResult{}, ErrRuntimeClosed
 	}
-	loaded := s.demux != nil
+	demux := s.demux
 	s.mu.Unlock()
 
-	if loaded {
-		return s.transcribeViaAdapter(ctx, req)
+	if demux != nil {
+		return s.transcribeViaAdapter(demux, ctx, req)
 	}
 	return TranscribeResult{}, fmt.Errorf("%w: subprocess runtime not loaded; call LoadModel first", ErrRuntimeUnavailable)
 }

@@ -41,6 +41,7 @@ for raw in sys.stdin:
             "languages": ["hi-IN", "ml-IN"],
             "voices": [{"language": "hi-IN", "name": "default", "revision": "vmock-1"}],
             "digest_name": "mock-tts",
+            "sample_rate": 44100,
             "digest_sha256": DIGEST,
         }) + "\n")
         sys.stdout.flush()
@@ -190,6 +191,7 @@ for raw in sys.stdin:
             "languages": ["hi-IN"],
             "voices": [{"language": "hi-IN", "name": "default", "revision": "vmock-1"}],
             "digest_name": "mock-tts",
+            "sample_rate": 44100,
             "digest_sha256": DIGEST,
         }) + "\n")
         sys.stdout.flush()
@@ -262,6 +264,7 @@ for raw in sys.stdin:
             "languages": ["hi-IN"],
             "voices": [{"language": "hi-IN", "name": "default", "revision": "vmock-1"}],
             "digest_name": "mock-tts",
+            "sample_rate": 44100,
             "digest_sha256": DIGEST,
         }) + "\n")
         sys.stdout.flush()

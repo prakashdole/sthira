@@ -21,19 +21,24 @@ import (
 // refuses a duration estimate that exceeds the declared budget.
 
 const (
-	// DefaultOutputSampleRate is the canonical output rate for the
-	// cached envelope.
+	// DefaultOutputSampleRate is the legacy fallback rate used only
+	// when no runtime has negotiated a native rate. The Indic
+	// Parler-TTS adapter reports its real rate (model.config.
+	// sampling_rate, verified from the model card: audio is written
+	// at that rate) at ready time; encoding at any other rate
+	// changes playback speed, so the runtime path never uses this.
 	DefaultOutputSampleRate = 22050
 	// MaxOutputSampleRate caps the rate regardless of what the
-	// synthesis settings requested.
-	MaxOutputSampleRate = 24000
+	// runtime reports. Indic Parler-TTS (Parler-TTS Mini lineage)
+	// runs at ~44.1 kHz native, so the previous 24 kHz cap would
+	// have rejected the real artifact's own output.
+	MaxOutputSampleRate = 48000
 	// MaxOutputDurationSeconds is the codec-level ceiling for one
-	// synthesis. Longer outputs are refused by the encoder.
+	// response.
 	MaxOutputDurationSeconds = 12.0
 	// MaxOutputBytes caps the encoded WAV size in bytes, including
-	// the 44-byte header. The limit enforces an absolute download
-	// budget on clients.
-	MaxOutputBytes = 256 * 1024
+	// the 44-byte header: 12 s @ 48 kHz mono PCM16 = 1,152,000.
+	MaxOutputBytes = 1200 * 1024
 	// MaxSynthesizedTextBytes caps the rendered-text size so a
 	// long template cannot produce a runaway audio length.
 	MaxSynthesizedTextBytes = 1024

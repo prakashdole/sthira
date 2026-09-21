@@ -218,6 +218,11 @@ type SubprocessRuntimeConfig struct {
 	Cmd      string
 	Workdir  string
 	ExtraEnv []string
+	// StartupTimeout bounds the load handshake (ready probe write
+	// + startup response wait). Zero uses adapterStartupTimeout;
+	// tests override it so the non-reading-child path is
+	// exercised in milliseconds instead of 30 seconds.
+	StartupTimeout time.Duration
 }
 
 // DefaultSubprocessRuntimeConfig targets the JSONL adapter module

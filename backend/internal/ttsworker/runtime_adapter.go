@@ -61,6 +61,7 @@ type ttsAdapterResponse struct {
 	Voices       []ttsVoiceEntry `json:"voices,omitempty"`
 	DigestName   string          `json:"digest_name,omitempty"`
 	DigestSHA256 string          `json:"digest_sha256,omitempty"`
+	SampleRate   int             `json:"sample_rate,omitempty"`
 
 	RequestID    string  `json:"request_id,omitempty"`
 	AudioB64     string  `json:"audio_b64,omitempty"`
@@ -120,6 +121,7 @@ type AdapterSubprocessRuntime struct {
 	revision   string
 	digestName string
 	digestSHA  string
+	sampleRate int
 	languages  []string
 	voices     []VoiceInfo
 	voiceMap   map[string]string
@@ -198,11 +200,12 @@ func (r *AdapterSubprocessRuntime) LoadModel() error {
 		return fmt.Errorf("%w: start: %v", ErrRuntimeUnavailable, err)
 	}
 
-	// Scanner buffer derived from the maximum permitted audio
-	// size plus base64/JSON overhead: 12 seconds of 22050 Hz
-	// mono 16-bit PCM = 264,600 sample bytes + 44 header; base64
-	// expands by ~33%. Add 20% margin.
-	scanner := newStdScanner(stdout, 1<<20)
+	// Scanner buffer must hold the largest legitimate response:
+	// 12 s of native-rate (up to 48 kHz) mono PCM16 WAV ≈ 1.15 MiB,
+	// base64-expands to ≈ 1.54 MiB plus JSON overhead. Cap 2 MiB;
+	// truly oversized/malformed lines abort the demux at the
+	// scanner boundary (tested in b3).
+	scanner := newStdScanner(stdout, 2<<20)
 
 	disp := &ttsIPCDispatcher{
 		proc:         cmd,
@@ -213,24 +216,29 @@ func (r *AdapterSubprocessRuntime) LoadModel() error {
 		demuxExit:    make(chan struct{}),
 	}
 
-	probeBytes, _ := json.Marshal(ttsAdapterRequest{Op: "ready"})
-	probeBytes = append(probeBytes, '\n')
-	if _, err := stdin.Write(probeBytes); err != nil {
-		_ = cmd.Process.Kill()
-		return fmt.Errorf("%w: write probe: %v", ErrRuntimeUnavailable, err)
-	}
-
-	go disp.runDemux()
-
+	// Register startup correlation BEFORE the reader can deliver
+	// it (mirrors the ASR dispatcher repair): an adapter that
+	// answers the ready probe instantly must not be mistaken for
+	// an unsolicited response.
 	startupCh := make(chan ttsAdapterResponse, 1)
 	disp.mu.Lock()
 	disp.pending["__startup__"] = startupCh
 	disp.mu.Unlock()
 
+	go disp.runDemux()
+
+	probeBytes, _ := json.Marshal(ttsAdapterRequest{Op: "ready"})
+	probeBytes = append(probeBytes, '\n')
+	started := time.Now()
+	if err := disp.writeStdin(probeBytes, ttsAdapterStartupTimeout, nil); err != nil {
+		_ = disp.Close()
+		return fmt.Errorf("%w: write probe: %v", ErrRuntimeUnavailable, err)
+	}
+
 	var resp ttsAdapterResponse
 	select {
 	case resp = <-startupCh:
-	case <-time.After(ttsAdapterStartupTimeout):
+	case <-time.After(ttsAdapterStartupTimeout - time.Since(started)):
 		_ = disp.Close()
 		return fmt.Errorf("%w: startup timeout; stderr: %s",
 			ErrRuntimeUnavailable, stderrBuf.String())
@@ -239,6 +247,16 @@ func (r *AdapterSubprocessRuntime) LoadModel() error {
 		_ = disp.Close()
 		return fmt.Errorf("%w: status %q error: %s",
 			ErrRuntimeUnavailable, resp.Status, resp.Error)
+	}
+	// The adapter must advertise its model-native sample rate
+	// (Indic Parler-TTS writes audio at model.config.sampling_rate;
+	// any other rate changes playback speed). A ready envelope
+	// without a plausible rate is a protocol violation and keeps
+	// the worker unready.
+	if resp.SampleRate <= 0 || resp.SampleRate > MaxOutputSampleRate {
+		_ = disp.Close()
+		return fmt.Errorf("%w: runtime reported ready without a usable native sample rate (got %d, want 1..%d)",
+			ErrRuntimeUnavailable, resp.SampleRate, MaxOutputSampleRate)
 	}
 
 	voiceMap := make(map[string]string)
@@ -259,6 +277,7 @@ func (r *AdapterSubprocessRuntime) LoadModel() error {
 	r.revision = resp.Revision
 	r.digestName = resp.DigestName
 	r.digestSHA = resp.DigestSHA256
+	r.sampleRate = resp.SampleRate
 	r.languages = append([]string(nil), resp.Languages...)
 	r.voices = voices
 	r.voiceMap = voiceMap
@@ -299,6 +318,7 @@ func (r *AdapterSubprocessRuntime) Synthesize(ctx RequestContext, text string, l
 		r.mu.Unlock()
 		return nil, ErrVoiceUnsupported
 	}
+	rate := r.sampleRate
 	requestID := fmt.Sprintf("R-%d", nextSynthID())
 	req := ttsAdapterRequest{
 		Op:         "synthesize",
@@ -306,7 +326,7 @@ func (r *AdapterSubprocessRuntime) Synthesize(ctx RequestContext, text string, l
 		Text:       text,
 		Language:   language,
 		Voice:      voice,
-		SampleRate: DefaultOutputSampleRate,
+		SampleRate: rate,
 	}
 	disp := r.demux
 	r.mu.Unlock()
@@ -317,6 +337,10 @@ func (r *AdapterSubprocessRuntime) Synthesize(ctx RequestContext, text string, l
 	}
 	if resp.Error != "" {
 		return nil, fmt.Errorf("%w: %s", ErrRuntimeUnavailable, resp.Error)
+	}
+	if resp.SampleRate != 0 && resp.SampleRate != rate {
+		return nil, fmt.Errorf("%w: adapter returned rate %d, negotiated %d",
+			ErrRuntimeUnavailable, resp.SampleRate, rate)
 	}
 	if resp.AudioB64 == "" {
 		return &SynthResult{Empty: true}, nil
@@ -383,6 +407,77 @@ func (r *AdapterSubprocessRuntime) Voices() []VoiceInfo {
 }
 
 // --- dispatcher implementation ---------------------------------
+//
+// Boundedness mirrors asrworker/runtime_ipc.go: startup
+// correlation is registered before the reader starts; every stdin
+// write runs under a deadline that starts BEFORE the write (a
+// wedged child fills the OS pipe and would otherwise hang Request
+// and Close); demuxErr is only touched under the mutex; and Close
+// reaps the child unconditionally so it never waits on a wedged
+// child's cooperation.
+
+// writeStdin writes one JSONL request under a budget covering the
+// write itself. Budget expiry means the child cannot drain input
+// at all, so the whole dispatcher is uncertain: the child is
+// killed, which releases the blocked write and the goroutine.
+// Caller cancellation returns without killing (the response is
+// dropped by deregistration; the writer goroutine ends when the
+// child drains or Close kills it).
+func (d *ttsIPCDispatcher) writeStdin(data []byte, budget time.Duration, cancel <-chan struct{}) error {
+	d.mu.Lock()
+	w := d.stdin
+	if d.closed || w == nil {
+		d.mu.Unlock()
+		return fmt.Errorf("%w: dispatcher closed", ErrRuntimeUnavailable)
+	}
+	d.mu.Unlock()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := w.Write(data)
+		done <- err
+	}()
+
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		if err != nil {
+			d.markUncertain(fmt.Errorf("write: %v", err))
+			return fmt.Errorf("%w: write: %v", ErrRuntimeUnavailable, err)
+		}
+		return nil
+	case <-timer.C:
+		d.markUncertain(errors.New("tts ipc: stdin write deadline; child not draining input"))
+		<-done
+		return fmt.Errorf("%w: stdin write deadline", ErrRuntimeUnavailable)
+	case <-cancel:
+		return fmt.Errorf("%w: canceled during stdin write", ErrRuntimeUnavailable)
+	}
+}
+
+// markUncertain records a protocol-lifetime failure under the
+// mutex, releases every pending caller, and kills the child so
+// the demultiplexer observes EOF and blocked writers unblock.
+// Idempotent; safe from any goroutine.
+func (d *ttsIPCDispatcher) markUncertain(reason error) {
+	d.mu.Lock()
+	if d.demuxErr == nil {
+		d.demuxErr = reason
+	}
+	for id, ch := range d.pending {
+		select {
+		case ch <- ttsAdapterResponse{Error: "subprocess reset"}:
+		default:
+		}
+		delete(d.pending, id)
+	}
+	proc := d.proc
+	d.mu.Unlock()
+	if proc != nil && proc.Process != nil {
+		_ = proc.Process.Kill()
+	}
+}
 
 func (d *ttsIPCDispatcher) runDemux() {
 	defer close(d.demuxExit)
@@ -395,6 +490,13 @@ func (d *ttsIPCDispatcher) runDemux() {
 			}
 			delete(d.pending, id)
 		}
+		if d.demuxErr == nil {
+			if err := d.scanner.Err(); err != nil {
+				d.demuxErr = fmt.Errorf("tts ipc: scanner: %w", err)
+			} else {
+				d.demuxErr = errors.New("tts ipc: subprocess closed stdout")
+			}
+		}
 		d.mu.Unlock()
 	}()
 	for d.scanner.Scan() {
@@ -404,24 +506,23 @@ func (d *ttsIPCDispatcher) runDemux() {
 		}
 		var resp ttsAdapterResponse
 		if err := json.Unmarshal(line, &resp); err != nil {
-			d.demuxErr = fmt.Errorf("tts ipc: malformed response: %w", err)
 			fmt.Fprintf(os.Stderr, "ttsworker ipc: malformed response: %v\n", err)
+			d.markUncertain(fmt.Errorf("tts ipc: malformed response: %w", err))
 			return
 		}
 		d.mu.Lock()
 		if resp.RequestID == "" {
+			// Only valid for the startup envelope, which is
+			// registered before this goroutine starts.
 			if startupCh, ok := d.pending["__startup__"]; ok {
 				delete(d.pending, "__startup__")
 				d.mu.Unlock()
-				select {
-				case startupCh <- resp:
-				default:
-				}
+				startupCh <- resp // buffer 1; receiver already selected
 				continue
 			}
 			d.mu.Unlock()
-			d.demuxErr = errors.New("tts ipc: response missing request_id")
 			fmt.Fprintln(os.Stderr, "ttsworker ipc: response missing request_id")
+			d.markUncertain(errors.New("tts ipc: response missing request_id"))
 			return
 		}
 		ch, ok := d.pending[resp.RequestID]
@@ -430,6 +531,9 @@ func (d *ttsIPCDispatcher) runDemux() {
 		}
 		d.mu.Unlock()
 		if !ok {
+			// Late response after cancel/timeout or an unknown /
+			// duplicate id: discard; it must never reach another
+			// caller.
 			continue
 		}
 		select {
@@ -437,20 +541,22 @@ func (d *ttsIPCDispatcher) runDemux() {
 		default:
 		}
 	}
-	var demuxErr error
-	if err := d.scanner.Err(); err != nil {
-		demuxErr = fmt.Errorf("tts ipc: scanner: %w", err)
-	} else {
-		demuxErr = errors.New("tts ipc: subprocess closed stdout")
-	}
-	d.mu.Lock()
-	d.demuxErr = demuxErr
-	d.mu.Unlock()
+	// Scanner finished; the deferred cleanup classifies it.
 }
 
 // send writes a single JSONL request and awaits the matching
-// response. The mutex serializes writes with itself and with Close.
+// response. The per-call budget covers the write AND the wait;
+// no mutex is held across the blocking write.
 func (d *ttsIPCDispatcher) send(req ttsAdapterRequest, requestID string, perCallTimeout time.Duration, ctx RequestContext) (ttsAdapterResponse, error) {
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		return ttsAdapterResponse{}, fmt.Errorf("marshal: %w", err)
+	}
+	reqBytes = append(reqBytes, '\n')
+
+	started := time.Now()
+	respCh := make(chan ttsAdapterResponse, 1)
+
 	d.mu.Lock()
 	if d.closed {
 		d.mu.Unlock()
@@ -461,30 +567,32 @@ func (d *ttsIPCDispatcher) send(req ttsAdapterRequest, requestID string, perCall
 		d.mu.Unlock()
 		return ttsAdapterResponse{}, fmt.Errorf("%w: %v", ErrRuntimeUnavailable, err)
 	}
-	if d.stdin == nil {
-		d.mu.Unlock()
-		return ttsAdapterResponse{}, fmt.Errorf("%w: not loaded", ErrRuntimeUnavailable)
-	}
-	reqBytes, err := json.Marshal(req)
-	if err != nil {
-		d.mu.Unlock()
-		return ttsAdapterResponse{}, fmt.Errorf("marshal: %w", err)
-	}
-	reqBytes = append(reqBytes, '\n')
-
-	respCh := make(chan ttsAdapterResponse, 1)
 	d.pending[requestID] = respCh
-
-	if _, err := d.stdin.Write(reqBytes); err != nil {
-		delete(d.pending, requestID)
-		d.mu.Unlock()
-		return ttsAdapterResponse{}, fmt.Errorf("%w: write: %v", ErrRuntimeUnavailable, err)
-	}
 	d.mu.Unlock()
 
-	timer := time.NewTimer(perCallTimeout)
-	defer timer.Stop()
+	deregister := func() {
+		d.mu.Lock()
+		delete(d.pending, requestID)
+		d.mu.Unlock()
+	}
+	remaining := func() time.Duration {
+		left := perCallTimeout - time.Since(started)
+		if left < 0 {
+			left = 0
+		}
+		return left
+	}
+	var cancel <-chan struct{}
+	if ctx.Canceled != nil {
+		cancel = ctx.Canceled
+	}
+	if err := d.writeStdin(reqBytes, remaining(), cancel); err != nil {
+		deregister()
+		return ttsAdapterResponse{}, err
+	}
 
+	timer := time.NewTimer(remaining())
+	defer timer.Stop()
 	select {
 	case resp := <-respCh:
 		if resp.RequestID != requestID && resp.RequestID != "__startup__" {
@@ -493,18 +601,27 @@ func (d *ttsIPCDispatcher) send(req ttsAdapterRequest, requestID string, perCall
 		}
 		return resp, nil
 	case <-timer.C:
-		d.mu.Lock()
-		delete(d.pending, requestID)
-		d.mu.Unlock()
+		deregister()
 		return ttsAdapterResponse{}, fmt.Errorf("%w: per-call deadline", ErrRuntimeUnavailable)
-	case <-ctx.Canceled:
-		d.mu.Lock()
-		delete(d.pending, requestID)
-		d.mu.Unlock()
+	case <-cancelOrNever(ctx.Canceled):
+		deregister()
 		return ttsAdapterResponse{}, ErrRuntimeUnavailable
 	}
 }
 
+// cancelOrNever lets a nil cancel channel block forever instead
+// of spinning select.
+func cancelOrNever(ch <-chan struct{}) <-chan struct{} {
+	if ch != nil {
+		return ch
+	}
+	return make(chan struct{})
+}
+
+// Close terminates the subprocess and waits for the demultiplexer
+// to drain. The graceful shutdown write is best-effort under a
+// 1s budget; the kill+wait then guarantees bounded Close even
+// against a wedged child. Idempotent.
 func (d *ttsIPCDispatcher) Close() error {
 	d.mu.Lock()
 	if d.closed {
@@ -515,13 +632,21 @@ func (d *ttsIPCDispatcher) Close() error {
 	stdin := d.stdin
 	proc := d.proc
 	d.stdin = nil
-	d.proc = nil
 	d.mu.Unlock()
 
 	if stdin != nil {
 		shutReq, _ := json.Marshal(ttsAdapterRequest{Op: "shutdown"})
 		shutReq = append(shutReq, '\n')
-		_, _ = stdin.Write(shutReq)
+		writeDone := make(chan struct{})
+		go func() {
+			_, _ = stdin.Write(shutReq)
+			close(writeDone)
+		}()
+		select {
+		case <-writeDone:
+		case <-time.After(time.Second):
+			// Wedged child; kill below unblocks the writer.
+		}
 		_ = stdin.Close()
 	}
 	if proc != nil && proc.Process != nil {
