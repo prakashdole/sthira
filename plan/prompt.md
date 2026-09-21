@@ -32,8 +32,8 @@ Status vocabulary: NOT_STARTED, IN_PROGRESS, BLOCKED_EXTERNAL, DONE. Evidence ap
 | P3 | Durable storage, authorization and ledger foundation | P1 + P2 contract slice | IN_PROGRESS | Checkpoint A DONE; Checkpoint B storage layer + migration written AND real-DB verified on PostgreSQL 18 + PostGIS 3.6 (11/11 store tests pass); see "P3 Checkpoint B record" and "P3 Checkpoint B real-DB verification" below |
 | P4 | Destination choice and immediate/temporary stays | P2 + P3 | IN_PROGRESS | Citizen stay flows verified; operator auth/idempotency/quarantine/persisted-context gaps reopened and re-verified (schema rev 4); O05/O07 stay OPEN; live operator IdP BLOCKED_EXTERNAL; see "P4 completion record" below |
 | P5 | Offline package and map-delivery protocol | P2 + P3 | IN_PROGRESS | Integration commit `046183c`; engineering acceptance reopened for corrections A–G (see compact acceptance matrix below) |
-| P6 | Regional ASR, constrained middle model and TTS | P1 + P4 + P5 | NOT_STARTED | None for new implementation |
-| P7 | Backend security, performance and handoff gate B | P0–P6 acceptance evidence | NOT_STARTED | None for new implementation |
+| P6 | Regional ASR, constrained middle model and TTS | P1 + P4 + P5 | IN_PROGRESS | Contract freeze committed on `CLEAN`; six parallel workers authorized. Engineering evidence gates acceptance |
+| P7 | Backend security, performance and handoff gate B | P0–P6 acceptance evidence | IN_PROGRESS | Preparation authorized alongside P6 engineering; Gate B remains blocked on P6 acceptance |
 | P8 | Select and implement Android and iPhone clients | Gate B | NOT_STARTED | None for new implementation |
 | P9 | Whole-system readiness, regional drills and release assurance | P8; full P2/P6 data/language acceptance | NOT_STARTED | None for new implementation |
 | P10 | Retire obsolete files and verify the final artifact | P9 | NOT_STARTED | None for new implementation |
@@ -1019,3 +1019,95 @@ Pilot metrics, field/operator feedback, approved source freshness, valid routes,
 ### Deliver and stop
 
 Operational release is a documented government/product/operations decision with ongoing monitoring and incident ownership. Never equate a passed demo, scanner report or API connection with flawless real-world evacuation.
+
+## P6 contract-freeze record (2026-09-21) — coordinator, run FIRST
+
+```text
+Phase / status: P6 — Regional ASR, constrained middle model and TTS — contract
+  freeze DONE. P6 engineering IN_PROGRESS via six parallel workers.
+  P7 preparation also IN_PROGRESS via three further workers; P6 acceptance
+  and P7 gate B remain gated.
+
+Base commit (before the freeze): bf17515 docs(plan): split P5 corrections and
+  P6-P7 parallel work.
+
+Scope completed and changed files (coordinator edits on CLEAN):
+  - plan/p6-contract.md — frozen typed contract, file ownership per worker,
+    base commit, seven resolved boundaries and acceptance matrix A1..A10.
+  - backend/internal/contracts/context.go — typed ScopedContext with typed
+    PlaceCandidate / RouteRef / FacilityRef / ZoneRef / EligibleChoice;
+    SnapshotRevalidator seam.
+  - backend/internal/contracts/transcription.go — typed ASR envelope,
+    TranscriptionState, bounded compressed-audio limits, content-type
+    allow-list, nullable confidence semantics.
+  - backend/internal/contracts/tts.go — typed TTS request/response/cache-key
+    shapes, ApprovedTemplate and TemplateRegistry seams.
+  - backend/internal/contracts/pipeline.go — typed PipelineRequest/
+    PipelineResponse unions, PipelineState, bounded input limits.
+  - backend/internal/contracts/worker_health.go — typed WorkerHealth,
+    ModelInfo, ArtifactDigest, QueueStats and the private ASR/Middle/TTS
+    request/response shapes that the workers' isolated Go modules consume.
+  - backend/internal/contracts/errors.go — additive codes only:
+    TRANSCRIPT_UNAVAILABLE, AUDIO_UNAVAILABLE, MODEL_TIMEOUT, QUEUE_SATURATED,
+    INFERENCE_CANCELLED, TEMPLATE_UNKNOWN, STALE_SNAPSHOT.
+  - backend/contracts/openapi.yaml — additive only: three new paths
+    /api/v3/voice/{transcriptions,process,speech} with typed schemas
+    TranscriptionResponse / PipelineRequest / PipelineResponse / TTSRequest /
+    TTSResponse. Existing paths and schemas unchanged.
+  - backend/internal/contracts/p6_contract_test.go — golden roundtrip tests
+    for ScopedContext, the three pipeline/TTS/ASR envelopes, the cache key,
+    the worker-health envelope and the new error codes.
+
+Acceptance matrix (plan/p6-contract.md):
+  A1 go build ./...                                                       PASS
+  A2 existing voice-command validation tests                              PASS
+  A3 TestServedRoutesMatchOpenAPI                                          PASS
+  A4 new envelopes marshal/unmarshal losslessly (roundtrip table)         PASS
+  A5 ScopedContext JSON-roundtrip stable                                  PASS
+  A6 new error codes present                                              PASS
+  A7 OpenAPI additive slices lint clean (no removal of existing paths)    PASS
+  A8 freeze document records base/ownership/resolved boundaries           PASS
+  A9 no shared file outside contract ownership list modified              PASS
+  A10 no .txt file modified                                               PASS
+
+Tests/commands, environment and results (Go 1.27.1 darwin/arm64):
+  - gofmt -l . → clean
+  - go vet ./... → clean
+  - go build ./... → ok
+  - go test ./internal/contracts ./internal/httpserver ./internal/store
+    ./internal/httpjson ./internal/capfeed ./internal/opkg ./internal/sourceact
+    ./internal/catalogue ./internal/offlinepkg ./internal/offlinedelivery
+    ./internal/offlineresources -count=1 → all ok
+
+File ownership and amendments:
+  - Six P6 workers and three P7 workers consume this freeze verbatim.
+  - Workers own their assigned directories only; shared backend/go.mod,
+    backend/contracts/openapi.yaml, cmd/sthira/main.go, backend/migrations/,
+    backend/internal/httpserver/server.go and plan/prompt.md remain under
+    coordinator ownership. Workers PROPOSE exact deltas in their handoff;
+    no shared-edit overlap is acceptable.
+  - Workers request contract amendments (typed-shape additions, new error
+    codes) by submitting a written proposal in their lane handoff. The
+    coordinator integrates accepted amendments in a single follow-up commit.
+
+P5 history preserved verbatim. P5 acceptance is IN_PROGRESS in the lanes
+(offlineclient, store/publication, offlinequeue) and is NOT closed by this
+freeze. P5 worker Areas A–G findings remain open; they are not silently
+relabelled complete.
+
+Unresolved internal work: none for the contract freeze.
+External dependency, owner and exact evidence needed (UNCHANGED):
+  O01..O16 remain open; O03/O04 hardware/reviewers/budget block real
+  language acceptance, not the contract freeze. No external evidence is
+  required for the freeze itself.
+
+Worker launch order:
+  Once the freeze commit is reported below, six P6 workers (W4, W5, W6,
+  W7, W8, W9) and three P7 workers (W10, W11, W12) may begin. Workers
+  create one codex/<task-name> worktree each from the freeze commit; they
+  do not edit the freeze. The coordinator stops here.
+
+Next eligible step: parallel P6 implementation per the freeze; P7
+preparation in parallel. P6 acceptance cannot bypass P5 defect closure;
+P7 gate B cannot pass before P6 acceptance.
+```

@@ -27,4 +27,14 @@ const (
 	ErrRateLimited         = "RATE_LIMITED"
 	ErrNotFound            = "NOT_FOUND"
 	ErrInternal            = "INTERNAL"
+
+	// P6 — voice pipeline and inference. Additive only; existing codes are
+	// unchanged. See plan/p6-contract.md.
+	ErrTranscriptUnavailable = "TRANSCRIPT_UNAVAILABLE"
+	ErrAudioUnavailable      = "AUDIO_UNAVAILABLE"
+	ErrModelTimeout          = "MODEL_TIMEOUT"
+	ErrQueueSaturated        = "QUEUE_SATURATED"
+	ErrInferenceCancelled    = "INFERENCE_CANCELLED"
+	ErrTemplateUnknown       = "TEMPLATE_UNKNOWN"
+	ErrStaleSnapshot         = "STALE_SNAPSHOT"
 )

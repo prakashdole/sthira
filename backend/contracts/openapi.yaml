@@ -16,6 +16,7 @@ servers:
 tags:
   - name: health
   - name: voice
+  - name: voice-p6
   - name: stay
   - name: operations
   - name: offline
@@ -455,6 +456,100 @@ paths:
         '404': { $ref: '#/components/responses/ErrorEnvelope' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '416': { description: Range Not Satisfiable }
+  # P6 — voice pipeline entry points. Additive only; the existing /voice/commands
+  # contract is unchanged. See plan/p6-contract.md. Worker 9 owns the
+  # orchestration handler; the request/response envelopes below are the
+  # coordinator freeze.
+  /voice/transcriptions:
+    post:
+      tags: [voice-p6]
+      summary: Transcribe a bounded audio upload to text
+      description: >-
+        ASR entry point. Accepts a bounded compressed mono audio upload
+        (audio/wav | audio/webm | audio/ogg; ≤512 KiB compressed; ≤20 s
+        decoded; 8 kHz – 48 kHz; mono) and a single enabled context language.
+        Returns a typed transcript. The handler does NOT store the
+        transcript server-side; persistence is the caller's job. It does NOT
+        log audio bytes. Cancellation propagates to the ASR worker via the
+        request context.
+      parameters:
+        - name: X-Language
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Request-ID
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          audio/wav:  { schema: { type: string, format: binary } }
+          audio/webm: { schema: { type: string, format: binary } }
+          audio/ogg:  { schema: { type: string, format: binary } }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/ErrorEnvelope' }
+        '413': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '422': { $ref: '#/components/responses/ErrorEnvelope' }
+        '499': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+        '504': { $ref: '#/components/responses/ErrorEnvelope' }
+  /voice/process:
+    post:
+      tags: [voice-p6]
+      summary: Full voice pipeline (audio → ASR → context → middle → validator → optional TTS)
+      description: >-
+        Orchestrator entry point. Drives the full pipeline under per-stage
+        and total deadlines with cancellation and stale-result rejection.
+        Performs NO write, call or capacity mutation. Body is JSON (typed
+        PipelineRequest); the embedded audio (when used) is base64-encoded
+        and bounded to the same compressed-bytes and decoded-duration limits
+        as /voice/transcriptions.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PipelineRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/ErrorEnvelope' }
+        '409': { $ref: '#/components/responses/ErrorEnvelope' }
+        '413': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '422': { $ref: '#/components/responses/ErrorEnvelope' }
+        '499': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+        '504': { $ref: '#/components/responses/ErrorEnvelope' }
+  /voice/speech:
+    post:
+      tags: [voice-p6]
+      summary: Synthesize an approved template to audio
+      description: >-
+        TTS entry point. Accepts a request naming an approved speech_key,
+        language, validated template args and source_version; returns a
+        content-addressed audio envelope. Only Go-approved text (rendered
+        from the typed template registry) and version metadata reach the
+        worker; arbitrary public text is rejected at the orchestrator.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TTSRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/ErrorEnvelope' }
+        '409': { $ref: '#/components/responses/ErrorEnvelope' }
+        '413': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '422': { $ref: '#/components/responses/ErrorEnvelope' }
+        '499': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+        '504': { $ref: '#/components/responses/ErrorEnvelope' }
 components:
   securitySchemes:
     bearerAuth:
@@ -799,6 +894,208 @@ components:
             properties:
               name: { type: string }
               number: { type: string }
+        allocation_policy:
+          type: object
+          required: [order]
+          properties:
+            order:
+              type: array
+              items: { type: string }
+        checksum_sha256: { type: string }
+        signature:
+          type: object
+          required: [algorithm, key_id, value]
+          properties:
+            algorithm: { type: string, enum: [Ed25519] }
+            key_id: { type: string }
+            value: { type: string }
+    # P6 — typed envelopes for the three new voice endpoints. See
+    # backend/internal/contracts/{transcription,tts,pipeline}.go for the Go
+    # types these schemas describe.
+    TranscriptionResponse:
+      type: object
+      required: [request_id, data_version, language, text, confidence, state]
+      properties:
+        request_id: { type: string }
+        data_version: { type: string }
+        language: { type: string }
+        text: { type: string }
+        confidence:
+          nullable: true
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: >-
+            Calibrated probability in [0,1] when supported by the ASR
+            artifact. null means unknown / not calibrated. An explicit zero
+            is a real zero, not "unknown".
+        alternatives:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            required: [text]
+            properties:
+              text: { type: string }
+              confidence:
+                nullable: true
+                type: number
+                format: float
+                minimum: 0
+                maximum: 1
+        state:
+          type: string
+          enum: [OK, UNSUPPORTED_LANGUAGE, AUDIO_UNAVAILABLE, TIMEOUT, UNAVAILABLE, CANCELED]
+        model_revision: { type: string }
+        artifact_digest: { type: string, description: SHA-256 of the loaded ASR artifact }
+    PipelineRequest:
+      type: object
+      required: [request_id, jurisdiction, language, input, render]
+      additionalProperties: false
+      properties:
+        request_id: { type: string }
+        jurisdiction:
+          type: string
+          description: >-
+            Required. Untrusted lookup input selecting which jurisdiction's
+            snapshot to resolve (mirrors /voice/commands semantics).
+        language:
+          type: string
+          description: >-
+            Required. Must be in the resolved ScopedContext.AllowedLanguages.
+        input:
+          type: object
+          required: [kind]
+          properties:
+            kind: { type: string, enum: [audio, transcript] }
+            content_type: { type: string, description: audio MIME when kind=audio }
+            body_b64:
+              type: string
+              description: >-
+                base64 of bounded compressed audio (≤512 KiB compressed;
+                ≤20 s decoded; 8–48 kHz; mono) when kind=audio.
+            text: { type: string, description: required when kind=transcript }
+            confidence:
+              nullable: true
+              type: number
+              format: float
+              minimum: 0
+              maximum: 1
+        render:
+          type: object
+          required: [kind]
+          properties:
+            kind: { type: string, enum: [none, tts] }
+        idempotency_key: { type: string }
+    PipelineResponse:
+      type: object
+      required: [request_id, data_version, state, validated_proposal, template]
+      properties:
+        request_id: { type: string }
+        data_version: { type: string }
+        state:
+          type: string
+          enum: [OK, CLARIFY, UNSUPPORTED, DATA_UNAVAILABLE, MODEL_UNAVAILABLE, CANCELED]
+        validated_proposal: { $ref: '#/components/schemas/ModelOutput' }
+        template:
+          type: object
+          required: [speech_key, template_version]
+          properties:
+            speech_key: { type: string }
+            template_version: { type: integer, minimum: 1 }
+            args:
+              type: array
+              items:
+                type: object
+                required: [key, value]
+                properties:
+                  key: { type: string }
+                  value: { type: string }
+        audio:
+          type: object
+          description: Present when render.kind=tts.
+          required: [audio_id, content_type, byte_size, checksum_sha256, cache_hit, language, model_revision, voice_revision, template_version, source_version, settings]
+          properties:
+            audio_id: { type: string, description: content-addressed; SHA-256 of audio bytes }
+            content_type: { type: string, enum: [audio/wav] }
+            byte_size: { type: integer, minimum: 1 }
+            checksum_sha256: { type: string }
+            cache_hit: { type: boolean }
+            language: { type: string }
+            model_revision: { type: string }
+            voice_revision: { type: string }
+            template_version: { type: integer, minimum: 1 }
+            source_version: { type: integer, minimum: 1 }
+            settings:
+              type: object
+              required: [sample_rate, bit_depth, channels]
+              properties:
+                sample_rate: { type: integer, minimum: 8000, maximum: 48000 }
+                bit_depth: { type: integer, enum: [16] }
+                channels: { type: integer, enum: [1] }
+                speaking_rate: { type: number, format: float }
+        stage_failures:
+          type: array
+          description: Stages that first failed (empty on success).
+          items:
+            type: string
+            enum: [audio, asr, context, middle, validator, template, tts]
+    TTSRequest:
+      type: object
+      required: [request_id, speech_key, language, args, source_version, settings]
+      additionalProperties: false
+      properties:
+        request_id: { type: string }
+        speech_key: { type: string, description: must be in ScopedContext.TemplateKeys }
+        language: { type: string, description: must be in ScopedContext.AllowedLanguages }
+        args:
+          type: object
+          required: [args]
+          properties:
+            args:
+              type: object
+              additionalProperties: true
+              description: >-
+                Validated template arguments. Worker 4 enforces the
+                template-specific JSON Schema at the orchestrator; arbitrary
+                prose is rejected before reaching the worker.
+        source_version: { type: integer, minimum: 1 }
+        settings:
+          type: object
+          required: [sample_rate, bit_depth, channels]
+          properties:
+            sample_rate: { type: integer, minimum: 8000, maximum: 48000 }
+            bit_depth: { type: integer, enum: [16] }
+            channels: { type: integer, enum: [1] }
+            speaking_rate: { type: number, format: float }
+    TTSResponse:
+      type: object
+      required: [request_id, speech_key, language, source_version, template_version, model_revision, voice_revision, audio_id, content_type, byte_size, checksum_sha256, cache_hit, state, settings]
+      properties:
+        request_id: { type: string }
+        speech_key: { type: string }
+        language: { type: string }
+        source_version: { type: integer, minimum: 1 }
+        template_version: { type: integer, minimum: 1 }
+        model_revision: { type: string }
+        voice_revision: { type: string }
+        audio_id: { type: string }
+        content_type: { type: string, enum: [audio/wav] }
+        byte_size: { type: integer, minimum: 1 }
+        checksum_sha256: { type: string }
+        cache_hit: { type: boolean }
+        state:
+          type: string
+          enum: [OK, UNSUPPORTED_LANGUAGE, AUDIO_UNAVAILABLE, TIMEOUT, UNAVAILABLE, CANCELED]
+        settings:
+          type: object
+          required: [sample_rate, bit_depth, channels]
+          properties:
+            sample_rate: { type: integer, minimum: 8000, maximum: 48000 }
+            bit_depth: { type: integer, enum: [16] }
+            channels: { type: integer, enum: [1] }
+            speaking_rate: { type: number, format: float }
         allocation_policy:
           type: object
           required: [order]
