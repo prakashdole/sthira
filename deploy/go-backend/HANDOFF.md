@@ -10,6 +10,13 @@ approval remains a separate decision owned by the deployment owner; see
   `53302b2` (`docs(plan): add deployment and scenario preparation build lanes`).
 - **Branch / worktree**: `codex/go-deployment-package` at
   `/private/tmp/mz-worktrees/go-deployment-package`.
+- **New commits (oldest first, on top of `53302b2`)** — Worker 1 may
+  cherry-pick these individually in this order:
+  - `4a825cb` — image, compose, and bounded lifecycle scaffolding
+  - `c197623` — explicit migrate, backup, and isolated restore
+  - `258fe97` — operator handoff and NOT_RUN register
+  - `917ac82` — Dockerfile builds sthmigrate and pgdsn-env from the right module
+  - `d22308b` — simplify Dockerfile to single-module build with both binaries
 - **Toolchain pin** (recorded in `backend/go.mod`):
   - Go: `1.27.1` (Dockerfile `ARG GO_VERSION` defaults to the same).
   - Database image: `postgis/postgis:16-3.4` (matches the migrations'
