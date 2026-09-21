@@ -507,20 +507,25 @@ func TestFreshnessState_Stale(t *testing.T) {
 	c := newClient(t, ts.URL, dir, clock)
 	c.Sync(context.Background(), "KL")
 
-	// Advance 30 min — should still be CURRENT (within window, > staleBefore).
+	// Restart with a fresh process (monotonic anchor zero): freshness must
+	// recover from wall-clock + the original acquisition window recorded
+	// in state.json, without renewing validity.
+	// Advance 30 min — still well within the 1h window; recovery reads
+	// CURRENT. MaxObservedUnixMS advances each query so a later clock
+	// rollback is still detected.
 	future1 := fakeClock(now.Add(30 * time.Minute))
 	c2 := newClient(t, ts.URL, dir, future1)
 	_, state, _ := c2.GetActiveCard()
-	if state != FreshnessUnverifiable {
-		t.Errorf("after restart: freshness = %v, want FreshnessUnverifiable", state)
+	if state != FreshnessCurrent {
+		t.Errorf("after restart + 30min: freshness = %v, want FreshnessCurrent (recovered without renewing validity)", state)
 	}
 
 	// Advance 56 min total — within staleBefore (5min default), so STALE.
 	future2 := fakeClock(now.Add(56 * time.Minute))
 	c3 := newClient(t, ts.URL, dir, future2)
 	_, state, _ = c3.GetActiveCard()
-	if state != FreshnessUnverifiable {
-		t.Errorf("after restart near expiry: freshness = %v, want FreshnessUnverifiable", state)
+	if state != FreshnessStale {
+		t.Errorf("after restart near expiry: freshness = %v, want FreshnessStale (recovered)", state)
 	}
 }
 
@@ -534,7 +539,7 @@ func TestStorageLayout(t *testing.T) {
 	c := newClient(t, ts.URL, dir, clock)
 	c.Sync(context.Background(), "KL")
 
-	wantFiles := []string{"state.json", "current_manifest.bin", "current_card.bin"}
+	wantFiles := []string{"state.json", "current_generation.json"}
 	for _, f := range wantFiles {
 		path := filepath.Join(dir, "state", f)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -870,8 +875,11 @@ func TestHasResource_NotDownloaded(t *testing.T) {
 	}
 }
 
-// Smoke test: verify that after sync, GetActiveCard and GetFreshnessState work
-// on a fresh client instance (restart recovery).
+// TestRestartRecovery verifies that after sync, a fresh client reading the
+// same storage recovers the freshness from wall-clock and the persisted
+// acquisition window. The validity window is NOT renewed: the same
+// LastFetchedAtUnixMS anchors the elapsed calculation. The monotonic
+// process-local anchor is not relied on across restart.
 func TestRestartRecovery(t *testing.T) {
 	ts := newTestServer(t, "KL")
 	defer ts.Server.Close()
@@ -882,7 +890,8 @@ func TestRestartRecovery(t *testing.T) {
 	c := newClient(t, ts.URL, dir, clock)
 	c.Sync(context.Background(), "KL")
 
-	// New client pointing at the same storage
+	// New client pointing at the same storage; wall-clock time has not
+	// advanced, so the card is still CURRENT.
 	c2 := newClient(t, ts.URL, dir, clock)
 	card, state, err := c2.GetActiveCard()
 	if err != nil {
@@ -891,8 +900,8 @@ func TestRestartRecovery(t *testing.T) {
 	if card.PackageID != "pkg-a" {
 		t.Errorf("card.PackageID = %q, want pkg-a", card.PackageID)
 	}
-	if state != FreshnessUnverifiable {
-		t.Errorf("freshness after restart = %v, want FreshnessUnverifiable", state)
+	if state != FreshnessCurrent {
+		t.Errorf("freshness after restart = %v, want FreshnessCurrent (recovered without renewing validity)", state)
 	}
 }
 
@@ -1126,8 +1135,8 @@ func TestKeyRevocationInvalidatesCard(t *testing.T) {
 }
 
 // TestCorruptTombstonesFailClosed verifies that corrupt tombstones fail closed:
-// stateQuery returns FreshnessUnverifiable with an error rather than silently treating
-// routes and packages as non-revoked.
+// stateQuery returns FreshnessUnverifiable with an error rather than silently
+// treating routes and packages as non-revoked.
 func TestCorruptTombstonesFailClosed(t *testing.T) {
 	ts := newTestServer(t, "KL")
 	defer ts.Server.Close()
@@ -1144,9 +1153,9 @@ func TestCorruptTombstonesFailClosed(t *testing.T) {
 		t.Fatalf("Sync: %v", err)
 	}
 
-	// Corrupt routes.json
-	routesPath := filepath.Join(dir, "tombstones", "routes.json")
-	if err := os.WriteFile(routesPath, []byte("NOT_VALID_JSON{{{"), 0o644); err != nil {
+	// Corrupt the single tombstone state file.
+	tombPath := filepath.Join(dir, "tombstones", "tombstones.json")
+	if err := os.WriteFile(tombPath, []byte("NOT_VALID_JSON{{{"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -1255,17 +1264,20 @@ func TestSameRevisionRepair(t *testing.T) {
 		t.Fatalf("Sync 1: %v", err)
 	}
 
-	// Delete active card
-	cardPath := filepath.Join(dir, "state", "current_card.bin")
-	_ = os.Remove(cardPath)
+	// Delete the active generation (corrupt / evicted / same-revision
+	// recovery scenario).
+	genPath := filepath.Join(dir, "state", "current_generation.json")
+	_ = os.Remove(genPath)
 
-	// Sync again at same revision 1
+	// Sync again at same revision 1: the client must detect the missing
+	// generation and repair it without silently treating the absence as
+	// a fresh empty trust store.
 	_, err = c.Sync(context.Background(), "KL")
 	if err != nil {
 		t.Fatalf("Sync repair failed: %v", err)
 	}
 
-	// Verify card is restored
+	// Verify card is restored.
 	repaired, state, err := c.GetActiveCard()
 	if err != nil {
 		t.Fatalf("GetActiveCard after repair: %v", err)
@@ -1657,8 +1669,12 @@ func TestResourceFreshnessIndependent(t *testing.T) {
 	if stale != ResourceStale {
 		t.Fatalf("stale = %v, want ResourceStale", stale)
 	}
-	if _, cardState, _ := cFuture.GetActiveCard(); cardState != FreshnessUnverifiable {
-		t.Fatalf("card freshness after restart = %v, want UNVERIFIABLE", cardState)
+	// The critical card expires in 2099, so it remains CURRENT across the
+	// restart at clock+25h. Resource freshness is independent of card
+	// freshness; recovery uses wall-clock against the persisted
+	// LastFetchedAtUnixMS without renewing the validity window.
+	if _, cardState, _ := cFuture.GetActiveCard(); cardState != FreshnessCurrent {
+		t.Fatalf("card freshness after restart = %v, want FreshnessCurrent (recovered)", cardState)
 	}
 }
 
@@ -1691,7 +1707,7 @@ func ts_serveCard(c *offlinepkg.PublicIncidentCard) http.HandlerFunc {
 // to assert "no generation got activated" after a failed Sync.
 func activeManifestOnDisk(t *testing.T, c *ProtocolClient) bool {
 	t.Helper()
-	_, err := os.Stat(filepath.Join(c.StorageDir(), "state", "current_manifest.bin"))
+	_, err := os.Stat(filepath.Join(c.StorageDir(), "state", "current_generation.json"))
 	return err == nil
 }
 
