@@ -11,9 +11,9 @@
 # them with bounded time so CI costs stay predictable.
 
 set -euo pipefail
-cd "$(dirname "$0")/../.."
-
-source "$(dirname "$0")/_lib.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/_lib.sh"
+cd "${SCRIPT_DIR}/../.."
 snapshot_metadata
 
 FUZZ_TIME="${FUZZ_TIME:-30s}"

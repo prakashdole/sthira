@@ -36,10 +36,8 @@ func buildVoiceServer(t *testing.T) (*httptest.Server, *orchestration.Orchestrat
 	if err != nil {
 		t.Fatalf("orchestrationtest.NewOrchestrator: %v", err)
 	}
-	srv := New(DefaultConfig("127.0.0.1:0"))
 	h := NewVoiceProcessHandler(orch, orchestration.DefaultLimits())
-	mux := srv.httpSrv.Handler.(*http.ServeMux)
-	h.RegisterVoiceRoutes(mux, srv.withRequestID)
+	srv := New(DefaultConfig("127.0.0.1:0"), WithVoiceProcess(h))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, orch, asr, mid, tts
@@ -232,9 +230,8 @@ func TestVoiceProcess_HandleProcessStaleSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("orchestrationtest.NewOrchestrator: %v", err)
 	}
-	s := New(DefaultConfig("127.0.0.1:0"))
 	h := NewVoiceProcessHandler(orch, orchestration.DefaultLimits())
-	h.RegisterVoiceRoutes(s.httpSrv.Handler.(*http.ServeMux), s.withRequestID)
+	s := New(DefaultConfig("127.0.0.1:0"), WithVoiceProcess(h))
 	srv2 := httptest.NewServer(s.Handler())
 	defer srv2.Close()
 	body := `{"request_id":"req-1","jurisdiction":"JTEST","language":"en-IN","input":{"kind":"transcript","text":"hi"},"render":{"kind":"none"}}`
@@ -261,9 +258,8 @@ func TestVoiceProcess_HandleProcessValidatorRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("orchestrationtest.NewOrchestrator: %v", err)
 	}
-	s := New(DefaultConfig("127.0.0.1:0"))
 	h := NewVoiceProcessHandler(orch, orchestration.DefaultLimits())
-	h.RegisterVoiceRoutes(s.httpSrv.Handler.(*http.ServeMux), s.withRequestID)
+	s := New(DefaultConfig("127.0.0.1:0"), WithVoiceProcess(h))
 	srv2 := httptest.NewServer(s.Handler())
 	defer srv2.Close()
 	body := `{"request_id":"req-1","jurisdiction":"JTEST","language":"en-IN","input":{"kind":"transcript","text":"hi"},"render":{"kind":"none"}}`

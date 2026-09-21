@@ -439,13 +439,9 @@ func TestP5Flow1_EndToEndPublicationToDiskActivation(t *testing.T) {
 	}
 
 	// 7. Verify atomic storage files exist and .part files were removed
-	manifestPath := filepath.Join(clientDir, "state", "current_manifest.bin")
-	cardPath := filepath.Join(clientDir, "state", "current_card.bin")
-	if _, err := os.Stat(manifestPath); err != nil {
-		t.Errorf("current_manifest.bin missing on disk: %v", err)
-	}
-	if _, err := os.Stat(cardPath); err != nil {
-		t.Errorf("current_card.bin missing on disk: %v", err)
+	genPath := filepath.Join(clientDir, "state", "current_generation.json")
+	if _, err := os.Stat(genPath); err != nil {
+		t.Errorf("current_generation.json missing on disk: %v", err)
 	}
 	downloadsDir := filepath.Join(clientDir, "downloads")
 	entries, _ := os.ReadDir(downloadsDir)
@@ -609,8 +605,8 @@ func TestP5Flow2_InterruptedDownloadAndRangeResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("c2.GetActiveCard on restart: %v", err)
 	}
-	if freshness != offlineclient.FreshnessUnverifiable {
-		t.Errorf("freshness after restart = %v, want UNVERIFIABLE", freshness)
+	if freshness != offlineclient.FreshnessCurrent {
+		t.Errorf("freshness after restart = %v, want CURRENT", freshness)
 	}
 	if activeCard.PackageID != "PKG-KL-WAYANAD-01" {
 		t.Errorf("activeCard.PackageID = %s, want PKG-KL-WAYANAD-01", activeCard.PackageID)

@@ -217,7 +217,7 @@ func (w *DummyWorker) handleChat(wr http.ResponseWriter, r *http.Request) {
 	wr.Header().Set("Content-Type", "application/json")
 	wr.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(wr).Encode(map[string]any{
-		"action": "SHOW_CHOICES",
+		"action":       "SHOW_CHOICES",
 		"data_version": 1,
 	})
 }

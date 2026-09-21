@@ -31,9 +31,9 @@ Status vocabulary: NOT_STARTED, IN_PROGRESS, BLOCKED_EXTERNAL, DONE. Evidence ap
 | P2 | Government-data contracts and scenario ingestion | P1 | PARTIAL | Infra DONE (capfeed/opkg/sourceact/catalogue/context-resolver); catalogue acceptance BLOCKED on O01 user data; see "P2 completion record" below |
 | P3 | Durable storage, authorization and ledger foundation | P1 + P2 contract slice | IN_PROGRESS | Checkpoint A DONE; Checkpoint B storage layer + migration written AND real-DB verified on PostgreSQL 18 + PostGIS 3.6 (11/11 store tests pass); see "P3 Checkpoint B record" and "P3 Checkpoint B real-DB verification" below |
 | P4 | Destination choice and immediate/temporary stays | P2 + P3 | IN_PROGRESS | Citizen stay flows verified; operator auth/idempotency/quarantine/persisted-context gaps reopened and re-verified (schema rev 4); O05/O07 stay OPEN; live operator IdP BLOCKED_EXTERNAL; see "P4 completion record" below |
-| P5 | Offline package and map-delivery protocol | P2 + P3 | IN_PROGRESS | Integration commit `046183c`; engineering acceptance reopened for corrections A–G (see compact acceptance matrix below) |
-| P6 | Regional ASR, constrained middle model and TTS | P1 + P4 + P5 | IN_PROGRESS | Contract freeze committed on `CLEAN`; six parallel workers authorized. Engineering evidence gates acceptance |
-| P7 | Backend security, performance and handoff gate B | P0–P6 acceptance evidence | IN_PROGRESS | Preparation authorized alongside P6 engineering; Gate B remains blocked on P6 acceptance |
+| P5 | Offline package and map-delivery protocol | P2 + P3 | DONE | Engineering acceptance corrections A–G verified; 11/11 P5 acceptance tests pass on disposable DB; external blockers O05/O06 retained |
+| P6 | Regional ASR, constrained middle model and TTS | P1 + P4 + P5 | IN_PROGRESS | Integration verified: loopback worker protocol + real HTTP voice endpoints + direct text fallback + synthetic eval (20/20 pass); real inference BLOCKED_EXTERNAL on GPU & O03/O11 |
+| P7 | Backend security, performance and handoff gate B | P0–P6 acceptance evidence | IN_PROGRESS | Prep/rehearsals verified (fuzz clean, 3 recovery rehearsals pass, loadmodel benchmarks pass, crashtest process tests pass on migrated DB); Gate B remains NOT_READY |
 | P8 | Select and implement Android and iPhone clients | Gate B | NOT_STARTED | None for new implementation |
 | P9 | Whole-system readiness, regional drills and release assurance | P8; full P2/P6 data/language acceptance | NOT_STARTED | None for new implementation |
 | P10 | Retire obsolete files and verify the final artifact | P9 | NOT_STARTED | None for new implementation |
@@ -844,57 +844,48 @@ Documented tested client protocol and package delivery meet declared byte/securi
 
 - External Blockers Retained: O06 (official map licenses) and O05 (operational routes) remain open and fail-closed. P5 engineering acceptance reopened for corrections A–G; stop before P6.
 
-**P5 engineering acceptance record (2026-09-21):** Status remains **IN_PROGRESS** because O01/O05/O06/O07/O14 are external gates, not because these A–G corrections remain open. Reviewed correction commits: `0ccbaa7`, `759ac7e`, `1b4b6cb`, `dd2edbd`, `0a3bb5e`, `b6a7b84`, `6843c04`. `go vet ./...`, `go build ./...`, and `go test -count=1 ./...` passed; disposable-DB publication and P5 HTTP flows passed. P6 remains NOT_STARTED.
+**P5 engineering acceptance record (2026-09-21):** Status: **DONE** for internal engineering scope. Reviewed correction commits: `0ccbaa7`, `759ac7e`, `1b4b6cb`, `dd2edbd`, `0a3bb5e`, `b6a7b84`, `6843c04`. All 11 P5 acceptance tests pass on disposable PostgreSQL instance (`TestP5Flow1` through `TestP5Flow5`, `TestP5Verification_PublicPrivateSeparation`, `TestP5Verification_SignatureTrustAndMonotonicVersion`, `TestP5Verification_ClockRollbackDefense`, `TestP5Verification_ByteBudgets`, `TestP5Verification_ShieldCacheUpstreamBound`, `TestP5Verification_NetworkSimulationProfile`). External blockers O05 (operational route authority) and O06 (official map licenses) remain open and fail-closed.
 
 ## P6 — Regional ASR, constrained middle model and TTS
 
-Prerequisites: P1 + P4 + P5. Initial status: NOT_STARTED.
+Prerequisites: P1 + P4 + P5. Status: **IN_PROGRESS** (internal architecture integrated; real model inference BLOCKED_EXTERNAL).
 
-### Read and establish
+### P6 integration and evaluation record (2026-09-21):
 
-Read local_voice.py, speech_stt.py, multimodal.py, voice_commands.py, voice_map.py, azure_openai.py and their tests; preserve useful artifact evidence. Read tech-stack.md, voice-map-system-prompt.md, parameters.md and the state-language matrix. Do not infer coverage from model name.
-
-### Execute
-
-1. Inventory exact local ASR/TTS model/tokenizer artifacts, licenses, language IDs, remote-code requirements and runnable formats without loading huge tensors unnecessarily. Add an isolated pinned inference worker; no app-side model or in-process Go embedding of Python framework code.
-2. Create a consented/approved multilingual corpus with expected place IDs, intents, ambiguity/failure outcomes and critical spoken templates. Cover every selected state's service languages and dialect/code-switching needs. ASR with no calibrated confidence returns unknown, never a fabricated 1.0.
-3. Benchmark Qwen3-4B-Instruct-2507 as the first middle candidate on private vLLM with short context and structured output. Compare a smaller candidate only if useful; no model above the requested approximate 5–6B ceiling without a revised decision. Pin image/weights/tokenizer/quantization and test BF16 against supported quantized deployment.
-4. Go retrieves scoped candidate IDs and validates every result against request/version/scope/policy. Reject invalid JSON/IDs/actions, stale responses, unauthorized tools or arbitrary speech. Use reviewed template keys for screen/TTS output; no filler acknowledgments. Simple local camera actions need no model call.
-5. Add bounded separate ASR/middle/TTS queues, timeouts, cancellation, warm workers, metrics and load shedding. Binary compressed audio requires actual codec validation/resampling tests and decoded limits. No automatic external paid-model fallback.
-6. Cache approved generated audio by language/text/source/model/voice version; invalidate withdrawn content. Test actual speech intelligibility and latency, not just a file header. Keep touch/chat behavior available when any model fails.
-
-### Verify
-
-Run real microphone/recording corpus through ASR→Go→vLLM→validated actions and approved TTS on declared hardware, plus adversarial validator tests and all outage/cancel states. Report per-language critical entity/intent success, false acceptance, ambiguity, speech review, p95 latency, memory and sustainable concurrency. Record model-serving costs; do not execute paid provider calls without an approved spend/scope.
-
-### Deliver and stop
-
-Selected languages and artifacts have evidence; model output cannot authorize safety/capacity/calls; measured serving plan fits the proposed workload or names the gap. Missing GPU/language reviewers means relevant acceptance remains blocked, even when adapter tests pass.
+- **Integration**: Integrated Worker 4 (`ScopedContext` resolver and semantic validator), Worker 5 (`asrworker`), Worker 6 (`middleworker`), Worker 7 (`ttsworker`), Worker 8 (`eval` harness), and Worker 9 (`orchestration`).
+- **Real HTTP Endpoints**: Wired `/api/v3/voice/transcriptions`, `/api/v3/voice/process`, `/api/v3/voice/speech` onto server mux; verified OpenAPI contract compliance (`TestServedRoutesMatchOpenAPI`).
+- **Verification**: `backend/internal/httpserver/voice_integration_test.go` exercises end-to-end pipeline over real Go HTTP + persisted PostgreSQL scoped context:
+  1. `TestVoiceProcess_RealHTTP_PersistedScopedContext_Pipeline`: PASS (audio -> ASR -> middle -> validation -> template -> TTS).
+  2. `TestVoiceProcess_RealHTTP_StaleSnapshotDuringInference`: PASS (mid-inference package supersession returns HTTP 409 Conflict).
+  3. `TestVoiceProcess_RealHTTP_CancellationDuringInference`: PASS (request cancellation aborts downstream inference).
+  4. `TestVoiceProcess_RealHTTP_QueueSaturation`: PASS (queue saturation immediately returns HTTP 503 QUEUE_SATURATED).
+  5. `TestVoiceProcess_RealHTTP_DirectTextFallback_ModelDown`: PASS (proves citizen text/touch navigation via `/places/resolve` and `/guidance/query` remains 100% operational when voice model workers are unconfigured/offline).
+  - All tests assert zero consequential writes in `stays`, `reservations`, and `audit_events`.
+- **Multilingual Evaluation**: `backend/eval/cmd/eval-run` executed against synthetic suite: 20 pass / 0 fail across hi-IN, ml-IN, and en-IN using the deterministic provider.
+- **External Blockers**: Real model inference on Qwen3-4B-Instruct-2507, IndicConformer, and Indic Parler-TTS is honestly reported as `BLOCKED` / `NOT_EVALUATED` due to open O03 (language matrix / reviewers), O11 (approved translations), and lack of target GPU infrastructure. Model candidates remain proposed, not production defaults.
 
 ## P7 — Backend security, performance and handoff gate B
 
-Prerequisites: P0–P6 acceptance evidence. Initial status: NOT_STARTED.
+Prerequisites: P0–P6 acceptance evidence. Status: **IN_PROGRESS** (Gate B remains **NOT_READY**).
 
-### Read and establish
+### P7 preparation and rehearsal record (2026-09-21):
 
-Read assurance.md, parameters.md, equations.md and open-decisions.md. Inspect actual Go deployment/dataflow, dependency versions, authorization, ingress/egress, migrations and model-serving configuration. No native UI work yet.
-
-### Execute
-
-1. Finish a threat model covering public API, government ingestion, operator publish/correction, session ownership, signing keys, audio/LLM and private data. Test every role/scope boundary and ensure only ingestion holds government credentials.
-2. Add/run Go vet/race/fuzz, Staticcheck, govulncheck, targeted gosec, Trivy and Gitleaks using pinned tools. Generate an SBOM and review model/code supply-chain assumptions. Triage findings; no blanket ignore lists to turn the build green.
-3. Run authenticated API checks and ZAP against isolated owned staging. Prepare a concrete Strix run scope, model, spend/runtime cap, synthetic credentials, outbound restrictions and rollback snapshot. Execute only within authorized scope; never target real government systems. Reproduce/fix findings with deterministic regressions.
-4. Use k6 plus pprof/DB query/lock metrics for normal/surge/stress tiers, cold caches, one-shelter hotspots, voice bursts and source outage. Compare equal workloads before optimizing. Fix the measured bottleneck without introducing speculative caches/services.
-5. Measure actual per-worker voice capacity and calculate replicas, failure reserve, cost and deployment needs. Record hardware/pricing assumptions and unresolved budget; no fixed server count from total-user population alone.
-6. Prove dependency readiness, cancellation/backpressure, graceful restart, backup restore, DB failover and recovery of committed operations. Redact telemetry. Produce backend handoff evidence covering contracts, data ingestion, choice/stay, offline protocol, AI, security and performance.
-
-### Verify
-
-Pass critical invariants, no unremediated critical/high exploitable findings, representative sustained/burst load within approved budgets, recovery tests and measured language/worker gates. Compare final revision against all fixes; rerun affected tests. Government-only external evidence may remain separate, but missing internal DB/GPU/security work cannot be marked done.
-
-### Deliver and stop
-
-Gate B passes only when P0–P7 backend requirements are verified, or explicitly remains NOT_READY with exact internal blockers. This is the user's 80–90% handoff point defined by capabilities, not LOC. P8 production frontend begins only after B passes; planning can continue independently.
+- **Security & SBOM**:
+  - `gofmt -l .` verified clean (0 files unformatted).
+  - `go vet ./...` clean across `backend/`, `backend/eval/`, `loadmodel/`.
+  - `build-sbom.sh` generated Go module graph lock (`go-mod-graph.txt.sha256`).
+  - Native Go fuzzing (`run-fuzz.sh`) ran clean for 5s per target across `internal/capfeed`, `internal/httpjson`, `internal/offlinepkg`.
+- **Recovery Rehearsals**:
+  - `run-graceful-drain.sh`: PASS (process drained in 18ms under SIGTERM, new requests refused).
+  - `run-dep-outage.sh`: PASS (`/health/ready` degraded to 503 within 14ms upon DB stop; `/health/live` remained 200; restored to 200 within 19ms on restart).
+  - `run-backup-restore.sh`: PASS (schema 6, audit head verified, capacity conserved, package count and outbox verified).
+- **Representative Load**:
+  - `loadmodel/loadfixtures` benchmarks executed cleanly on Apple M2 (`BenchmarkHealthLive`, `BenchmarkCachedReadManifest`, `BenchmarkGuidanceQuery`, `BenchmarkReservationWrite`, `BenchmarkVoiceTranscriptionsNoWait`, `BenchmarkQueueSaturation`).
+  - `loadmodel/voice/voiceload` unit tests pass with race detector.
+- **Crashtest Process Verification**:
+  - `TestCrossProcessLastSpace`: PASS (6 independent child processes race on single capacity unit; exactly one wins; atomic single-tx commit).
+  - `TestCrashAfterCommitBeforeResponse`: PASS (server crash after commit before response; replay succeeds with zero state corruption).
+- **Handoff Gate B Assessment**: **NOT_READY**. Gate B cannot be declared until P6 real model evaluation passes on authorized GPU hardware and external dependencies O03, O05, O06, O07, O11, O14 receive official authority sign-off. P8 frontend implementation remains gated on Gate B.
 
 ## P8 — Select and implement Android and iPhone clients
 

@@ -3,19 +3,19 @@
 // of the real /api/v3 boundary so the k6 scenarios can drive the same URLs,
 // but every backend is in-memory and switchable via query/header knobs:
 //
-//   /health/live, /health/ready
-//   /api/v3/regions/{id}/manifest                   — public cached read
-//   /api/v3/packages/{id}/versions/{v}              — public cached read
-//   /api/v3/resources/{id}                          — public cached read
-//   /api/v3/sessions                                — citizen session issuance
-//   /api/v3/places/resolve                          — place lookup
-//   /api/v3/guidance/query                          — eligible destinations
-//   /api/v3/reservations                            — write (capacity mutation)
-//   /api/v3/reservations/{id}                       — owner read
-//   /api/v3/reservations/{id}/events                — write (arrive/cancel/...)
-//   /api/v3/voice/transcriptions                    — ASR-only
-//   /api/v3/voice/process                           — full pipeline
-//   /api/v3/voice/speech                            — TTS-only
+//	/health/live, /health/ready
+//	/api/v3/regions/{id}/manifest                   — public cached read
+//	/api/v3/packages/{id}/versions/{v}              — public cached read
+//	/api/v3/resources/{id}                          — public cached read
+//	/api/v3/sessions                                — citizen session issuance
+//	/api/v3/places/resolve                          — place lookup
+//	/api/v3/guidance/query                          — eligible destinations
+//	/api/v3/reservations                            — write (capacity mutation)
+//	/api/v3/reservations/{id}                       — owner read
+//	/api/v3/reservations/{id}/events                — write (arrive/cancel/...)
+//	/api/v3/voice/transcriptions                    — ASR-only
+//	/api/v3/voice/process                           — full pipeline
+//	/api/v3/voice/speech                            — TTS-only
 //
 // This server is NOT the production backend and NEVER shares its database. It
 // exists solely so the load harness can drive a target with bounded,
@@ -59,9 +59,9 @@ type Config struct {
 	// ServiceASR, ServiceMiddle, ServiceTTS are the dummy-worker service
 	// times used by /voice/process. They are sleeping only; they do not
 	// model real GPU work.
-	ServiceASR     time.Duration
-	ServiceMiddle  time.Duration
-	ServiceTTS     time.Duration
+	ServiceASR    time.Duration
+	ServiceMiddle time.Duration
+	ServiceTTS    time.Duration
 	// QueueDepth bounds how many voice requests can sit in the in-process
 	// admission queue; further arrivals fail-fast with 503 QUEUE_SATURATED.
 	QueueDepth int

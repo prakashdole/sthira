@@ -3,10 +3,11 @@
 // on the addresses passed via env vars.
 //
 // Usage:
-//   STHIRA_VOICE_ASR=http://127.0.0.1:9101 \
-//   STHIRA_VOICE_MID=http://127.0.0.1:9102 \
-//   STHIRA_VOICE_TTS=http://127.0.0.1:9103 \
-//   voiceloadd --rate 20 --duration 30s --tts 0.5
+//
+//	STHIRA_VOICE_ASR=http://127.0.0.1:9101 \
+//	STHIRA_VOICE_MID=http://127.0.0.1:9102 \
+//	STHIRA_VOICE_TTS=http://127.0.0.1:9103 \
+//	voiceloadd --rate 20 --duration 30s --tts 0.5
 //
 // Output: a single JSON line on stdout that the harness captures.
 package main
@@ -39,12 +40,12 @@ func main() {
 			Middle: os.Getenv("STHIRA_VOICE_MID"),
 			TTS:    os.Getenv("STHIRA_VOICE_TTS"),
 		},
-		ArrivalRate:      *rate,
-		Duration:         *duration,
+		ArrivalRate:       *rate,
+		Duration:          *duration,
 		RenderTTSFraction: *ttsFrac,
-		Language:         *language,
-		Jurisdiction:     *jurisdiction,
-		Logger:           slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		Language:          *language,
+		Jurisdiction:      *jurisdiction,
+		Logger:            slog.New(slog.NewTextHandler(os.Stderr, nil)),
 	}
 	if cfg.Workers.ASR == "" || cfg.Workers.Middle == "" || cfg.Workers.TTS == "" {
 		fmt.Fprintln(os.Stderr, "STHIRA_VOICE_ASR, STHIRA_VOICE_MID, STHIRA_VOICE_TTS must be set")

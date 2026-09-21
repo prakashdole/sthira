@@ -114,7 +114,8 @@ func TestProcess_AudioPathCallsASR(t *testing.T) {
 	if out.State != contracts.PipelineOK {
 		t.Errorf("State = %s, want OK", out.State)
 	}
-	asrCalls := asr.TranscribeCalls(); midCalls := mid.ProposeCalls()
+	asrCalls := asr.TranscribeCalls()
+	midCalls := mid.ProposeCalls()
 	if asrCalls != 1 {
 		t.Errorf("ASR called %d times for audio input; want 1", asrCalls)
 	}

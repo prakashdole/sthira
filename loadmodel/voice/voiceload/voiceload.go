@@ -58,19 +58,19 @@ type Config struct {
 
 // Result is the post-run summary.
 type Result struct {
-	Total           uint64
-	OK              uint64
-	QueueSaturated  uint64
+	Total            uint64
+	OK               uint64
+	QueueSaturated   uint64
 	ModelUnavailable uint64
-	Other           uint64
-	Cancelled       uint64
-	p50             time.Duration
-	p95             time.Duration
-	p99             time.Duration
-	Max             time.Duration
-	Throughput      float64 // requests/s
-	StartedAt       time.Time
-	EndedAt         time.Time
+	Other            uint64
+	Cancelled        uint64
+	p50              time.Duration
+	p95              time.Duration
+	p99              time.Duration
+	Max              time.Duration
+	Throughput       float64 // requests/s
+	StartedAt        time.Time
+	EndedAt          time.Time
 }
 
 // Run drives the voice workload for cfg.Duration and returns the summary.
@@ -95,14 +95,14 @@ func Run(ctx context.Context, cfg Config) Result {
 	}
 
 	var (
-		ok       atomic.Uint64
-		qs       atomic.Uint64
-		mu       atomic.Uint64
-		other    atomic.Uint64
-		cancel   atomic.Uint64
+		ok        atomic.Uint64
+		qs        atomic.Uint64
+		mu        atomic.Uint64
+		other     atomic.Uint64
+		cancel    atomic.Uint64
 		latencies = make([]time.Duration, 0, 4096)
 		latMu     sync.Mutex
-		total    atomic.Uint64
+		total     atomic.Uint64
 	)
 
 	started := time.Now().UTC()
@@ -158,14 +158,14 @@ done:
 	// Compute percentiles.
 	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
 	res := Result{
-		Total:      total.Load(),
-		OK:         ok.Load(),
-		QueueSaturated: qs.Load(),
+		Total:            total.Load(),
+		OK:               ok.Load(),
+		QueueSaturated:   qs.Load(),
 		ModelUnavailable: mu.Load(),
-		Other:      other.Load(),
-		Cancelled:  cancel.Load(),
-		StartedAt:  started,
-		EndedAt:    ended,
+		Other:            other.Load(),
+		Cancelled:        cancel.Load(),
+		StartedAt:        started,
+		EndedAt:          ended,
 	}
 	if len(latencies) > 0 {
 		res.p50 = latencies[len(latencies)*50/100]
@@ -208,8 +208,8 @@ func driveVoiceProcess(ctx context.Context, cfg Config, includeTTS bool) (int, e
 
 	// 2. middle.
 	midBody, _ := json.Marshal(map[string]any{
-		"model":     "synthetic",
-		"messages":  []map[string]any{{"role": "user", "content": "synthetic"}},
+		"model":      "synthetic",
+		"messages":   []map[string]any{{"role": "user", "content": "synthetic"}},
 		"max_tokens": 64,
 	})
 	midReq, err := http.NewRequestWithContext(ctx, "POST", cfg.Workers.Middle+"/v1/chat/completions", bytes.NewReader(midBody))

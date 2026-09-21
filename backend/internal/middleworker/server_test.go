@@ -43,9 +43,9 @@ func startTestServer(t *testing.T, langs []string) (*Server, string) {
 		t.Fatalf("LoadAndVerify: %v", err)
 	}
 	srv, err := NewServer(ServerConfig{
-		Address:     "127.0.0.1:0",
-		Token:       "test-token",
-		ReadTimeout: 5 * time.Second,
+		Address:      "127.0.0.1:0",
+		Token:        "test-token",
+		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		ShutdownWait: 2 * time.Second,
 	}, w)

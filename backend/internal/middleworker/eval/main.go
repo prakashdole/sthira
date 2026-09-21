@@ -39,12 +39,12 @@ import (
 // "NOT_EVALUATED" are NOT invented; they are placeholders for the
 // recorded evidence that real-inference acceptance requires.
 type PinnedModel struct {
-	ModelID         string `json:"model_id"`
-	License         string `json:"license"`
-	ParamsB         string `json:"params_b"`
-	Thinking        string `json:"thinking"`
-	TrustRemoteCode bool   `json:"trust_remote_code"`
-	VLLMImageTag    string `json:"vllm_image_tag"`
+	ModelID         string       `json:"model_id"`
+	License         string       `json:"license"`
+	ParamsB         string       `json:"params_b"`
+	Thinking        string       `json:"thinking"`
+	TrustRemoteCode bool         `json:"trust_remote_code"`
+	VLLMImageTag    string       `json:"vllm_image_tag"`
 	BF16Artifact    ArtifactInfo `json:"bf16"`
 	AWQInt4Artifact ArtifactInfo `json:"awq_int4"`
 }

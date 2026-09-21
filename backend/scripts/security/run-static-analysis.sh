@@ -15,9 +15,9 @@
 #   77  required tool not installed
 
 set -euo pipefail
-cd "$(dirname "$0")/../.." # repo backend/
-
-source "$(dirname "$0")/_lib.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/_lib.sh"
+cd "${SCRIPT_DIR}/../.." # repo backend/
 snapshot_metadata
 
 FAIL=0

@@ -72,13 +72,13 @@ func TestRun_DrivesAllRoles(t *testing.T) {
 			Middle: mid.server.URL,
 			TTS:    tts.server.URL,
 		},
-		ArrivalRate:      10,
-		Duration:         200 * time.Millisecond,
+		ArrivalRate:       10,
+		Duration:          200 * time.Millisecond,
 		RenderTTSFraction: 0.5,
-		Language:         "en-IN",
-		Jurisdiction:     "KL",
-		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
-		HTTPClient:       &http.Client{Timeout: 2 * time.Second},
+		Language:          "en-IN",
+		Jurisdiction:      "KL",
+		Logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
+		HTTPClient:        &http.Client{Timeout: 2 * time.Second},
 	}
 	res := Run(context.Background(), cfg)
 	if res.Total == 0 {
@@ -131,13 +131,13 @@ func TestRun_RecordsPercentiles(t *testing.T) {
 			Middle: mid.server.URL,
 			TTS:    tts.server.URL,
 		},
-		ArrivalRate:      20,
-		Duration:         300 * time.Millisecond,
+		ArrivalRate:       20,
+		Duration:          300 * time.Millisecond,
 		RenderTTSFraction: 1.0,
-		Language:         "en-IN",
-		Jurisdiction:     "KL",
-		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
-		HTTPClient:       &http.Client{Timeout: 2 * time.Second},
+		Language:          "en-IN",
+		Jurisdiction:      "KL",
+		Logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
+		HTTPClient:        &http.Client{Timeout: 2 * time.Second},
 	}
 	res := Run(context.Background(), cfg)
 	if res.p50 == 0 || res.p95 == 0 || res.p99 == 0 {
@@ -158,13 +158,13 @@ func TestRun_Cancellation(t *testing.T) {
 			Middle: mid.server.URL,
 			TTS:    tts.server.URL,
 		},
-		ArrivalRate:      100,
-		Duration:         5 * time.Second,
+		ArrivalRate:       100,
+		Duration:          5 * time.Second,
 		RenderTTSFraction: 1.0,
-		Language:         "en-IN",
-		Jurisdiction:     "KL",
-		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
-		HTTPClient:       &http.Client{Timeout: 200 * time.Millisecond},
+		Language:          "en-IN",
+		Jurisdiction:      "KL",
+		Logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
+		HTTPClient:        &http.Client{Timeout: 200 * time.Millisecond},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {

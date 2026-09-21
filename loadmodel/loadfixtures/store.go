@@ -12,19 +12,19 @@ import (
 // contention that D28 demands and the idempotency-keyed replay that
 // R13 / D30 require.
 type syntheticStore struct {
-	mu     sync.Mutex
-	next   int
-	idem   map[string]string // idempotency_key -> reservation_id
-	byID   map[string]reservation
-	cap    map[string]int // facility|service_date -> remaining capacity
+	mu   sync.Mutex
+	next int
+	idem map[string]string // idempotency_key -> reservation_id
+	byID map[string]reservation
+	cap  map[string]int // facility|service_date -> remaining capacity
 }
 
 type reservation struct {
-	ID         string `json:"reservation_id"`
-	FacilityID string `json:"facility_id"`
+	ID          string `json:"reservation_id"`
+	FacilityID  string `json:"facility_id"`
 	ServiceDate string `json:"service_date"`
-	State      string `json:"state"`
-	CreatedAt  string `json:"created_at"`
+	State       string `json:"state"`
+	CreatedAt   string `json:"created_at"`
 }
 
 func newSyntheticStore() *syntheticStore {

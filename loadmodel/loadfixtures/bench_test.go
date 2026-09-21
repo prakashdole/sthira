@@ -5,7 +5,8 @@
 // fixture's per-route cost.
 //
 // Run with:
-//   cd loadmodel && go test -bench=. -benchmem -benchtime=2s ./loadfixtures/...
+//
+//	cd loadmodel && go test -bench=. -benchmem -benchtime=2s ./loadfixtures/...
 package loadfixtures
 
 import (

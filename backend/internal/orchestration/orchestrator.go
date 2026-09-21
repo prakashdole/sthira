@@ -313,6 +313,9 @@ func (o *Orchestrator) stageContext(ctx context.Context, jurisdiction string, id
 			Stage: StageContext, Code: contracts.ErrDataUnavailable, Reason: "context snapshot unavailable", Retryable: true,
 		})
 	}
+	if len(sc.TemplateKeys) == 0 && o.cfg.Templates != nil {
+		sc.TemplateKeys = o.cfg.Templates.Keys()
+	}
 	return sc, nil
 }
 

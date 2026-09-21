@@ -3,15 +3,17 @@
 // switchable knobs. Used only by the P7 load harness.
 //
 // Usage:
-//   loadtestd --addr 127.0.0.1:8080
+//
+//	loadtestd --addr 127.0.0.1:8080
 //
 // Knobs (env vars; the harness uses one process per scenario and may flip
 // knobs mid-run via the /admin/* endpoints):
-//   STHIRA_LOAD_CACHE_HIT    float [0..1], default 0.95
-//   STHIRA_LOAD_QUEUE_DEPTH  int,         default 8
-//   STHIRA_LOAD_SERVICE_ASR  duration,    default 1.5s
-//   STHIRA_LOAD_SERVICE_MID  duration,    default 4s
-//   STHIRA_LOAD_SERVICE_TTS  duration,    default 2s
+//
+//	STHIRA_LOAD_CACHE_HIT    float [0..1], default 0.95
+//	STHIRA_LOAD_QUEUE_DEPTH  int,         default 8
+//	STHIRA_LOAD_SERVICE_ASR  duration,    default 1.5s
+//	STHIRA_LOAD_SERVICE_MID  duration,    default 4s
+//	STHIRA_LOAD_SERVICE_TTS  duration,    default 2s
 package main
 
 import (
@@ -29,18 +31,18 @@ func main() {
 	flag.Parse()
 
 	cfg := loadfixtures.Config{
-		Addr:           *addr,
-		CacheHitRate:   envFloat("STHIRA_LOAD_CACHE_HIT", 0.95),
-		OutageRate:     envFloat("STHIRA_LOAD_OUTAGE_RATE", 0.0),
-		ManifestBytes:  4096,
-		CardBytes:      16384,
-		ResourceBytes:  8192,
-		ServiceASR:     envDur("STHIRA_LOAD_SERVICE_ASR", 1500*time.Millisecond),
-		ServiceMiddle:  envDur("STHIRA_LOAD_SERVICE_MID", 4*time.Second),
-		ServiceTTS:     envDur("STHIRA_LOAD_SERVICE_TTS", 2*time.Second),
-		QueueDepth:     envInt("STHIRA_LOAD_QUEUE_DEPTH", 8),
+		Addr:            *addr,
+		CacheHitRate:    envFloat("STHIRA_LOAD_CACHE_HIT", 0.95),
+		OutageRate:      envFloat("STHIRA_LOAD_OUTAGE_RATE", 0.0),
+		ManifestBytes:   4096,
+		CardBytes:       16384,
+		ResourceBytes:   8192,
+		ServiceASR:      envDur("STHIRA_LOAD_SERVICE_ASR", 1500*time.Millisecond),
+		ServiceMiddle:   envDur("STHIRA_LOAD_SERVICE_MID", 4*time.Second),
+		ServiceTTS:      envDur("STHIRA_LOAD_SERVICE_TTS", 2*time.Second),
+		QueueDepth:      envInt("STHIRA_LOAD_QUEUE_DEPTH", 8),
 		WriteContention: 8,
-		Logger:         slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		Logger:          slog.New(slog.NewTextHandler(os.Stderr, nil)),
 	}
 	srv := loadfixtures.New(cfg)
 	if err := srv.Listen(); err != nil {

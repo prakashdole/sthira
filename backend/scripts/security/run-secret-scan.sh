@@ -11,9 +11,9 @@
 # recorded in reports/gitleaks-suppressions.toml with a signed reason.
 
 set -euo pipefail
-cd "$(dirname "$0")/../.."  # repo root
-
-source "$(dirname "$0")/_lib.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/_lib.sh"
+cd "${SCRIPT_DIR}/../.."  # repo root
 snapshot_metadata
 
 echo "==> gitleaks detect (pinned ${GITLEAKS_VERSION})"

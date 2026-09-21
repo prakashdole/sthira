@@ -37,10 +37,10 @@ func TestServedRoutesMatchOpenAPI(t *testing.T) {
 		{"/api/v3/regions/KL/manifest", http.MethodPost, http.StatusMethodNotAllowed},
 		{"/api/v3/packages/PKG-1/versions/1", http.MethodPost, http.StatusMethodNotAllowed},
 		{"/api/v3/resources/RES-1", http.MethodPost, http.StatusMethodNotAllowed},
-		// P6 — the new /voice/transcriptions, /voice/process and /voice/speech
-		// handlers are owned by Workers 5/7/9 and are wired into the router
-		// during the integration stage. Until then they intentionally return
-		// 404 and are not asserted by this test.
+		// P6 — voice pipeline routes wired to the router
+		{"/api/v3/voice/transcriptions", http.MethodGet, http.StatusMethodNotAllowed},
+		{"/api/v3/voice/process", http.MethodGet, http.StatusMethodNotAllowed},
+		{"/api/v3/voice/speech", http.MethodGet, http.StatusMethodNotAllowed},
 	}
 	srv := httptest.NewServer(newTestServer().Handler())
 	defer srv.Close()

@@ -61,11 +61,10 @@ type VoiceProcessHandler struct {
 }
 
 // NewVoiceProcessHandler wires an orchestrator to the public HTTP
-// boundary. The orchestrator must be non-nil.
+// boundary. The orchestrator may be nil when model configuration is incomplete;
+// in that case, the routes stay unavailable (503 MODEL_UNAVAILABLE) while
+// correctly enforcing HTTP methods (405 on non-POST).
 func NewVoiceProcessHandler(orch *orchestration.Orchestrator, limits orchestration.Limits) *VoiceProcessHandler {
-	if orch == nil {
-		panic("voice process handler: orchestrator is nil")
-	}
 	return &VoiceProcessHandler{orchestrator: orch, limits: limits}
 }
 
@@ -90,6 +89,11 @@ func (h *VoiceProcessHandler) RegisterVoiceRoutes(mux *http.ServeMux, withReques
 // standard /api/v3 envelope.
 func (h *VoiceProcessHandler) handleTranscriptions(w http.ResponseWriter, r *http.Request) {
 	if !h.requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h.orchestrator == nil {
+		h.writeError(w, r, http.StatusServiceUnavailable, contracts.ErrModelUnavailable,
+			"voice pipeline is unavailable: model worker is not configured", "", false)
 		return
 	}
 	ct := r.Header.Get("Content-Type")
@@ -163,6 +167,11 @@ func (h *VoiceProcessHandler) handleProcess(w http.ResponseWriter, r *http.Reque
 	if !h.requireMethod(w, r, http.MethodPost) {
 		return
 	}
+	if h.orchestrator == nil {
+		h.writeError(w, r, http.StatusServiceUnavailable, contracts.ErrModelUnavailable,
+			"voice pipeline is unavailable: model worker is not configured", "", false)
+		return
+	}
 	if !h.requireJSONContentType(w, r) {
 		return
 	}
@@ -208,6 +217,11 @@ func (h *VoiceProcessHandler) handleProcess(w http.ResponseWriter, r *http.Reque
 // synthesis to the TTS worker.
 func (h *VoiceProcessHandler) handleSpeech(w http.ResponseWriter, r *http.Request) {
 	if !h.requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h.orchestrator == nil {
+		h.writeError(w, r, http.StatusServiceUnavailable, contracts.ErrModelUnavailable,
+			"voice pipeline is unavailable: model worker is not configured", "", false)
 		return
 	}
 	if !h.requireJSONContentType(w, r) {

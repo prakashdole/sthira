@@ -4,15 +4,17 @@
 // NOT GPU throughput.
 //
 // Usage:
-//   dummyd --kind asr     --addr 127.0.0.1:9101
-//   dummyd --kind middle  --addr 127.0.0.1:9102
-//   dummyd --kind tts     --addr 127.0.0.1:9103
+//
+//	dummyd --kind asr     --addr 127.0.0.1:9101
+//	dummyd --kind middle  --addr 127.0.0.1:9102
+//	dummyd --kind tts     --addr 127.0.0.1:9103
 //
 // Routes exposed (always; the kind controls only the default service time):
-//   /health                       -> {"ready":bool,"warm":bool}
-//   /transcribe                   -> ASR
-//   /v1/chat/completions          -> middle
-//   /synthesize                   -> TTS
+//
+//	/health                       -> {"ready":bool,"warm":bool}
+//	/transcribe                   -> ASR
+//	/v1/chat/completions          -> middle
+//	/synthesize                   -> TTS
 package main
 
 import (

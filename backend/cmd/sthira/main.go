@@ -21,6 +21,7 @@ import (
 	"syscall"
 
 	"sthira/backend/internal/httpserver"
+	"sthira/backend/internal/orchestration"
 	"sthira/backend/internal/store"
 )
 
@@ -72,6 +73,45 @@ func main() {
 		go expiry.Run(ctx)
 	} else {
 		logger.Info("no STHIRA_DATABASE_DSN; foundation mode, readiness BLOCKED")
+	}
+
+	// P6 Voice Pipeline wiring:
+	// When private worker URLs are configured (STHIRA_ASR_URL, STHIRA_MIDDLE_URL, STHIRA_TTS_URL)
+	// and durable store is available, wire the full voice orchestrator.
+	// Otherwise, incomplete model configuration stays unavailable (fail closed 503).
+	asrURL := os.Getenv("STHIRA_ASR_URL")
+	asrTok := os.Getenv("STHIRA_ASR_TOKEN")
+	midURL := os.Getenv("STHIRA_MIDDLE_URL")
+	midTok := os.Getenv("STHIRA_MIDDLE_TOKEN")
+	ttsURL := os.Getenv("STHIRA_TTS_URL")
+	ttsTok := os.Getenv("STHIRA_TTS_TOKEN")
+
+	if asrURL != "" && midURL != "" && ttsURL != "" && st != nil {
+		asrClient := orchestration.NewHTTPWorkerClient(asrURL, asrTok, nil)
+		midClient := orchestration.NewHTTPWorkerClient(midURL, midTok, nil)
+		ttsClient := orchestration.NewHTTPWorkerClient(ttsURL, ttsTok, nil)
+		workers := orchestration.NewWorkers(asrClient, midClient, ttsClient)
+
+		resolver := store.NewScopedContextResolver(st)
+		validator := orchestration.NewProductionValidator()
+		templates := orchestration.DefaultTemplateRegistry()
+
+		orch, err := orchestration.NewOrchestrator(orchestration.PipelineConfig{
+			Limits:    orchestration.DefaultLimits(),
+			Workers:   workers,
+			Resolver:  resolver,
+			Validator: validator,
+			Templates: templates,
+		})
+		if err != nil {
+			logger.Error("failed to construct voice orchestrator", "error", err)
+			os.Exit(1)
+		}
+		voiceHandler := httpserver.NewVoiceProcessHandler(orch, orchestration.DefaultLimits())
+		opts = append(opts, httpserver.WithVoiceProcess(voiceHandler))
+		logger.Info("P6 voice orchestrator wired with private workers")
+	} else {
+		logger.Info("P6 voice workers not fully configured; voice pipeline stays unavailable (503)")
 	}
 
 	// Optional demo context for manual smoke testing only. It wires a static

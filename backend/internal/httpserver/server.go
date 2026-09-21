@@ -13,6 +13,7 @@ import (
 	"sthira/backend/internal/contracts"
 	"sthira/backend/internal/httpjson"
 	"sthira/backend/internal/offlinedelivery"
+	"sthira/backend/internal/orchestration"
 	"sthira/backend/internal/store"
 )
 
@@ -72,6 +73,14 @@ type Server struct {
 	// pubSource is the source for P5 offline delivery (manifests, cards, resources).
 	pubSource   offlinedelivery.PublicationSource
 	deliveryCfg *offlinedelivery.Config
+	// voiceProcess is the handler for P6 voice pipeline routes.
+	// When nil, routes are registered in unavailable mode (fail closed 503).
+	voiceProcess *VoiceProcessHandler
+}
+
+// WithVoiceProcess wires the voice process handler for the /api/v3/voice/{transcriptions,process,speech} routes.
+func WithVoiceProcess(h *VoiceProcessHandler) Option {
+	return func(s *Server) { s.voiceProcess = h }
 }
 
 // persistedResolver adapts the store's persisted context resolution to the
@@ -246,6 +255,16 @@ func New(cfg Config, opts ...Option) *Server {
 	// Test-only crash fault-injection endpoint; a no-op unless built with the
 	// `crashtest` tag. Never present in production builds.
 	s.registerCrashHook(mux)
+
+	// P6 voice pipeline routes (transcriptions, full pipeline process, speech synthesis).
+	// When no voice process handler is configured, incomplete model configuration
+	// stays unavailable: the routes are registered and enforce HTTP methods (returning 405
+	// on non-POST), while returning 503 (MODEL_UNAVAILABLE) on requests.
+	voiceHandler := s.voiceProcess
+	if voiceHandler == nil {
+		voiceHandler = NewVoiceProcessHandler(nil, orchestration.DefaultLimits())
+	}
+	voiceHandler.RegisterVoiceRoutes(mux, s.withRequestID)
 
 	s.httpSrv = &http.Server{
 		Addr:              cfg.Addr,
