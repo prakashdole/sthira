@@ -51,13 +51,13 @@ const SarvamModelID = "sarvamai/sarvam-30b"
 // substituted without changing the runtime.
 func SarvamConfig(client *Client, system string) HTTPClientRuntimeConfig {
 	return HTTPClientRuntimeConfig{
-		Client:      client,
-		ModelID:     SarvamModelID,
-		Revision:    "", // populated by /health from vLLM
-		DigestName:  "sarvamai/sarvam-30b",
-		DigestSHA:   "", // populated by artifact verification
-		Languages:   SarvamSupportedLanguages(),
-		System:      system,
+		Client:       client,
+		ModelID:      SarvamModelID,
+		Revision:     "", // populated by /health from vLLM
+		DigestName:   "sarvamai/sarvam-30b",
+		DigestSHA:    "", // populated by artifact verification
+		Languages:    SarvamSupportedLanguages(),
+		System:       system,
 		ChatTemplate: SarvamChatTemplate,
 	}
 }

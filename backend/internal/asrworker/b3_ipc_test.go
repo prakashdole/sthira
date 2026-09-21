@@ -101,7 +101,7 @@ func TestB3_ASR_ConcurrentRequestsGetOwnResults(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			r, err := rt.Transcribe(ctx, TranscribeRequest{
-				RequestID: rid,
+				RequestID:  rid,
 				Language:   "hi-IN",
 				Samples:    []float32{0.1, 0.2, 0.3},
 				SampleRate: 16000,
@@ -385,7 +385,7 @@ func TestB3_ASR_RunWithGoRace(t *testing.T) {
 			defer wg.Done()
 			rid := requestIDFor(i)
 			r, err := rt.Transcribe(context.Background(), TranscribeRequest{
-				RequestID: rid,
+				RequestID:  rid,
 				Language:   "hi-IN",
 				Samples:    []float32{0.1, 0.2, 0.3},
 				SampleRate: 16000,

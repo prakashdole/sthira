@@ -403,6 +403,16 @@ func buildOrdinaryWAV(pcm []byte, sampleRate int) []byte {
 
 // osGetwd, osChdir, osReadDir are tiny indirection so the temp-dir
 // test does not pull in the os package twice in the helpers above.
-func osGetwd() (string, error)             { return os.Getwd() }
-func osChdir(d string) error               { return os.Chdir(d) }
-func osReadDir(d string) ([]string, error) { entries, err := os.ReadDir(d); if err != nil { return nil, err }; names := make([]string, 0, len(entries)); for _, e := range entries { names = append(names, e.Name()) }; return names, nil }
+func osGetwd() (string, error) { return os.Getwd() }
+func osChdir(d string) error   { return os.Chdir(d) }
+func osReadDir(d string) ([]string, error) {
+	entries, err := os.ReadDir(d)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names, nil
+}

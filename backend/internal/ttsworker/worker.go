@@ -235,11 +235,11 @@ func (w *Worker) Health() WorkerHealth {
 		}}
 	}
 	return WorkerHealth{
-		Ready:                w.ready.Load(),
-		Warm:                 w.warm.Load(),
-		Models:               models,
-		Artifacts:            artifacts,
-		SupportedLanguages:   langs,
+		Ready:              w.ready.Load(),
+		Warm:               w.warm.Load(),
+		Models:             models,
+		Artifacts:          artifacts,
+		SupportedLanguages: langs,
 		Queue: QueueStats{
 			Depth:          len(w.queue),
 			MaxDepth:       cap(w.queue),

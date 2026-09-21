@@ -8,21 +8,21 @@
 //
 // Adapter protocol:
 //
-//   Startup:  {"op":"ready"}
-//   Ready:    {"status":"ready"|"blocked", "revision":"...",
-//              "languages":["hi-IN","ml-IN"],
-//              "voices":[{"language":"hi-IN","name":"default",
-//                          "revision":"..."}],
-//              "digest_name":"...","digest_sha256":"..."}
+//	Startup:  {"op":"ready"}
+//	Ready:    {"status":"ready"|"blocked", "revision":"...",
+//	           "languages":["hi-IN","ml-IN"],
+//	           "voices":[{"language":"hi-IN","name":"default",
+//	                       "revision":"..."}],
+//	           "digest_name":"...","digest_sha256":"..."}
 //
-//   Request:  {"op":"synthesize","request_id":"R-1","text":"...",
-//              "language":"hi-IN","voice":"default","sample_rate":22050}
-//   Response: {"request_id":"R-1","audio_b64":"<base64 PCM16LE WAV>",
-//              "duration_secs":1.5} or {"request_id":"R-1",
-//              "error":"..."}
+//	Request:  {"op":"synthesize","request_id":"R-1","text":"...",
+//	           "language":"hi-IN","voice":"default","sample_rate":22050}
+//	Response: {"request_id":"R-1","audio_b64":"<base64 PCM16LE WAV>",
+//	           "duration_secs":1.5} or {"request_id":"R-1",
+//	           "error":"..."}
 //
-//   Shutdown: {"op":"shutdown"}
-//   Ack:      {"status":"shutdown"}
+//	Shutdown: {"op":"shutdown"}
+//	Ack:      {"status":"shutdown"}
 package ttsworker
 
 import (
@@ -81,8 +81,8 @@ type ttsVoiceEntry struct {
 type ttsIPCDispatcher struct {
 	mu sync.Mutex
 
-	proc    *exec.Cmd
-	stdin   interface {
+	proc  *exec.Cmd
+	stdin interface {
 		Write(p []byte) (int, error)
 		Close() error
 	}
@@ -151,9 +151,9 @@ func NewAdapterSubprocessRuntime(cfg AdapterSubprocessConfig) *AdapterSubprocess
 		cmd = "python3"
 	}
 	return &AdapterSubprocessRuntime{
-		cmd:    cmd,
-		module: cfg.Module,
-		workdir: cfg.Workdir,
+		cmd:      cmd,
+		module:   cfg.Module,
+		workdir:  cfg.Workdir,
 		extraEnv: cfg.ExtraEnv,
 	}
 }

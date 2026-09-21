@@ -7,18 +7,18 @@
 // harness sends; backend/internal/contracts/*.go is the source
 // of truth for what the orchestrator/worker accepts):
 //
-//   POST {ASRURL}                  ASRWorkerRequest JSON
-//                                  -> ASRWorkerResponse JSON
+//	POST {ASRURL}                  ASRWorkerRequest JSON
+//	                               -> ASRWorkerResponse JSON
 //
-//   POST {MiddleURL}               PipelineRequest JSON
-//                                  -> PipelineResponse JSON
-//                                  (the typed envelope, NOT a
-//                                  status/intent/actions flat
-//                                  object; the runner extracts
-//                                  from validated_proposal)
+//	POST {MiddleURL}               PipelineRequest JSON
+//	                               -> PipelineResponse JSON
+//	                               (the typed envelope, NOT a
+//	                               status/intent/actions flat
+//	                               object; the runner extracts
+//	                               from validated_proposal)
 //
-//   POST {TTSURL}                  TTSWorkerRequest JSON
-//                                  -> TTSWorkerResponse JSON
+//	POST {TTSURL}                  TTSWorkerRequest JSON
+//	                               -> TTSWorkerResponse JSON
 //
 // All three MUST carry: request_id (round-trip), language
 // (where supported), and the actual jurisdiction + source_version
@@ -76,13 +76,13 @@ func (p *HTTPProvider) ASR(ctx context.Context, req ASRRequest) (ASROutcome, err
 		return ASROutcome{}, fmt.Errorf("decode audio: %w", err)
 	}
 	wire := map[string]any{
-		"request_id":       req.RequestID,
-		"language":         req.Language,
-		"content_type":     req.ContentType,
-		"audio_b64":        req.AudioB64, // server can decode without us round-tripping
-		"byte_size":        int64(len(audioBytes)),
-		"decoded_seconds":  0.0, // server recomputes
-		"deadline_ms":      5000,
+		"request_id":      req.RequestID,
+		"language":        req.Language,
+		"content_type":    req.ContentType,
+		"audio_b64":       req.AudioB64, // server can decode without us round-tripping
+		"byte_size":       int64(len(audioBytes)),
+		"decoded_seconds": 0.0, // server recomputes
+		"deadline_ms":     5000,
 	}
 	body, err := json.Marshal(wire)
 	if err != nil {
@@ -154,11 +154,11 @@ func (p *HTTPProvider) Middle(ctx context.Context, req MiddleRequest) (MiddleOut
 	}
 	render := map[string]any{"kind": "none"}
 	wire := map[string]any{
-		"request_id":     req.RequestID,
-		"jurisdiction":   jurisdiction,
-		"language":       req.Language,
-		"input":          input,
-		"render":         render,
+		"request_id":      req.RequestID,
+		"jurisdiction":    jurisdiction,
+		"language":        req.Language,
+		"input":           input,
+		"render":          render,
 		"idempotency_key": "eval-" + req.RequestID,
 		// data_version is NOT in PipelineRequest; the orchestrator
 		// resolves it from the scoped context. The harness
@@ -278,8 +278,8 @@ func (p *HTTPProvider) TTS(ctx context.Context, req TTSRequest) (TTSOutcome, err
 			"bit_depth":   16,
 			"channels":    1,
 		},
-		"deadline_ms":   5000,
-		"jurisdiction":   jurisdiction,
+		"deadline_ms":     5000,
+		"jurisdiction":    jurisdiction,
 		"idempotency_key": "tts-eval-" + req.RequestID,
 	}
 	body, err := json.Marshal(wire)
@@ -330,38 +330,38 @@ func (p *HTTPProvider) TTS(ctx context.Context, req TTSRequest) (TTSOutcome, err
 
 // ASRWorkerResponseWire mirrors contracts.ASRWorkerResponse.
 type ASRWorkerResponseWire struct {
-	RequestID      string             `json:"request_id"`
-	Language       string             `json:"language"`
-	Text           string             `json:"text"`
-	Confidence     *float64           `json:"confidence,omitempty"`
-	State          string             `json:"state"`
-	ModelRevision  string             `json:"model_revision,omitempty"`
-	ArtifactDigest string             `json:"artifact_digest,omitempty"`
+	RequestID      string   `json:"request_id"`
+	Language       string   `json:"language"`
+	Text           string   `json:"text"`
+	Confidence     *float64 `json:"confidence,omitempty"`
+	State          string   `json:"state"`
+	ModelRevision  string   `json:"model_revision,omitempty"`
+	ArtifactDigest string   `json:"artifact_digest,omitempty"`
 }
 
 // PipelineResponseWire mirrors contracts.PipelineResponse.
 type PipelineResponseWire struct {
-	RequestID         string                       `json:"request_id"`
-	DataVersion       string                       `json:"data_version"`
-	State             string                       `json:"state"`
-	ValidatedProposal *ModelOutputWire             `json:"validated_proposal,omitempty"`
-	Template          PipelineTemplateWire         `json:"template"`
-	Audio             *PipelineAudioWire           `json:"audio,omitempty"`
-	StageFailures     []string                     `json:"stage_failures,omitempty"`
+	RequestID         string               `json:"request_id"`
+	DataVersion       string               `json:"data_version"`
+	State             string               `json:"state"`
+	ValidatedProposal *ModelOutputWire     `json:"validated_proposal,omitempty"`
+	Template          PipelineTemplateWire `json:"template"`
+	Audio             *PipelineAudioWire   `json:"audio,omitempty"`
+	StageFailures     []string             `json:"stage_failures,omitempty"`
 }
 
 // ModelOutputWire mirrors contracts.ModelOutput.
 type ModelOutputWire struct {
-	SchemaVersion    string          `json:"schema_version"`
-	RequestID        string          `json:"request_id"`
-	DataVersion      string          `json:"data_version"`
-	Status           string          `json:"status"`
-	Intent           *string         `json:"intent,omitempty"`
-	Language         string          `json:"language"`
-	Actions          []ActionWire    `json:"actions"`
-	SpeechKey        *string         `json:"speech_key,omitempty"`
-	ClarificationIDs []string        `json:"clarification_ids"`
-	EvidenceIDs      []string        `json:"evidence_ids"`
+	SchemaVersion    string       `json:"schema_version"`
+	RequestID        string       `json:"request_id"`
+	DataVersion      string       `json:"data_version"`
+	Status           string       `json:"status"`
+	Intent           *string      `json:"intent,omitempty"`
+	Language         string       `json:"language"`
+	Actions          []ActionWire `json:"actions"`
+	SpeechKey        *string      `json:"speech_key,omitempty"`
+	ClarificationIDs []string     `json:"clarification_ids"`
+	EvidenceIDs      []string     `json:"evidence_ids"`
 }
 
 // ActionWire mirrors contracts.Action (loose; the runner only

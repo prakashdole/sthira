@@ -15,18 +15,18 @@
 //
 // Adapter protocol (stdin→subprocess, subprocess→stdout):
 //
-//   Startup:  {"op":"ready"}
-//   Ready:    {"status":"ready","revision":"...","languages":["hi-IN","ml-IN"],
-//              "digest_name":"...","digest_sha256":"..."}
+//	Startup:  {"op":"ready"}
+//	Ready:    {"status":"ready","revision":"...","languages":["hi-IN","ml-IN"],
+//	           "digest_name":"...","digest_sha256":"..."}
 //
-//   Request:  {"op":"transcribe","request_id":"R-1","language":"hi-IN",
-//              "samples_b64":"<base64 float32 LE>","sample_rate":16000,
-//              "duration_secs":1.5}
-//   Response: {"request_id":"R-1","text":"...","confidence":null,
-//              "alternatives":[]}
+//	Request:  {"op":"transcribe","request_id":"R-1","language":"hi-IN",
+//	           "samples_b64":"<base64 float32 LE>","sample_rate":16000,
+//	           "duration_secs":1.5}
+//	Response: {"request_id":"R-1","text":"...","confidence":null,
+//	           "alternatives":[]}
 //
-//   Shutdown: {"op":"shutdown"}
-//   Ack:      {"status":"shutdown"}
+//	Shutdown: {"op":"shutdown"}
+//	Ack:      {"status":"shutdown"}
 package asrworker
 
 import (

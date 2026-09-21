@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "eval",
-  "documentNamespace": "https://sthira.local/spdx/eval-20260921T101855Z-5e0da8405062",
+  "documentNamespace": "https://sthira.local/spdx/eval-20260921T113844Z-bd675236e131",
   "creationInfo": {
-    "created": "2026-09-21T10:18:55Z",
+    "created": "2026-09-21T11:38:44Z",
     "creators": [
       "Tool: sthira-gen-spdx"
     ]
@@ -15,7 +15,7 @@
       "name": "sthira/backend/eval",
       "SPDXID": "SPDXRef-sthira-backend-eval-",
       "versionInfo": "",
-      "downloadLocation": "https://proxy.golang.org/sthira/backend/eval/@v/.zip",
+      "downloadLocation": "NOASSERTION",
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
       "copyrightText": "NOASSERTION",

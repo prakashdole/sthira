@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "backend",
-  "documentNamespace": "https://sthira.local/spdx/backend-20260921T101855Z-6f5e6262166a",
+  "documentNamespace": "https://sthira.local/spdx/backend-20260921T113843Z-84640c23ff46",
   "creationInfo": {
-    "created": "2026-09-21T10:18:55Z",
+    "created": "2026-09-21T11:38:43Z",
     "creators": [
       "Tool: sthira-gen-spdx"
     ]
@@ -15,7 +15,7 @@
       "name": "sthira/backend",
       "SPDXID": "SPDXRef-sthira-backend-",
       "versionInfo": "",
-      "downloadLocation": "https://proxy.golang.org/sthira/backend/@v/.zip",
+      "downloadLocation": "NOASSERTION",
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
       "copyrightText": "NOASSERTION",

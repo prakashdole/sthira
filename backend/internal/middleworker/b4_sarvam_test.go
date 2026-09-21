@@ -63,15 +63,15 @@ func TestB4_SarvamChatTemplateWiredIntoRequestPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := rt.Propose(testCtx(t), RequestEnvelope{
-		RequestID:     "R-b4",
+		RequestID: "R-b4",
 		ScopedContext: ScopedContext{
-			RequestID:       "R-b4",
-			DataVersion:     "v1",
-			SchemaVersion:   "3.0",
-			Jurisdiction:    "KL-WYD",
+			RequestID:        "R-b4",
+			DataVersion:      "v1",
+			SchemaVersion:    "3.0",
+			Jurisdiction:     "KL-WYD",
 			AllowedLanguages: []string{"hi-IN"},
 		},
-		Transcript:     TranscriptInput{RequestID: "R-b4", Language: "hi-IN", Text: "hello", State: "OK"},
+		Transcript:      TranscriptInput{RequestID: "R-b4", Language: "hi-IN", Text: "hello", State: "OK"},
 		MaxOutputTokens: 256,
 		DeadlineMillis:  5000,
 	}); err != nil {
@@ -119,7 +119,7 @@ func TestB4_SarvamChatTemplateWiredIntoRequestPath(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{{
 				"finish_reason": "stop",
-				"message": map[string]any{"role": "assistant", "content": `{"schema_version":"3.0","request_id":"R-b4-2","data_version":"v1","status":"OK","intent":null,"language":"hi-IN","actions":[],"speech_key":null,"clarification_ids":[],"evidence_ids":[]}`},
+				"message":       map[string]any{"role": "assistant", "content": `{"schema_version":"3.0","request_id":"R-b4-2","data_version":"v1","status":"OK","intent":null,"language":"hi-IN","actions":[],"speech_key":null,"clarification_ids":[],"evidence_ids":[]}`},
 			}},
 		})
 	}))
@@ -132,7 +132,7 @@ func TestB4_SarvamChatTemplateWiredIntoRequestPath(t *testing.T) {
 			RequestID: "R-b4-2", DataVersion: "v1", SchemaVersion: "3.0",
 			Jurisdiction: "KL-WYD", AllowedLanguages: []string{"hi-IN"},
 		},
-		Transcript:     TranscriptInput{RequestID: "R-b4-2", Language: "hi-IN", State: "OK"},
+		Transcript:      TranscriptInput{RequestID: "R-b4-2", Language: "hi-IN", State: "OK"},
 		MaxOutputTokens: 256,
 		DeadlineMillis:  5000,
 	}); err != nil {

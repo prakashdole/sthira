@@ -114,17 +114,27 @@ def build_sbom(module_dir: str, name: str) -> dict:
     created = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
     packages = []
     relationships: list[dict] = []
+    root_pkg_emitted = False
     for mod in modules:
         if mod.get("Path") in (None, ""):
             continue
         module_path = mod["Path"]
         version = mod.get("Version", "")
         spdx_id = _safe_pkg_name(f"{module_path}-{version}")
+        if module_path.startswith("sthira/"):
+            # Root module: SPDX requires a downloadLocation.
+            # Our build does NOT publish a tarball, so NOASSERTION
+            # is the honest answer. Do not invent a proxy URL.
+            download_location = "NOASSERTION"
+        else:
+            download_location = (
+                f"https://proxy.golang.org/{module_path}/@v/{version}.zip"
+            )
         pkg = {
             "name": module_path,
             "SPDXID": spdx_id,
             "versionInfo": version,
-            "downloadLocation": f"https://proxy.golang.org/{module_path}/@v/{version}.zip",
+            "downloadLocation": download_location,
             "licenseConcluded": _resolve_license(module_path, version),
             "licenseDeclared": "NOASSERTION",
             "copyrightText": "NOASSERTION",
@@ -135,6 +145,20 @@ def build_sbom(module_dir: str, name: str) -> dict:
             "spdxElementId": spdx_id,
             "relatedSpdxElement": "SPDXRef-Root",
             "relationshipType": "DEPENDS_ON",
+        })
+        root_pkg_emitted = True
+    # If no root package was emitted (e.g. all-stdlib module), add a
+    # minimal root descriptor so the SPDX document remains valid.
+    if not root_pkg_emitted:
+        packages.insert(0, {
+            "name": name,
+            "SPDXID": "SPDXRef-Root",
+            "versionInfo": "",
+            "downloadLocation": "NOASSERTION",
+            "licenseConcluded": "NOASSERTION",
+            "licenseDeclared": "NOASSERTION",
+            "copyrightText": "NOASSERTION",
+            "filesAnalyzed": False,
         })
     return {
         "spdxVersion": "SPDX-2.3",
