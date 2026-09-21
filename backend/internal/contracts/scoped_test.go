@@ -589,4 +589,3 @@ func TestEnforce_SilentActionDoesNotRequireSpeechApproval(t *testing.T) {
 		t.Fatalf("silent action must succeed even when no speech keys are approved: %v", err)
 	}
 }
-

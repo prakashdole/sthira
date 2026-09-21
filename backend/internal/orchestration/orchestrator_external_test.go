@@ -865,7 +865,7 @@ func TestSynthesize_MismatchedTemplateVersionRejected(t *testing.T) {
 	tpls := orchestrationtest.NewTemplates()
 	tpls.Add(contracts.ApprovedTemplate{
 		SpeechKey: "welcome", Language: "en-IN", TemplateVersion: 2, SourceVersion: 1,
-		Text:      "Welcome to Sthira.",
+		Text: "Welcome to Sthira.",
 	})
 	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
 
