@@ -24,11 +24,11 @@ BUILDER="${STHIRA_DEPLOY_BUILDER:-docker}"
 STAGE_DIR="$(mktemp -d -t sthira-go-stage.XXXXXXXX)"
 trap 'rm -rf "${STAGE_DIR}"' EXIT
 
-# Copy only the backend tree. The repository's frontend, loadmodel, fixtures,
-# raw .txt evidence, .venv, .git and plan docs are not needed to compile the
-# Go binary and would bloat the build context if included.
-mkdir -p "${STAGE_DIR}/backend"
-# `cp -R` then prune non-source files for tightness.
+# Copy only the backend tree and the migrate tree. The repository's
+# frontend, loadmodel, fixtures, raw .txt evidence, .venv, .git and
+# plan docs are not needed to compile the Go binaries and would bloat
+# the build context if included.
+mkdir -p "${STAGE_DIR}/backend" "${STAGE_DIR}/deploy/go-backend/migrate"
 rsync -a --delete \
   --exclude='.git' \
   --exclude='__pycache__' \
@@ -36,6 +36,11 @@ rsync -a --delete \
   --exclude='*.txt' \
   --exclude='testdata/**' \
   "${REPO_ROOT}/backend/" "${STAGE_DIR}/backend/"
+# The migrate module is stdlib-only. Keep its go.mod, go.sum (if any)
+# and cmd subdirs; nothing else needs to land in the context.
+rsync -a --delete \
+  "${REPO_ROOT}/deploy/go-backend/migrate/" \
+  "${STAGE_DIR}/deploy/go-backend/migrate/"
 
 # Owned per-package ignore: keep it next to this build script. BuildKit
 # reads .dockerignore from the build-context root, so this exact file is
