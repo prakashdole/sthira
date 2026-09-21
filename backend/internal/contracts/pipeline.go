@@ -99,6 +99,7 @@ type PipelineAudio struct {
 	TemplateVersion int                  `json:"template_version"`
 	SourceVersion   int                  `json:"source_version"`
 	Settings        TTSSynthesisSettings `json:"settings"`
+	AudioB64        string               `json:"audio_b64,omitempty"`
 }
 
 // PipelineResponse is the typed envelope returned by the orchestrator.

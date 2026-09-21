@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"sthira/backend/internal/contracts"
@@ -116,6 +117,11 @@ func (o *Orchestrator) Transcribe(ctx context.Context, req contracts.Transcripti
 // SourceVersion; a mismatch yields STALE_VERSION. The template key
 // must be in the active context's TemplateKeys.
 func (o *Orchestrator) Synthesize(ctx context.Context, req contracts.TTSRequest, rawBody []byte) (contracts.TTSResponse, error) {
+	if req.Jurisdiction == "" {
+		return contracts.TTSResponse{}, pipelineError(contracts.PipelineUnsupported, 400, StageFailure{
+			Stage: StageContext, Code: contracts.ErrInvalidValue, Reason: "jurisdiction is required", Retryable: false,
+		})
+	}
 	if req.SpeechKey == "" {
 		return contracts.TTSResponse{}, pipelineError(contracts.PipelineUnsupported, 400, StageFailure{
 			Stage: StageTemplate, Code: contracts.ErrInvalidValue, Reason: "speech_key is required", Retryable: false,
@@ -126,6 +132,11 @@ func (o *Orchestrator) Synthesize(ctx context.Context, req contracts.TTSRequest,
 			Stage: StageTemplate, Code: contracts.ErrInvalidValue, Reason: "language is required", Retryable: false,
 		})
 	}
+	if req.SourceVersion <= 0 {
+		return contracts.TTSResponse{}, pipelineError(contracts.PipelineUnsupported, 400, StageFailure{
+			Stage: StageContext, Code: contracts.ErrInvalidValue, Reason: "source_version must be a positive integer", Retryable: false,
+		})
+	}
 	// Validate raw JSON shape before any worker call.
 	if len(rawBody) > 0 {
 		if err := o.cfg.Validator.ValidateShape(rawBody); err != nil {
@@ -134,20 +145,30 @@ func (o *Orchestrator) Synthesize(ctx context.Context, req contracts.TTSRequest,
 			})
 		}
 	}
-	// We resolve a synthetic scoped context for template-key
-	// validation. The full pipeline resolves the jurisdiction; here
-	// the caller does not provide one. The orchestrator falls back
-	// to ANY operational context, mirroring the legacy
-	// ResolveAnyOperationalContext semantics.
-	sc, err := o.resolveAnyScopedContext(ctx)
+
+	sc, err := o.cfg.Resolver.Resolve(ctx, req.Jurisdiction)
 	if err != nil {
 		return contracts.TTSResponse{}, pipelineError(contracts.PipelineDataUnavailable, 503, StageFailure{
-			Stage: StageContext, Code: contracts.ErrDataUnavailable, Reason: "scoped context unavailable", Retryable: true,
+			Stage: StageContext, Code: contracts.ErrDataUnavailable, Reason: "scoped context unavailable: " + err.Error(), Retryable: true,
 		})
 	}
+
+	if req.SourceVersion != sc.SourceVersion {
+		return contracts.TTSResponse{}, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
+			Stage: StageContext, Code: contracts.ErrStaleVersion, Reason: "source_version is stale", Retryable: false,
+		})
+	}
+
+	// Revalidate snapshot before synthesis.
+	if err := o.cfg.Resolver.SnapshotRevalidate(ctx, sc); err != nil {
+		return contracts.TTSResponse{}, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
+			Stage: StageContext, Code: contracts.ErrStaleSnapshot, Reason: "snapshot stale before synthesis: " + err.Error(), Retryable: false,
+		})
+	}
+
 	if !sc.IsTemplateKeyAllowed(req.SpeechKey) {
 		return contracts.TTSResponse{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
-			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template key not approved", Retryable: false,
+			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template key not approved for jurisdiction", Retryable: false,
 		})
 	}
 	if !sc.IsLanguageAllowed(req.Language) {
@@ -155,11 +176,7 @@ func (o *Orchestrator) Synthesize(ctx context.Context, req contracts.TTSRequest,
 			Stage: StageContext, Code: contracts.ErrLanguageUnsupported, Reason: "language not in active context", Retryable: false,
 		})
 	}
-	if req.SourceVersion != 0 && sc.SourceVersion != 0 && req.SourceVersion != sc.SourceVersion {
-		return contracts.TTSResponse{}, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
-			Stage: StageContext, Code: contracts.ErrStaleVersion, Reason: "source_version is stale", Retryable: false,
-		})
-	}
+
 	// Lookup the approved template.
 	tpl, ok := o.cfg.Templates.Lookup(req.SpeechKey, req.Language)
 	if !ok {
@@ -172,6 +189,7 @@ func (o *Orchestrator) Synthesize(ctx context.Context, req contracts.TTSRequest,
 			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template is synthetic-only", Retryable: false,
 		})
 	}
+
 	// Render with the validated args only. The TTS worker receives
 	// rendered text only; it does NOT receive arbitrary user input.
 	rendered, err := renderTemplateArgs(tpl, req.Args)
@@ -180,6 +198,7 @@ func (o *Orchestrator) Synthesize(ctx context.Context, req contracts.TTSRequest,
 			Stage: StageTemplate, Code: contracts.ErrValidation, Reason: err.Error(), Retryable: false,
 		})
 	}
+
 	// Per-stage deadline.
 	ttsCtx, cancel := StageDeadline(ctx, o.cfg.Limits.TTSDeadline)
 	defer cancel()
@@ -251,6 +270,14 @@ func (o *Orchestrator) Synthesize(ctx context.Context, req contracts.TTSRequest,
 			Stage: StageTTS, Code: contracts.ErrInternal, Reason: "tts checksum mismatch", Retryable: false,
 		})
 	}
+
+	// Revalidate snapshot after synthesis before audio delivery.
+	if err := o.cfg.Resolver.SnapshotRevalidate(ctx, sc); err != nil {
+		return contracts.TTSResponse{}, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
+			Stage: StageContext, Code: contracts.ErrStaleSnapshot, Reason: "snapshot stale after synthesis: " + err.Error(), Retryable: false,
+		})
+	}
+
 	return contracts.TTSResponse{
 		RequestID:       string(id),
 		SpeechKey:       req.SpeechKey,
@@ -266,45 +293,143 @@ func (o *Orchestrator) Synthesize(ctx context.Context, req contracts.TTSRequest,
 		CacheHit:        false,
 		State:           resp.State,
 		Settings:        req.Settings,
+		AudioB64:        resp.AudioB64,
 	}, nil
 }
 
-// resolveAnyScopedContext resolves a ScopedContext for the speech
-// endpoint, which does not carry a jurisdiction. The orchestrator
-// delegates to whatever resolver is wired (typically Worker 4's
-// store.NewScopedContextResolver). When the resolver does not
-// implement "any jurisdiction", we fail closed.
-func (o *Orchestrator) resolveAnyScopedContext(ctx context.Context) (contracts.ScopedContext, error) {
-	if ar, ok := o.cfg.Resolver.(interface {
-		ResolveAny(context.Context) (contracts.ScopedContext, error)
-	}); ok {
-		return ar.ResolveAny(ctx)
-	}
-	// Fallback: try the empty-jurisdiction path. The contract is
-	// that Resolve("") returns ErrNoOperationalContext; we surface
-	// that as a generic unavailable.
-	sc, err := o.cfg.Resolver.Resolve(ctx, "")
-	if err == nil && sc.Jurisdiction != "" {
-		return sc, nil
-	}
-	return contracts.ScopedContext{}, errors.New("orchestration: no operational context for the speech endpoint")
-}
-
 // renderTemplateArgs substitutes validated args into the template's
-// rendered text. The args object is validated by the orchestrator
-// against the template's ArgSchema; the worker only sees the
-// rendered string.
+// rendered text. The args object is validated against the template's
+// ArgSchema; any injection characters or extra args cause failure.
 func renderTemplateArgs(tpl contracts.ApprovedTemplate, args contracts.SpeechArgs) (string, error) {
+	argSchema, hasSchema := parseArgSchema(tpl.ArgSchema)
+	if hasSchema && len(argSchema) > 0 {
+		for k, expectedType := range argSchema {
+			v, ok := args.Args[k]
+			if !ok {
+				return "", fmt.Errorf("missing required template arg: %s", k)
+			}
+			switch expectedType {
+			case "int":
+				if _, ok := toInt(v); !ok {
+					return "", fmt.Errorf("arg %q must be an integer", k)
+				}
+			case "string":
+				s, ok := v.(string)
+				if !ok || s == "" {
+					return "", fmt.Errorf("arg %q must be a non-empty string", k)
+				}
+				if !validIDChar(s) {
+					return "", fmt.Errorf("arg %q contains invalid characters or delimiters", k)
+				}
+			default:
+				s := fmt.Sprintf("%v", v)
+				if !validIDChar(s) {
+					return "", fmt.Errorf("arg %q contains invalid characters", k)
+				}
+			}
+		}
+		for k := range args.Args {
+			if _, ok := argSchema[k]; !ok {
+				return "", fmt.Errorf("unexpected arg: %s", k)
+			}
+		}
+	}
+
 	out := tpl.Text
 	for k, v := range args.Args {
 		if !isValidArgKey(k) {
-			return "", errors.New("invalid arg key: " + k)
+			return "", fmt.Errorf("invalid arg key: %s", k)
+		}
+		val := argValueString(v)
+		if !validIDChar(val) && val != "" {
+			return "", fmt.Errorf("arg value for %s contains invalid characters", k)
 		}
 		key := "{" + k + "}"
-		val := argValueString(v)
 		out = strings.ReplaceAll(out, key, val)
 	}
+	if strings.Contains(out, "{") || strings.Contains(out, "}") {
+		return "", errors.New("template text contains unreplaced placeholder or forbidden delimiter")
+	}
 	return out, nil
+}
+
+// parseArgSchema normalizes the any ArgSchema value into a key -> type map.
+func parseArgSchema(schema any) (map[string]string, bool) {
+	if schema == nil {
+		return nil, false
+	}
+	out := make(map[string]string)
+	switch s := schema.(type) {
+	case map[string]string:
+		for k, v := range s {
+			out[k] = v
+		}
+		return out, true
+	case map[string]any:
+		for k, v := range s {
+			if str, ok := v.(string); ok {
+				out[k] = str
+			} else {
+				out[k] = fmt.Sprintf("%v", v)
+			}
+		}
+		return out, true
+	default:
+		bs, err := json.Marshal(schema)
+		if err == nil {
+			var m map[string]string
+			if err := json.Unmarshal(bs, &m); err == nil {
+				return m, true
+			}
+		}
+		return nil, false
+	}
+}
+
+// validIDChar returns true when the value looks like a typed ID.
+// Forbids control characters, angle brackets, curly braces, quotes,
+// and backslashes so substituted text cannot smuggle SSTI payloads.
+func validIDChar(s string) bool {
+	if len(s) == 0 || len(s) > 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'z':
+		case c >= 'A' && c <= 'Z':
+		case c == '-' || c == '_' || c == '.' || c == ':':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func toInt(v any) (int, bool) {
+	switch x := v.(type) {
+	case int:
+		return x, true
+	case int32:
+		return int(x), true
+	case int64:
+		return int(x), true
+	case float64:
+		if x != float64(int(x)) {
+			return 0, false
+		}
+		return int(x), true
+	case string:
+		var i int
+		n, err := fmt.Sscanf(x, "%d", &i)
+		if err == nil && n == 1 {
+			return i, true
+		}
+		return 0, false
+	default:
+		return 0, false
+	}
 }
 
 // isValidArgKey accepts the canonical arg key shape (letters, digits,
@@ -334,12 +459,16 @@ func argValueString(v any) string {
 	case string:
 		return x
 	case float64:
-		// JSON numbers decode to float64; keep the integral form
-		// when possible to avoid noisy "1234.000000" in templates.
 		if x == float64(int64(x)) {
 			return intToString(int64(x))
 		}
 		return floatToString(x)
+	case int:
+		return intToString(int64(x))
+	case int32:
+		return intToString(int64(x))
+	case int64:
+		return intToString(x)
 	case bool:
 		if x {
 			return "true"
@@ -375,8 +504,6 @@ func intToString(i int64) string {
 }
 
 func floatToString(f float64) string {
-	// Marshal produces a canonical JSON representation. We use
-	// encoding/json for consistency with the typed envelope.
 	bs, _ := json.Marshal(f)
 	return string(bs)
 }

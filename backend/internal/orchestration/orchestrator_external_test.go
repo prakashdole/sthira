@@ -2,6 +2,9 @@ package orchestration_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -664,5 +667,358 @@ func TestProcess_TranscriptNeverBecomesInstruction(t *testing.T) {
 	}
 	if capturedMid.Transcript.Text != injection {
 		t.Errorf("transcript text was rewritten by the orchestrator")
+	}
+}
+
+// TestSynthesize_TwoJurisdictionsScoping proves that /voice/speech properly
+// scopes template approval and versions to the requested jurisdiction.
+func TestSynthesize_TwoJurisdictionsScoping(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	sc1 := orchestrationtest.BuildScopedContext("J1", "en-IN")
+	sc1.TemplateKeys = []string{"welcome"}
+	sc2 := orchestrationtest.BuildScopedContext("J2", "en-IN")
+	sc2.TemplateKeys = []string{"destination_options"} // "welcome" not allowed in J2
+
+	resolver := orchestrationtest.NewResolver(sc1)
+	resolver.AddJurisdiction(sc2)
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	tpls.Add(contracts.ApprovedTemplate{
+		SpeechKey: "welcome", Language: "en-IN", TemplateVersion: 1, SourceVersion: 1,
+		Text: "Welcome, citizen.", SyntheticOnly: false,
+	})
+	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
+
+	// Call for J2 requesting "welcome" -> must fail because J2 does not have "welcome" approved
+	req2 := contracts.TTSRequest{
+		RequestID:     "req-j2",
+		Jurisdiction:  "J2",
+		SpeechKey:     "welcome",
+		Language:      "en-IN",
+		SourceVersion: 1,
+		Settings:      contracts.TTSSynthesisSettings{SampleRate: 16000, BitDepth: 16, Channels: 1},
+	}
+	_, err := o.Synthesize(context.Background(), req2, nil)
+	if err == nil {
+		t.Fatalf("expected error for J2 requesting template unapproved in J2")
+	}
+	var pe *orchestration.PipelineError
+	if !errors.As(err, &pe) {
+		t.Fatalf("error is not *orchestration.PipelineError: %v", err)
+	}
+	if pe.Failures[0].Code != contracts.ErrTemplateUnknown {
+		t.Errorf("Code = %s, want TEMPLATE_UNKNOWN", pe.Failures[0].Code)
+	}
+
+	// Call for J1 requesting "welcome" -> must succeed
+	req1 := contracts.TTSRequest{
+		RequestID:     "req-j1",
+		Jurisdiction:  "J1",
+		SpeechKey:     "welcome",
+		Language:      "en-IN",
+		SourceVersion: 1,
+		Settings:      contracts.TTSSynthesisSettings{SampleRate: 16000, BitDepth: 16, Channels: 1},
+	}
+	resp1, err := o.Synthesize(context.Background(), req1, nil)
+	if err != nil {
+		t.Fatalf("Synthesize J1: %v", err)
+	}
+	if resp1.SpeechKey != "welcome" {
+		t.Errorf("SpeechKey = %s, want welcome", resp1.SpeechKey)
+	}
+}
+
+// TestSynthesize_UnapprovedSyntheticTranslation rejects synthetic-only or missing translations.
+func TestSynthesize_UnapprovedSyntheticTranslation(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	sc.AllowedLanguages = append(sc.AllowedLanguages, "ml-IN")
+	sc.TemplateKeys = append(sc.TemplateKeys, "synth_key", "missing_trans")
+	resolver := orchestrationtest.NewResolver(sc)
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	tpls.Add(contracts.ApprovedTemplate{
+		SpeechKey: "synth_key", Language: "en-IN", TemplateVersion: 1, SourceVersion: 1,
+		Text: "Synthetic only.", SyntheticOnly: true,
+	})
+	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
+
+	// Synthetic-only template
+	reqSynth := contracts.TTSRequest{
+		RequestID:     "req-synth",
+		Jurisdiction:  "JTEST",
+		SpeechKey:     "synth_key",
+		Language:      "en-IN",
+		SourceVersion: 1,
+		Settings:      contracts.TTSSynthesisSettings{SampleRate: 16000, BitDepth: 16, Channels: 1},
+	}
+	_, err := o.Synthesize(context.Background(), reqSynth, nil)
+	if err == nil {
+		t.Fatalf("expected error for synthetic template")
+	}
+
+	// Missing translation
+	reqMissing := contracts.TTSRequest{
+		RequestID:     "req-missing",
+		Jurisdiction:  "JTEST",
+		SpeechKey:     "missing_trans",
+		Language:      "ml-IN",
+		SourceVersion: 1,
+		Settings:      contracts.TTSSynthesisSettings{SampleRate: 16000, BitDepth: 16, Channels: 1},
+	}
+	_, err = o.Synthesize(context.Background(), reqMissing, nil)
+	if err == nil {
+		t.Fatalf("expected error for missing translation")
+	}
+}
+
+// TestSynthesize_InjectedTemplateArg rejects template arguments containing injection delimiters.
+func TestSynthesize_InjectedTemplateArg(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	sc.TemplateKeys = append(sc.TemplateKeys, "choice_prompt")
+	resolver := orchestrationtest.NewResolver(sc)
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	tpls.Add(contracts.ApprovedTemplate{
+		SpeechKey: "choice_prompt", Language: "en-IN", TemplateVersion: 1, SourceVersion: 1,
+		Text:      "Select destination: {facility_id}.",
+		ArgSchema: map[string]string{"facility_id": "string"},
+	})
+	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
+
+	req := contracts.TTSRequest{
+		RequestID:     "req-inject",
+		Jurisdiction:  "JTEST",
+		SpeechKey:     "choice_prompt",
+		Language:      "en-IN",
+		SourceVersion: 1,
+		Args: contracts.SpeechArgs{
+			Args: map[string]any{"facility_id": "{malicious_injection}"},
+		},
+		Settings: contracts.TTSSynthesisSettings{SampleRate: 16000, BitDepth: 16, Channels: 1},
+	}
+	_, err := o.Synthesize(context.Background(), req, nil)
+	if err == nil {
+		t.Fatalf("expected validation error for injected argument")
+	}
+	var pe *orchestration.PipelineError
+	if !errors.As(err, &pe) {
+		t.Fatalf("error is not *orchestration.PipelineError: %v", err)
+	}
+	if pe.Failures[0].Code != contracts.ErrValidation {
+		t.Errorf("Code = %s, want VALIDATION_ERROR", pe.Failures[0].Code)
+	}
+}
+
+// TestSynthesize_SourceWithdrawalDuringSynthesis verifies that snapshot invalidation
+// during synthesis fails closed with 409 STALE_SNAPSHOT.
+func TestSynthesize_SourceWithdrawalDuringSynthesis(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	resolver := orchestrationtest.NewResolver(sc)
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	tpls.Add(contracts.ApprovedTemplate{
+		SpeechKey: "welcome", Language: "en-IN", TemplateVersion: 1, SourceVersion: 1,
+		Text: "Welcome, citizen.", SyntheticOnly: false,
+	})
+	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
+
+	// First revalidation succeeds; second revalidation (post-synthesis) returns ErrStaleSnapshot
+	callCount := 0
+	resolver.SetRevalidateHook(func(ctx context.Context, sc contracts.ScopedContext) error {
+		callCount++
+		if callCount > 1 {
+			return orchestration.ErrStaleSnapshot
+		}
+		return nil
+	})
+
+	req := contracts.TTSRequest{
+		RequestID:     "req-stale",
+		Jurisdiction:  "JTEST",
+		SpeechKey:     "welcome",
+		Language:      "en-IN",
+		SourceVersion: 1,
+		Settings:      contracts.TTSSynthesisSettings{SampleRate: 16000, BitDepth: 16, Channels: 1},
+	}
+	_, err := o.Synthesize(context.Background(), req, nil)
+	if err == nil {
+		t.Fatalf("expected error on stale snapshot after synthesis")
+	}
+	var pe *orchestration.PipelineError
+	if !errors.As(err, &pe) {
+		t.Fatalf("error is not *orchestration.PipelineError: %v", err)
+	}
+	if pe.Failures[0].Code != contracts.ErrStaleSnapshot {
+		t.Errorf("Code = %s, want STALE_SNAPSHOT", pe.Failures[0].Code)
+	}
+}
+
+// TestSynthesize_InvalidReturnedAudio detects checksum mismatch and returns internal error.
+func TestSynthesize_InvalidReturnedAudio(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	resolver := orchestrationtest.NewResolver(sc)
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	tpls.Add(contracts.ApprovedTemplate{
+		SpeechKey: "welcome", Language: "en-IN", TemplateVersion: 1, SourceVersion: 1,
+		Text: "Welcome, citizen.", SyntheticOnly: false,
+	})
+	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
+
+	// Hook TTS worker to return corrupt checksum
+	tts.SetSynthesizeHook(func(ctx context.Context, req contracts.TTSWorkerRequest) (contracts.TTSWorkerResponse, error) {
+		return contracts.TTSWorkerResponse{
+			RequestID:      req.RequestID,
+			SpeechKey:      req.SpeechKey,
+			Language:       req.Language,
+			State:          contracts.TTSOK,
+			AudioB64:       base64.StdEncoding.EncodeToString([]byte("RIFFfake-audio")),
+			ContentType:    "audio/wav",
+			ChecksumSHA256: "corrupted_checksum",
+			ModelRevision:  "r0",
+			VoiceRevision:  "v0",
+		}, nil
+	})
+
+	req := contracts.TTSRequest{
+		RequestID:     "req-bad-audio",
+		Jurisdiction:  "JTEST",
+		SpeechKey:     "welcome",
+		Language:      "en-IN",
+		SourceVersion: 1,
+		Settings:      contracts.TTSSynthesisSettings{SampleRate: 16000, BitDepth: 16, Channels: 1},
+	}
+	_, err := o.Synthesize(context.Background(), req, nil)
+	if err == nil {
+		t.Fatalf("expected error for corrupted checksum")
+	}
+	var pe *orchestration.PipelineError
+	if !errors.As(err, &pe) {
+		t.Fatalf("error is not *orchestration.PipelineError: %v", err)
+	}
+	if pe.Failures[0].Code != contracts.ErrInternal {
+		t.Errorf("Code = %s, want INTERNAL", pe.Failures[0].Code)
+	}
+}
+
+// TestProcess_UnavailableTTSPreservesActionsAndText verifies that when TTS fails,
+// model actions and template text are preserved and audio stage failure is reported.
+func TestProcess_UnavailableTTSPreservesActionsAndText(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	resolver := orchestrationtest.NewResolver(sc)
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	tpls.Add(contracts.ApprovedTemplate{
+		SpeechKey: "destination_options", Language: "en-IN", TemplateVersion: 1, SourceVersion: 1,
+		Text: "Destination options on screen.", SyntheticOnly: false,
+	})
+	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
+
+	mid.SetProposeHook(func(ctx context.Context, req contracts.MiddleWorkerRequest) (contracts.MiddleWorkerResponse, error) {
+		key := "destination_options"
+		return contracts.MiddleWorkerResponse{
+			RequestID: req.RequestID,
+			Proposal: contracts.ModelOutput{
+				SchemaVersion: contracts.ModelSchemaVersion,
+				RequestID:     req.RequestID,
+				DataVersion:   req.ScopedContext.DataVersion,
+				Status:        contracts.StatusOK,
+				Intent:        orchestrationtest.IntentPtr(contracts.IntentListDestinations),
+				Language:      req.Transcript.Language,
+				Actions:       []contracts.Action{{Type: contracts.ActionShowChoices, TargetIDs: []string{"FAC-DEMO-1"}}},
+				SpeechKey:     &key,
+			},
+			ModelRevision: "r0",
+		}, nil
+	})
+
+	// Make TTS fail
+	tts.SetSynthesizeHook(func(ctx context.Context, req contracts.TTSWorkerRequest) (contracts.TTSWorkerResponse, error) {
+		return contracts.TTSWorkerResponse{}, errors.New("tts worker service unavailable")
+	})
+
+	req := transcriptPipelineRequest("JTEST", "en-IN", "where can I go")
+	req.Render.Kind = contracts.PipelineRenderTTS
+	out, err := o.Process(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("Process must not fail completely when TTS is unavailable: %v", err)
+	}
+	if out.State != contracts.PipelineOK {
+		t.Errorf("State = %s, want OK", out.State)
+	}
+	if len(out.ValidatedProposal.Actions) != 1 || out.ValidatedProposal.Actions[0].Type != contracts.ActionShowChoices {
+		t.Errorf("Validated proposal actions lost on TTS failure: %+v", out.ValidatedProposal.Actions)
+	}
+	if out.Template.SpeechKey != "destination_options" {
+		t.Errorf("Template speech key = %s, want destination_options", out.Template.SpeechKey)
+	}
+	if out.Audio != nil {
+		t.Errorf("Audio should be nil on TTS failure")
+	}
+	if len(out.Stages) != 1 || out.Stages[0].Stage != orchestration.StageTTS {
+		t.Errorf("Stages = %+v, want StageTTS failure recorded", out.Stages)
+	}
+}
+
+// TestProcess_PlayableAudioOutput verifies that successful TTS returns inline base64
+// audio that can be decoded and whose SHA256 and byte size match.
+func TestProcess_PlayableAudioOutput(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	resolver := orchestrationtest.NewResolver(sc)
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	tpls.Add(contracts.ApprovedTemplate{
+		SpeechKey: "welcome", Language: "en-IN", TemplateVersion: 1, SourceVersion: 1,
+		Text: "Welcome, citizen.", SyntheticOnly: false,
+	})
+	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
+
+	mid.SetProposeHook(func(ctx context.Context, req contracts.MiddleWorkerRequest) (contracts.MiddleWorkerResponse, error) {
+		key := "welcome"
+		return contracts.MiddleWorkerResponse{
+			RequestID: req.RequestID,
+			Proposal: contracts.ModelOutput{
+				SchemaVersion: contracts.ModelSchemaVersion,
+				RequestID:     req.RequestID,
+				DataVersion:   req.ScopedContext.DataVersion,
+				Status:        contracts.StatusOK,
+				Intent:        orchestrationtest.IntentPtr(contracts.IntentRecenter),
+				Language:      req.Transcript.Language,
+				Actions:       []contracts.Action{{Type: contracts.ActionRecenter}},
+				SpeechKey:     &key,
+			},
+			ModelRevision: "r0",
+		}, nil
+	})
+
+	req := transcriptPipelineRequest("JTEST", "en-IN", "welcome")
+	req.Render.Kind = contracts.PipelineRenderTTS
+	out, err := o.Process(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if out.Audio == nil {
+		t.Fatalf("out.Audio is nil")
+	}
+	if out.Audio.AudioB64 == "" {
+		t.Fatalf("AudioB64 is empty")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(out.Audio.AudioB64)
+	if err != nil {
+		t.Fatalf("AudioB64 failed to decode: %v", err)
+	}
+	if int64(len(decoded)) != out.Audio.ByteSize {
+		t.Errorf("decoded length %d != ByteSize %d", len(decoded), out.Audio.ByteSize)
+	}
+	sum := sha256.Sum256(decoded)
+	checksum := hex.EncodeToString(sum[:])
+	if checksum != out.Audio.ChecksumSHA256 {
+		t.Errorf("checksum mismatch: computed %s != expected %s", checksum, out.Audio.ChecksumSHA256)
 	}
 }

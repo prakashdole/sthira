@@ -48,6 +48,7 @@ type TTSSynthesisSettings struct {
 // body.
 type TTSRequest struct {
 	RequestID     string               `json:"request_id"`
+	Jurisdiction  string               `json:"jurisdiction"`
 	SpeechKey     string               `json:"speech_key"` // must be in ScopedContext.TemplateKeys
 	Language      string               `json:"language"`   // must be in ScopedContext.AllowedLanguages
 	Args          SpeechArgs           `json:"args"`
@@ -74,6 +75,7 @@ type TTSResponse struct {
 	CacheHit        bool                 `json:"cache_hit"`
 	State           TTSState             `json:"state"`
 	Settings        TTSSynthesisSettings `json:"settings"`
+	AudioB64        string               `json:"audio_b64,omitempty"`
 }
 
 // TTSCacheKey is the canonical cache key used by the TTS worker and the

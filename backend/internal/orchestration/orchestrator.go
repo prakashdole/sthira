@@ -185,12 +185,27 @@ func (o *Orchestrator) Process(ctx context.Context, req contracts.PipelineReques
 		}))
 	}
 
+	var stageFailures []StageFailure
+
 	// 7. STAGE: TEMPLATE (lookup approved, render text). For silent
 	// actions (no speech_key, no intent) the template is empty and
 	// we skip TTS entirely.
-	tplOut, err := o.stageTemplate(runCtx, scoped, middleResp.Proposal)
-	if err != nil {
-		return o.fail(id, scoped.DataVersion, err)
+	var tplOut TemplateOutput
+	if middleResp.Proposal.SpeechKey != nil && *middleResp.Proposal.SpeechKey != "" {
+		out, err := o.stageTemplate(runCtx, scoped, middleResp.Proposal)
+		if err != nil {
+			var perr *PipelineError
+			if errors.As(err, &perr) {
+				stageFailures = append(stageFailures, perr.Failures...)
+			} else {
+				stageFailures = append(stageFailures, StageFailure{
+					Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: err.Error(), Retryable: false,
+				})
+			}
+			tplOut.SpeechKey = *middleResp.Proposal.SpeechKey
+		} else {
+			tplOut = out
+		}
 	}
 
 	// 8. STAGE: TTS (optional). Render only when the proposal has a
@@ -200,9 +215,28 @@ func (o *Orchestrator) Process(ctx context.Context, req contracts.PipelineReques
 	if req.Render.Kind == contracts.PipelineRenderTTS && tplOut.Text != "" {
 		audioOut, err := o.stageTTS(runCtx, id, scoped, tplOut, req.Language, middleResp.ModelRevision)
 		if err != nil {
-			return o.fail(id, scoped.DataVersion, err)
+			var perr *PipelineError
+			if errors.As(err, &perr) {
+				stageFailures = append(stageFailures, perr.Failures...)
+			} else {
+				stageFailures = append(stageFailures, StageFailure{
+					Stage: StageTTS, Code: contracts.ErrModelUnavailable, Reason: err.Error(), Retryable: true,
+				})
+			}
+		} else {
+			// Revalidate snapshot after synthesis before audio delivery.
+			if err := o.cfg.Resolver.SnapshotRevalidate(runCtx, scoped); err != nil {
+				if !errors.Is(err, ErrStaleSnapshot) {
+					return o.fail(id, scoped.DataVersion, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
+						Stage: StageContext, Code: contracts.ErrStaleSnapshot, Reason: err.Error(), Retryable: false,
+					}))
+				}
+				return o.fail(id, scoped.DataVersion, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
+					Stage: StageContext, Code: contracts.ErrStaleSnapshot, Reason: err.Error(), Retryable: false,
+				}))
+			}
+			audio = audioOut
 		}
-		audio = audioOut
 	}
 
 	return PipelineOutput{
@@ -216,7 +250,7 @@ func (o *Orchestrator) Process(ctx context.Context, req contracts.PipelineReques
 			Args:            tplOut.Args,
 		},
 		Audio:  audio,
-		Stages: nil,
+		Stages: stageFailures,
 	}, nil
 }
 
@@ -622,6 +656,7 @@ func (o *Orchestrator) stageTTS(ctx context.Context, id CorrelationID, sc contra
 		TemplateVersion: tpl.TemplateVersion,
 		SourceVersion:   tpl.SourceVersion,
 		Settings:        settings,
+		AudioB64:        resp.AudioB64,
 	}, nil
 }
 
@@ -683,13 +718,63 @@ func mapTTSStateToCode(s contracts.TTSState) string {
 }
 
 // validateArgsAgainstSchema validates the proposal's actions against
-// the template's ArgSchema. The schema is the typed JSON Schema
-// Worker 4 produces; a minimal validator is bundled here so the
-// orchestrator fails closed at template time without importing W4.
-func validateArgsAgainstSchema(_ contracts.ModelOutput, _ contracts.ApprovedTemplate) error {
-	// Minimal stub: real validation lives in Worker 4 (template
-	// worker) and runs at template time. The orchestrator only
-	// checks that the template is registered and approved.
+// the template's ArgSchema.
+func validateArgsAgainstSchema(proposal contracts.ModelOutput, tpl contracts.ApprovedTemplate) error {
+	for _, id := range proposal.EvidenceIDs {
+		if !validIDChar(id) {
+			return fmt.Errorf("evidence_id %q contains invalid characters", id)
+		}
+	}
+	for _, id := range proposal.ClarificationIDs {
+		if !validIDChar(id) {
+			return fmt.Errorf("clarification_id %q contains invalid characters", id)
+		}
+	}
+	for _, a := range proposal.Actions {
+		if a.TargetID != "" && !validIDChar(a.TargetID) {
+			return fmt.Errorf("target_id %q contains invalid characters", a.TargetID)
+		}
+		if a.RouteID != "" && !validIDChar(a.RouteID) {
+			return fmt.Errorf("route_id %q contains invalid characters", a.RouteID)
+		}
+		for _, tid := range a.TargetIDs {
+			if !validIDChar(tid) {
+				return fmt.Errorf("target_id %q contains invalid characters", tid)
+			}
+		}
+	}
+
+	argSchema, ok := parseArgSchema(tpl.ArgSchema)
+	if !ok || len(argSchema) == 0 {
+		return nil
+	}
+
+	args := argsForTemplate(proposal)
+	provided := make(map[string]string)
+	for _, a := range args {
+		provided[a.Key] = a.Value
+	}
+
+	for k, expectedType := range argSchema {
+		val, exists := provided[k]
+		if !exists {
+			return fmt.Errorf("missing required template argument %q", k)
+		}
+		switch expectedType {
+		case "int":
+			if _, ok := toInt(val); !ok {
+				return fmt.Errorf("template argument %q must be an integer", k)
+			}
+		case "string":
+			if val == "" || !validIDChar(val) {
+				return fmt.Errorf("template argument %q contains invalid characters", k)
+			}
+		default:
+			if !validIDChar(val) {
+				return fmt.Errorf("template argument %q contains invalid characters", k)
+			}
+		}
+	}
 	return nil
 }
 
@@ -704,12 +789,21 @@ func argsForTemplate(proposal contracts.ModelOutput) []contracts.PipelineTemplat
 	// are already validated against the ScopedContext by the
 	// validator. The renderer enforces placeholders via the
 	// template's ArgSchema; here we pass them in stable order.
-	out := make([]contracts.PipelineTemplateArg, 0, len(proposal.EvidenceIDs))
+	out := make([]contracts.PipelineTemplateArg, 0, len(proposal.EvidenceIDs)+len(proposal.ClarificationIDs))
 	for _, id := range proposal.EvidenceIDs {
 		out = append(out, contracts.PipelineTemplateArg{Key: "evidence_id", Value: id})
 	}
 	for _, id := range proposal.ClarificationIDs {
 		out = append(out, contracts.PipelineTemplateArg{Key: "clarification_id", Value: id})
+	}
+	for _, a := range proposal.Actions {
+		if a.TargetID != "" {
+			out = append(out, contracts.PipelineTemplateArg{Key: "target_id", Value: a.TargetID})
+			out = append(out, contracts.PipelineTemplateArg{Key: "facility_id", Value: a.TargetID})
+		}
+		if a.RouteID != "" {
+			out = append(out, contracts.PipelineTemplateArg{Key: "route_id", Value: a.RouteID})
+		}
 	}
 	return out
 }
@@ -724,6 +818,9 @@ func renderTemplate(tpl contracts.ApprovedTemplate, args []contracts.PipelineTem
 			continue
 		}
 		out = strings.ReplaceAll(out, "{"+a.Key+"}", a.Value)
+	}
+	if strings.Contains(out, "{") || strings.Contains(out, "}") {
+		return "", errors.New("template text contains unreplaced placeholder or forbidden delimiter")
 	}
 	return out, nil
 }

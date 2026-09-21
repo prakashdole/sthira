@@ -1027,6 +1027,7 @@ components:
             voice_revision: { type: string }
             template_version: { type: integer, minimum: 1 }
             source_version: { type: integer, minimum: 1 }
+            audio_b64: { type: string, description: Base64-encoded audio payload }
             settings:
               type: object
               required: [sample_rate, bit_depth, channels]
@@ -1043,10 +1044,11 @@ components:
             enum: [audio, asr, context, middle, validator, template, tts]
     TTSRequest:
       type: object
-      required: [request_id, speech_key, language, args, source_version, settings]
+      required: [request_id, jurisdiction, speech_key, language, args, source_version, settings]
       additionalProperties: false
       properties:
         request_id: { type: string }
+        jurisdiction: { type: string, description: must match active operational context }
         speech_key: { type: string, description: must be in ScopedContext.TemplateKeys }
         language: { type: string, description: must be in ScopedContext.AllowedLanguages }
         args:
@@ -1081,6 +1083,7 @@ components:
         model_revision: { type: string }
         voice_revision: { type: string }
         audio_id: { type: string }
+        audio_b64: { type: string, description: Base64-encoded audio payload }
         content_type: { type: string, enum: [audio/wav] }
         byte_size: { type: integer, minimum: 1 }
         checksum_sha256: { type: string }

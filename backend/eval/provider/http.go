@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -229,12 +230,32 @@ type PipelineResponseEnvelope struct {
 // TTSEnvelopeBridge converts a TTSRequest into the orchestrator's
 // typed envelope.
 func TTSEnvelopeBridge(req TTSRequest) map[string]any {
+	srcVer := req.SourceVersion
+	if srcVer <= 0 {
+		srcVer = req.Case.Context.SourceVersion
+	}
+	if srcVer <= 0 {
+		srcVer = 1
+	}
+	jurisdiction := "KL-WYD"
+	if req.Case.Context.DataVersion != "" {
+		parts := strings.Split(req.Case.Context.DataVersion, "-")
+		if len(parts) >= 2 {
+			jurisdiction = parts[0] + "-" + parts[1]
+		}
+	}
 	return map[string]any{
 		"request_id":     req.RequestID,
+		"jurisdiction":   jurisdiction,
 		"speech_key":     req.SpeechKey,
 		"language":       req.Language,
-		"args":           req.Args,
-		"source_version": req.SourceVersion,
+		"args":           map[string]any{"args": req.Args},
+		"source_version": srcVer,
+		"settings": map[string]any{
+			"sample_rate": 16000,
+			"bit_depth":   16,
+			"channels":    1,
+		},
 	}
 }
 

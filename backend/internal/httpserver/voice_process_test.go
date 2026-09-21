@@ -3,7 +3,9 @@ package httpserver
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -145,7 +147,7 @@ func TestVoiceProcess_HandleProcessRejectsOversizedBody(t *testing.T) {
 // speech handler returns 422 for unknown template keys.
 func TestVoiceProcess_HandleSpeechFailsOnUnknownTemplate(t *testing.T) {
 	srv, _, _, _, _ := buildVoiceServer(t)
-	body := `{"request_id":"req-1","speech_key":"unknown","language":"en-IN","args":{"args":{}},"source_version":1,"settings":{"sample_rate":16000,"bit_depth":16,"channels":1}}`
+	body := `{"request_id":"req-1","jurisdiction":"JTEST","speech_key":"unknown","language":"en-IN","args":{"args":{}},"source_version":1,"settings":{"sample_rate":16000,"bit_depth":16,"channels":1}}`
 	code, _, resp := doVoice(t, srv, http.MethodPost, "/api/v3/voice/speech", "application/json", body)
 	if code == http.StatusOK {
 		t.Fatalf("/voice/speech = 200 with unknown template key; resp=%s", resp)
@@ -159,7 +161,7 @@ func TestVoiceProcess_HandleSpeechFailsOnUnknownTemplate(t *testing.T) {
 // handler when source_version is stale.
 func TestVoiceProcess_HandleSpeechUnknownSourceVersion(t *testing.T) {
 	srv, _, _, _, _ := buildVoiceServer(t)
-	body := `{"request_id":"req-1","speech_key":"welcome","language":"en-IN","args":{"args":{}},"source_version":99,"settings":{"sample_rate":16000,"bit_depth":16,"channels":1}}`
+	body := `{"request_id":"req-1","jurisdiction":"JTEST","speech_key":"welcome","language":"en-IN","args":{"args":{}},"source_version":99,"settings":{"sample_rate":16000,"bit_depth":16,"channels":1}}`
 	code, _, resp := doVoice(t, srv, http.MethodPost, "/api/v3/voice/speech", "application/json", body)
 	if code == http.StatusOK {
 		t.Fatalf("/voice/speech = 200 with stale source_version; resp=%s", resp)
@@ -329,5 +331,193 @@ func TestVoiceProcess_RejectsUnknownField(t *testing.T) {
 	code, _, _ := doVoice(t, srv, http.MethodPost, "/api/v3/voice/process", "application/json", body)
 	if code != http.StatusBadRequest {
 		t.Errorf("unknown field = %d, want 400", code)
+	}
+}
+
+// TestVoiceProcess_HandleSpeech_TwoJurisdictions verifies multi-jurisdiction scoping at the HTTP layer.
+func TestVoiceProcess_HandleSpeech_TwoJurisdictions(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	sc1 := orchestrationtest.BuildScopedContext("J1", "en-IN")
+	sc1.TemplateKeys = []string{"welcome"}
+	sc2 := orchestrationtest.BuildScopedContext("J2", "en-IN")
+	sc2.TemplateKeys = []string{"other_key"}
+
+	resolver := orchestrationtest.NewResolver(sc1)
+	resolver.AddJurisdiction(sc2)
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	tpls.Add(contracts.ApprovedTemplate{
+		SpeechKey: "welcome", Language: "en-IN", TemplateVersion: 1, SourceVersion: 1,
+		Text: "Welcome, citizen.", SyntheticOnly: false,
+	})
+	orch, err := orchestrationtest.NewOrchestrator(asr, mid, tts, resolver, validator, tpls)
+	if err != nil {
+		t.Fatalf("NewOrchestrator: %v", err)
+	}
+	h := NewVoiceProcessHandler(orch, orchestration.DefaultLimits())
+	srv := New(DefaultConfig("127.0.0.1:0"), WithVoiceProcess(h))
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	// J2 requesting "welcome" -> 422
+	bodyJ2 := `{"request_id":"req-j2","jurisdiction":"J2","speech_key":"welcome","language":"en-IN","args":{"args":{}},"source_version":1,"settings":{"sample_rate":16000,"bit_depth":16,"channels":1}}`
+	code, _, _ := doVoice(t, ts, http.MethodPost, "/api/v3/voice/speech", "application/json", bodyJ2)
+	if code != http.StatusUnprocessableEntity {
+		t.Errorf("J2 /voice/speech = %d, want 422", code)
+	}
+
+	// J1 requesting "welcome" -> 200
+	bodyJ1 := `{"request_id":"req-j1","jurisdiction":"J1","speech_key":"welcome","language":"en-IN","args":{"args":{}},"source_version":1,"settings":{"sample_rate":16000,"bit_depth":16,"channels":1}}`
+	code, _, resp := doVoice(t, ts, http.MethodPost, "/api/v3/voice/speech", "application/json", bodyJ1)
+	if code != http.StatusOK {
+		t.Fatalf("J1 /voice/speech = %d, want 200; body=%s", code, resp)
+	}
+}
+
+// TestVoiceProcess_HandleSpeech_InjectedArg verifies template arg injection rejection at HTTP layer.
+func TestVoiceProcess_HandleSpeech_InjectedArg(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	sc.TemplateKeys = append(sc.TemplateKeys, "choice_prompt")
+	resolver := orchestrationtest.NewResolver(sc)
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	tpls.Add(contracts.ApprovedTemplate{
+		SpeechKey: "choice_prompt", Language: "en-IN", TemplateVersion: 1, SourceVersion: 1,
+		Text:      "Select destination: {facility_id}.",
+		ArgSchema: map[string]string{"facility_id": "string"},
+	})
+	orch, err := orchestrationtest.NewOrchestrator(asr, mid, tts, resolver, validator, tpls)
+	if err != nil {
+		t.Fatalf("NewOrchestrator: %v", err)
+	}
+	h := NewVoiceProcessHandler(orch, orchestration.DefaultLimits())
+	srv := New(DefaultConfig("127.0.0.1:0"), WithVoiceProcess(h))
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	body := `{"request_id":"req-1","jurisdiction":"JTEST","speech_key":"choice_prompt","language":"en-IN","args":{"args":{"facility_id":"{inject}"}},"source_version":1,"settings":{"sample_rate":16000,"bit_depth":16,"channels":1}}`
+	code, _, _ := doVoice(t, ts, http.MethodPost, "/api/v3/voice/speech", "application/json", body)
+	if code != http.StatusUnprocessableEntity {
+		t.Errorf("injected arg /voice/speech = %d, want 422", code)
+	}
+}
+
+// TestVoiceProcess_HandleSpeech_SourceWithdrawal verifies 409 STALE_SNAPSHOT on withdrawal during synthesis.
+func TestVoiceProcess_HandleSpeech_SourceWithdrawal(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	resolver := orchestrationtest.NewResolver(sc)
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	tpls.Add(contracts.ApprovedTemplate{
+		SpeechKey: "welcome", Language: "en-IN", TemplateVersion: 1, SourceVersion: 1,
+		Text: "Welcome, citizen.", SyntheticOnly: false,
+	})
+	calls := 0
+	resolver.SetRevalidateHook(func(ctx context.Context, sc contracts.ScopedContext) error {
+		calls++
+		if calls > 1 {
+			return orchestration.ErrStaleSnapshot
+		}
+		return nil
+	})
+	orch, err := orchestrationtest.NewOrchestrator(asr, mid, tts, resolver, validator, tpls)
+	if err != nil {
+		t.Fatalf("NewOrchestrator: %v", err)
+	}
+	h := NewVoiceProcessHandler(orch, orchestration.DefaultLimits())
+	srv := New(DefaultConfig("127.0.0.1:0"), WithVoiceProcess(h))
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	body := `{"request_id":"req-1","jurisdiction":"JTEST","speech_key":"welcome","language":"en-IN","args":{"args":{}},"source_version":1,"settings":{"sample_rate":16000,"bit_depth":16,"channels":1}}`
+	code, _, _ := doVoice(t, ts, http.MethodPost, "/api/v3/voice/speech", "application/json", body)
+	if code != http.StatusConflict {
+		t.Errorf("/voice/speech during withdrawal = %d, want 409", code)
+	}
+}
+
+// TestVoiceProcess_HandleProcess_TTSFailurePreservesActions verifies that when TTS fails during /voice/process,
+// model proposal actions and text are preserved and an audio stage failure is reported with 200 OK.
+func TestVoiceProcess_HandleProcess_TTSFailurePreservesActions(t *testing.T) {
+	srv, _, _, mid, tts := buildVoiceServer(t)
+	key := "welcome"
+	mid.SetProposeHook(func(ctx context.Context, req contracts.MiddleWorkerRequest) (contracts.MiddleWorkerResponse, error) {
+		return contracts.MiddleWorkerResponse{
+			RequestID: req.RequestID,
+			Proposal: contracts.ModelOutput{
+				SchemaVersion: contracts.ModelSchemaVersion,
+				RequestID:     req.RequestID,
+				DataVersion:   req.ScopedContext.DataVersion,
+				Status:        contracts.StatusOK,
+				Intent:        orchestrationtest.IntentPtr(contracts.IntentListDestinations),
+				Language:      req.Transcript.Language,
+				Actions:       []contracts.Action{{Type: contracts.ActionShowChoices, TargetIDs: []string{"FAC-DEMO-1"}}},
+				SpeechKey:     &key,
+			},
+			ModelRevision: "r0",
+		}, nil
+	})
+	tts.SetSynthesizeHook(func(ctx context.Context, req contracts.TTSWorkerRequest) (contracts.TTSWorkerResponse, error) {
+		return contracts.TTSWorkerResponse{}, errors.New("tts worker failure")
+	})
+
+	body := `{"request_id":"req-fail-tts","jurisdiction":"JTEST","language":"en-IN","input":{"kind":"transcript","text":"hello"},"render":{"kind":"tts"}}`
+	code, _, resp := doVoice(t, srv, http.MethodPost, "/api/v3/voice/process", "application/json", body)
+	if code != http.StatusOK {
+		t.Fatalf("/voice/process = %d, want 200; body=%s", code, resp)
+	}
+	env := decodeVoiceEnvelope(t, resp)
+	dataBS, _ := json.Marshal(env.Data)
+	var pipelineResp contracts.PipelineResponse
+	_ = json.Unmarshal(dataBS, &pipelineResp)
+
+	if len(pipelineResp.ValidatedProposal.Actions) != 1 || pipelineResp.ValidatedProposal.Actions[0].Type != contracts.ActionShowChoices {
+		t.Errorf("actions lost on TTS failure: %+v", pipelineResp.ValidatedProposal.Actions)
+	}
+	if pipelineResp.Audio != nil {
+		t.Errorf("Audio should be nil on TTS failure")
+	}
+	foundTTSFail := false
+	for _, f := range pipelineResp.StageFailures {
+		if f == "tts" {
+			foundTTSFail = true
+		}
+	}
+	if !foundTTSFail {
+		t.Errorf("StageFailures = %+v, want tts", pipelineResp.StageFailures)
+	}
+}
+
+// TestVoiceProcess_HandleSpeech_PlayableDecode verifies that /voice/speech returns audio_b64
+// that decodes into bytes matching checksum_sha256 and byte_size.
+func TestVoiceProcess_HandleSpeech_PlayableDecode(t *testing.T) {
+	srv, _, _, _, _ := buildVoiceServer(t)
+	body := `{"request_id":"req-audio-ok","jurisdiction":"JTEST","speech_key":"welcome","language":"en-IN","args":{"args":{}},"source_version":1,"settings":{"sample_rate":16000,"bit_depth":16,"channels":1}}`
+	code, _, resp := doVoice(t, srv, http.MethodPost, "/api/v3/voice/speech", "application/json", body)
+	if code != http.StatusOK {
+		t.Fatalf("/voice/speech = %d, want 200; body=%s", code, resp)
+	}
+	env := decodeVoiceEnvelope(t, resp)
+	dataBS, _ := json.Marshal(env.Data)
+	var ttsResp contracts.TTSResponse
+	if err := json.Unmarshal(dataBS, &ttsResp); err != nil {
+		t.Fatalf("unmarshal TTSResponse: %v", err)
+	}
+	if ttsResp.AudioB64 == "" {
+		t.Fatalf("AudioB64 is empty")
+	}
+	audioBytes, err := base64.StdEncoding.DecodeString(ttsResp.AudioB64)
+	if err != nil {
+		t.Fatalf("base64 decode AudioB64: %v", err)
+	}
+	if int64(len(audioBytes)) != ttsResp.ByteSize {
+		t.Errorf("decoded length %d != byte_size %d", len(audioBytes), ttsResp.ByteSize)
+	}
+	sum := sha256.Sum256(audioBytes)
+	checksum := hex.EncodeToString(sum[:])
+	if checksum != ttsResp.ChecksumSHA256 {
+		t.Errorf("checksum mismatch: computed %s != expected %s", checksum, ttsResp.ChecksumSHA256)
 	}
 }

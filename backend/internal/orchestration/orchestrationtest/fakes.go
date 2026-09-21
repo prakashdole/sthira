@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"sync"
 	"sync/atomic"
 
@@ -175,6 +176,7 @@ func IntentPtr(i contracts.Intent) *contracts.Intent { return &i }
 type Resolver struct {
 	mu              sync.Mutex
 	scoped          contracts.ScopedContext
+	contexts        map[string]contracts.ScopedContext
 	revalidateError error
 	revalidateCalls atomic.Int64
 	revalidateHook  func(ctx context.Context, sc contracts.ScopedContext) error
@@ -182,11 +184,33 @@ type Resolver struct {
 
 // NewResolver returns a resolver seeded with the given scoped context.
 func NewResolver(sc contracts.ScopedContext) *Resolver {
-	return &Resolver{scoped: sc}
+	r := &Resolver{scoped: sc, contexts: make(map[string]contracts.ScopedContext)}
+	if sc.Jurisdiction != "" {
+		r.contexts[sc.Jurisdiction] = sc
+	}
+	return r
+}
+
+// AddJurisdiction registers an additional operational context for a jurisdiction.
+func (r *Resolver) AddJurisdiction(sc contracts.ScopedContext) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.contexts == nil {
+		r.contexts = make(map[string]contracts.ScopedContext)
+	}
+	r.contexts[sc.Jurisdiction] = sc
 }
 
 // Resolve implements orchestration.ScopedContextResolver.
 func (r *Resolver) Resolve(_ context.Context, jurisdiction string) (contracts.ScopedContext, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if sc, ok := r.contexts[jurisdiction]; ok {
+		return sc, nil
+	}
+	if len(r.contexts) > 0 && r.scoped.Jurisdiction != "" && jurisdiction != r.scoped.Jurisdiction {
+		return contracts.ScopedContext{}, errors.New("resolver: no operational context for jurisdiction")
+	}
 	if r.scoped.Jurisdiction == "" {
 		r.scoped.Jurisdiction = jurisdiction
 	}
