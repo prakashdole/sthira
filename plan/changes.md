@@ -1,5 +1,36 @@
 # Change and evidence record
 
+## 2026-09-21 — integration repair: Stage 1 closed on `codex/p567-integration-repair`
+
+Continued the A/B integration on the existing integration worktree. Re-checked
+ground truth first: the committed tree built but **did not** pass its own Stage 1
+real-HTTP gate (`TestVoiceProcess_RealHTTP_...` returned 400 `UNKNOWN_FIELD
+jurisdiction`, then 422 `speech_key not in approved set`), and the in-flight
+`a1_regression_test.go` was left syntactically broken. Fixed the breakage and
+closed Stage 1 with real boundary evidence (commit `b3ddc9a`):
+
+- Public citizen bytes are strictly decoded as `PipelineRequest`; model bytes are
+  strictly validated (presence/enums/tagged variants, explicit-empty forbidden
+  fields) via `model_strict.go` at `HTTPWorkerClient.Propose`, on distinct limits.
+- `decodeRIFFWAV` rejects an unknown-length `fmt` chunk and bounds every chunk
+  advance with `uint64` checks; added no-panic regressions and a bounded
+  `FuzzDecodeWAVChunkSizes` (~360k execs, clean).
+- Added persisted, jurisdiction/source-bound template approval
+  (`approved_translations`, migration `0008`) that populates `ScopedContext.TemplateKeys`;
+  empty approval still fails closed. The real-HTTP happy path now returns 200 with
+  audio through `ProductionValidator` and the real handlers.
+- All six Go modules build, vet, gofmt-clean; backend + asrworker + ttsworker +
+  middleworker + eval + loadmodel test suites are green (default, non-`-race`).
+
+Stages 2–5 remain **open**. Verified status is recorded in
+[integration-repair-handoff.md](integration-repair-handoff.md). Notably A3 DB
+tests still `t.Skip`/`t.Skipf` (a pass bypass) and reference a nonexistent
+`artifacts` table; the observer/in-memory-bus publication path, real-adapter
+READY semantics, IPC `-race` boundedness, actual-handler eval conformance and the
+P7 smoke/security harnesses are unfinished. Gate B stays **NOT_READY**; P8 not
+started. `CLEAN` (`4095400`) cannot fast-forward to this branch (diverged at
+`b63e469`).
+
 ## 2026-09-19 — production-preparation planning pivot
 
 All sixteen existing Markdown documents under `plan/` are rewritten for immediate evacuation and 7–30 day temporary relocation. Added dedicated stack, cleanup and assurance documents. Added the Go migration sequence, both-platform mobile gate, one-million-total-user workload model, regional demo/language matrix, map/offline architecture, bounded middle-model contract and phase prompts.
