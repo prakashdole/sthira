@@ -1,0 +1,78 @@
+# Disposable single-host rehearsal stack for P7 recovery.
+#
+# This compose file is intentionally minimal — it exists so the
+# coordinator has a concrete shape to compare against when provisioning
+# an actual disposable deployment. It is NOT meant to run against the
+# team's cluster: the brief forbids touching shared databases.
+#
+# Required conditions before `docker compose -f compose.recovery.yml up`:
+#
+#   - The team's primary project stays untouched. This composition
+#     binds to 127.0.0.1-only ports.
+#   - Each service uses an `r7recover_*`-prefixed database name; the
+#     DSN encodes `database=r7recover_*` and the cleanup script refuses
+#     any other prefix.
+#   - The host has PostgreSQL 16+ available (the runners' proven version
+#     is 16.15). If the host has 17 or 18, the team must first confirm
+#     the binary's migrations are compatible — currently they target
+#     PostgreSQL 15+ with PostGIS 3.x.
+
+services:
+  recovery-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: sthira_recovery
+      POSTGRES_DB: r7recover_rehearsal
+    command:
+      - "postgres"
+      - "-c"
+      - "port=25432"
+      - "-c"
+      - "listen_addresses=127.0.0.1"
+    ports:
+      - "127.0.0.1:25432:5432"
+    volumes:
+      - recovery_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sthira_recovery -d r7recover_rehearsal"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  recovery-sthira:
+    build:
+      context: ../..
+      dockerfile: deploy/recovery/Dockerfile.sthira
+    environment:
+      STHIRA_ADDR: 127.0.0.1:18080
+      STHIRA_DATABASE_DSN: "postgres://sthira_recovery@recovery-db:5432/r7recover_rehearsal?sslmode=disable"
+    depends_on:
+      recovery-db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/health/live"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  recovery-runner:
+    image: postgres:16
+    command: ["sleep", "infinity"]
+    volumes:
+      - ./:/work
+      - ../scripts:/scripts
+    working_dir: /work
+    depends_on:
+      - recovery-db
+      - recovery-sthira
+    environment:
+      PGHOST: recovery-db
+      PGPORT: "5432"
+      PGUSER: sthira_recovery
+      PGDATABASE: r7recover_rehearsal
+      STHIRA_ADDR: 127.0.0.1:18080
+
+volumes:
+  recovery_data:
