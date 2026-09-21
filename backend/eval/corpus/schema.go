@@ -152,6 +152,18 @@ type Context struct {
 	// field rather than parsing it out of data_version.
 	Jurisdiction    string `json:"jurisdiction,omitempty"`
 	TemplateVersion int    `json:"template_version,omitempty"`
+	// TemplateText is the rendered approved-template text the TTS
+	// stage synthesizes when the harness drives the private TTS
+	// worker directly (the worker only speaks text it is given).
+	// Optional: only real-run TTS conformance requires it.
+	TemplateText string `json:"template_text,omitempty"`
+	// SampleRate is the TTS output rate the harness requests; when
+	// zero the provider omits settings and the worker default
+	// applies.
+	SampleRate int `json:"sample_rate,omitempty"`
+	// Voice selects an explicit TTS voice revision; empty means the
+	// worker's default for the language.
+	Voice string `json:"voice,omitempty"`
 }
 
 // ExpectedOutcome is the locked decision the runner must reconcile

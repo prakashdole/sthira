@@ -243,12 +243,16 @@ func (r *Runner) dispatch(ctx context.Context, c corpus.Case, gate WarmGate) pro
 	if r.cfg.StagesRun.TTS && !skipTTS(c, mid.Status) {
 		t := r.cfg.Now()
 		_, err := r.cfg.Provider.TTS(cctx, provider.TTSRequest{
-			RequestID:     c.ID,
-			SpeechKey:     mid.SpeechKey,
-			Language:      c.LangCohort.Language,
-			Args:          map[string]any{},
-			SourceVersion: c.Context.SourceVersion,
-			Case:          c,
+			RequestID:       c.ID,
+			SpeechKey:       mid.SpeechKey,
+			Language:        c.LangCohort.Language,
+			Text:            c.Context.TemplateText,
+			Voice:           c.Context.Voice,
+			SampleRate:      c.Context.SampleRate,
+			Args:            map[string]any{},
+			SourceVersion:   c.Context.SourceVersion,
+			TemplateVersion: c.Context.TemplateVersion,
+			Case:            c,
 		})
 		stage.TTSMS = time.Since(t).Milliseconds()
 		if err != nil {

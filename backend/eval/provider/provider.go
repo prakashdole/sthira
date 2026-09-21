@@ -97,14 +97,21 @@ type MiddleRequest struct {
 }
 
 // TTSRequest is the typed TTS shape trimmed to fields the harness
-// cares about.
+// cares about. Text is the ACTUAL rendered approved-template text:
+// the private worker only synthesizes text it is handed, and the
+// harness must not send empty text expecting the server to invent
+// it, nor must it ever invent versions.
 type TTSRequest struct {
-	RequestID     string
-	SpeechKey     string
-	Language      string
-	Args          map[string]any
-	SourceVersion int
-	Case          corpus.Case
+	RequestID       string
+	SpeechKey       string
+	Language        string
+	Text            string
+	Voice           string
+	SampleRate      int
+	Args            map[string]any
+	SourceVersion   int
+	TemplateVersion int
+	Case            corpus.Case
 }
 
 // StageTimings captures per-stage latency for a single case. All times
@@ -145,6 +152,11 @@ type Result struct {
 // the pipeline runs. The runner maps this to NOT_EVALUATED at the case
 // level — not a failure, an unmeasured.
 var ErrUnsupported = errors.New("provider refused")
+
+// ErrMalformedResponse marks an HTTP 200 whose body is not a valid
+// typed success (empty proposal, empty state, OK-without-bytes). A
+// 200 is not proof of success; the provider must fail closed.
+var ErrMalformedResponse = errors.New("provider: malformed 200 response")
 
 // NewTimings is a zero helper.
 func NewTimings() StageTimings { return StageTimings{} }

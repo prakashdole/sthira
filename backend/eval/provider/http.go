@@ -132,40 +132,56 @@ func (p *HTTPProvider) ASR(ctx context.Context, req ASRRequest) (ASROutcome, err
 	}, nil
 }
 
-// Middle POSTs the typed PipelineRequest envelope (mirrors
-// contracts.PipelineRequest) and decodes the typed
-// PipelineResponse. Jurisdiction is sourced from the case's
-// Context, NOT invented from data_version parsing.
+// Middle POSTs the real private middle-worker envelope
+// (middleworker.RequestEnvelope, mirrored here) to the worker's
+// /v1/chat/completions endpoint and decodes the real
+// ResponseEnvelope. It does NOT send a public PipelineRequest to a
+// private worker, and it does NOT invent fields the envelope does
+// not have (no top-level source_version, no data_version_hint):
+// versioning travels inside scoped_context where the worker reads
+// it. The proposal is decoded NESTED (out.Proposal), never flat.
 func (p *HTTPProvider) Middle(ctx context.Context, req MiddleRequest) (MiddleOutcome, error) {
 	if p.cfg.MiddleURL == "" {
 		return MiddleOutcome{}, errors.New("HTTP Middle URL not configured")
 	}
-	jurisdiction := req.Case.Context.Jurisdiction
-	if jurisdiction == "" {
-		return MiddleOutcome{}, errors.New("middle: jurisdiction required (D36)")
+	// The transcript round-trips correlation: same request_id the
+	// ASR stage used. The middle wire schema_version is the frozen
+	// 3.0 model-output contract (NOT the corpus 1.0.0 format).
+	dataVersion := req.Case.Context.DataVersion
+	if dataVersion == "" {
+		return MiddleOutcome{}, errors.New("middle: context.data_version required")
 	}
-	srcVer := req.Case.Context.SourceVersion
-	if srcVer <= 0 {
-		return MiddleOutcome{}, errors.New("middle: source_version required (D43)")
+	if req.Case.Context.Jurisdiction == "" {
+		return MiddleOutcome{}, errors.New("middle: context.jurisdiction required (D36)")
 	}
-	input := map[string]any{
-		"kind": "transcript",
-		"text": req.Transcript,
+	scoped := map[string]any{
+		"schema_version": "3.0",
+		"data_version":   dataVersion,
+		"jurisdiction":   req.Case.Context.Jurisdiction,
 	}
-	render := map[string]any{"kind": "none"}
+	if req.Case.Context.SourceVersion > 0 {
+		scoped["source_version"] = req.Case.Context.SourceVersion
+	}
+	if req.Case.Context.TemplateVersion > 0 {
+		scoped["template_version"] = req.Case.Context.TemplateVersion
+	}
+	if len(req.Case.Context.TemplateKeys) > 0 {
+		scoped["template_keys"] = req.Case.Context.TemplateKeys
+	}
+	if req.Case.Context.Language != "" {
+		scoped["allowed_languages"] = []string{req.Case.Context.Language}
+	}
 	wire := map[string]any{
-		"request_id":      req.RequestID,
-		"jurisdiction":    jurisdiction,
-		"language":        req.Language,
-		"input":           input,
-		"render":          render,
-		"idempotency_key": "eval-" + req.RequestID,
-		// data_version is NOT in PipelineRequest; the orchestrator
-		// resolves it from the scoped context. The harness
-		// surfaces it as a request-side hint so the server can
-		// fail-fast on stale context.
-		"data_version_hint": req.Case.Context.DataVersion,
-		"source_version":    srcVer,
+		"request_id":     req.RequestID,
+		"scoped_context": scoped,
+		"transcript": map[string]any{
+			"request_id": req.RequestID,
+			"language":   req.Language,
+			"text":       req.Transcript,
+			"state":      "OK",
+		},
+		"max_output_tokens": 256,
+		"deadline_ms":       5000,
 	}
 	body, err := json.Marshal(wire)
 	if err != nil {
@@ -195,7 +211,7 @@ func (p *HTTPProvider) Middle(ctx context.Context, req MiddleRequest) (MiddleOut
 	if err != nil {
 		return MiddleOutcome{}, fmt.Errorf("decode middle json: %w", err)
 	}
-	var out PipelineResponseWire
+	var out MiddleWorkerResponseWire
 	if err := json.Unmarshal(rawBody, &out); err != nil {
 		return MiddleOutcome{}, fmt.Errorf("decode middle json: %w", err)
 	}
@@ -203,84 +219,83 @@ func (p *HTTPProvider) Middle(ctx context.Context, req MiddleRequest) (MiddleOut
 		return MiddleOutcome{}, fmt.Errorf("middle: request_id mismatch got=%q want=%q",
 			out.RequestID, req.RequestID)
 	}
-	// The runner consumes status + intent + actions + speech_key.
-	// The contract returns the validated_proposal; we extract
-	// the typed fields from it.
-	status := string(out.State)
-	intent := ""
-	var actions []string
-	speechKey := ""
-	var clarifyIDs, evidenceIDs []string
-	if out.ValidatedProposal != nil {
-		intent = stringPtr(out.ValidatedProposal.Intent)
-		for _, a := range out.ValidatedProposal.Actions {
-			actions = append(actions, actionToString(a))
-		}
-		speechKey = stringPtr(out.ValidatedProposal.SpeechKey)
-		clarifyIDs = append(clarifyIDs, out.ValidatedProposal.ClarificationIDs...)
-		evidenceIDs = append(evidenceIDs, out.ValidatedProposal.EvidenceIDs...)
+	if out.Proposal.SchemaVersion == "" || out.Proposal.Status == "" {
+		// A 200 whose nested proposal is empty is NOT a success
+		// with nil error (prompt item 5).
+		return MiddleOutcome{}, fmt.Errorf("%w: middle worker returned 200 with empty proposal", ErrMalformedResponse)
 	}
-	// Template speech_key overrides proposal speech_key (matches
-	// orchestrator logic).
-	if out.Template.SpeechKey != "" {
-		speechKey = out.Template.SpeechKey
+	if out.Proposal.RequestID != req.RequestID {
+		return MiddleOutcome{}, fmt.Errorf("middle: proposal request_id mismatch got=%q want=%q",
+			out.Proposal.RequestID, req.RequestID)
+	}
+	status := out.Proposal.Status
+	intent := ""
+	if out.Proposal.Intent != nil {
+		intent = *out.Proposal.Intent
+	}
+	var actions []string
+	for _, a := range out.Proposal.Actions {
+		actions = append(actions, actionToString(a))
+	}
+	speechKey := ""
+	if out.Proposal.SpeechKey != nil {
+		speechKey = *out.Proposal.SpeechKey
 	}
 	return MiddleOutcome{
 		Status:      status,
 		Intent:      intent,
-		Language:    req.Language,
+		Language:    out.Proposal.Language,
 		Actions:     actions,
 		SpeechKey:   speechKey,
-		ClarifyIDs:  clarifyIDs,
-		EvidenceIDs: evidenceIDs,
+		ClarifyIDs:  out.Proposal.ClarificationIDs,
+		EvidenceIDs: out.Proposal.EvidenceIDs,
 	}, nil
 }
 
 // TTS POSTs the typed TTSWorkerRequest envelope (mirrors
-// contracts.TTSWorkerRequest) and decodes the typed
-// TTSWorkerResponse. The runner is forbidden from supplying free
-// text; the speech text is sourced from a validated template via
-// the server-side /api/v3/voice/speech endpoint. The harness
-// supplies only the speech_key, jurisdiction and source_version
-// so the worker renders the approved template text itself.
+// middleworker/ttsworker SynthesizeRequest) to the TTS WORKER's
+// private /synthesize endpoint. This is the worker-conformance
+// boundary: the harness must supply the ACTUAL rendered template
+// text (the worker only synthesizes text it was given) and the
+// real source_version/template_version, and must never invent
+// version 1. The public /api/v3/voice/speech orchestration host is
+// exercised by Worker 1's integrated conformance, not here.
 func (p *HTTPProvider) TTS(ctx context.Context, req TTSRequest) (TTSOutcome, error) {
 	if p.cfg.TTSURL == "" {
 		return TTSOutcome{}, errors.New("HTTP TTS URL not configured")
 	}
-	jurisdiction := req.Case.Context.Jurisdiction
-	if jurisdiction == "" {
-		return TTSOutcome{}, errors.New("tts: jurisdiction required")
+	if req.SpeechKey == "" {
+		return TTSOutcome{}, errors.New("tts: speech_key required")
 	}
-	srcVer := req.SourceVersion
-	if srcVer <= 0 {
-		srcVer = req.Case.Context.SourceVersion
+	if req.Text == "" {
+		return TTSOutcome{}, errors.New("tts: rendered text required (worker synthesizes given text only; never fabricated)")
 	}
-	if srcVer <= 0 {
-		srcVer = 1
+	if req.SourceVersion <= 0 {
+		return TTSOutcome{}, errors.New("tts: source_version required (never invented)")
 	}
-	templateVersion := 1
-	if req.Case.Context.TemplateVersion > 0 {
-		templateVersion = req.Case.Context.TemplateVersion
+	if req.TemplateVersion <= 0 {
+		return TTSOutcome{}, errors.New("tts: template_version required (never invented)")
 	}
-	// The harness does NOT send free text — the speech text is
-	// server-rendered from the approved template. The wire
-	// request sends the speech_key, language, jurisdiction,
-	// source_version, and template_version only.
+	settings := map[string]any{}
+	if req.SampleRate > 0 {
+		settings["sample_rate"] = req.SampleRate
+		settings["bit_depth"] = 16
+		settings["channels"] = 1
+	}
 	wire := map[string]any{
 		"request_id":       req.RequestID,
 		"speech_key":       req.SpeechKey,
 		"language":         req.Language,
-		"text":             "", // server renders; client does not supply free text
-		"source_version":   srcVer,
-		"template_version": templateVersion,
-		"settings": map[string]any{
-			"sample_rate": 22050,
-			"bit_depth":   16,
-			"channels":    1,
-		},
-		"deadline_ms":     5000,
-		"jurisdiction":    jurisdiction,
-		"idempotency_key": "tts-eval-" + req.RequestID,
+		"text":             req.Text,
+		"source_version":   req.SourceVersion,
+		"template_version": req.TemplateVersion,
+		"deadline_ms":      5000,
+	}
+	if req.Voice != "" {
+		wire["voice"] = req.Voice
+	}
+	if len(settings) > 0 {
+		wire["settings"] = settings
 	}
 	body, err := json.Marshal(wire)
 	if err != nil {
@@ -318,17 +333,25 @@ func (p *HTTPProvider) TTS(ctx context.Context, req TTSRequest) (TTSOutcome, err
 		return TTSOutcome{}, fmt.Errorf("tts: request_id mismatch got=%q want=%q",
 			out.RequestID, req.RequestID)
 	}
+	if out.State == "" {
+		return TTSOutcome{}, fmt.Errorf("%w: tts worker returned 200 with empty state", ErrMalformedResponse)
+	}
+	if out.State == "OK" && out.ByteSize <= 0 {
+		return TTSOutcome{}, fmt.Errorf("%w: tts OK without bytes", ErrMalformedResponse)
+	}
 	return TTSOutcome{
-		State:      string(out.State),
+		State:      out.State,
 		SpeechKey:  out.SpeechKey,
 		ByteSize:   int(out.ByteSize),
-		DurationMS: 0, // PipelineAudio carries duration; TTSWorkerResponse doesn't
+		DurationMS: 0, // TTSWorkerResponse carries no duration; PipelineAudio (public host) does
 	}, nil
 }
 
-// --- wire shapes (mirror of contracts/*; eval module is stdlib-only) ---
+// --- wire shapes (mirror of the actual worker servers; eval module
+// is stdlib-only and cannot import the worker packages) ---
 
-// ASRWorkerResponseWire mirrors contracts.ASRWorkerResponse.
+// ASRWorkerResponseWire mirrors the asrworker /transcribe
+// responseJSON (contracts.ASRWorkerResponse).
 type ASRWorkerResponseWire struct {
 	RequestID      string   `json:"request_id"`
 	Language       string   `json:"language"`
@@ -339,33 +362,33 @@ type ASRWorkerResponseWire struct {
 	ArtifactDigest string   `json:"artifact_digest,omitempty"`
 }
 
-// PipelineResponseWire mirrors contracts.PipelineResponse.
-type PipelineResponseWire struct {
-	RequestID         string               `json:"request_id"`
-	DataVersion       string               `json:"data_version"`
-	State             string               `json:"state"`
-	ValidatedProposal *ModelOutputWire     `json:"validated_proposal,omitempty"`
-	Template          PipelineTemplateWire `json:"template"`
-	Audio             *PipelineAudioWire   `json:"audio,omitempty"`
-	StageFailures     []string             `json:"stage_failures,omitempty"`
+// MiddleWorkerResponseWire mirrors middleworker.ResponseEnvelope.
+// The proposal is a NESTED object, not flat top-level fields; the
+// provider decodes out.Proposal.* exactly where the real server
+// puts them.
+type MiddleWorkerResponseWire struct {
+	RequestID     string       `json:"request_id"`
+	DataVersion   string       `json:"data_version"`
+	Proposal      ProposalWire `json:"proposal"`
+	FinishReason  string       `json:"finish_reason,omitempty"`
+	ModelRevision string       `json:"model_revision"`
 }
 
-// ModelOutputWire mirrors contracts.ModelOutput.
-type ModelOutputWire struct {
+// ProposalWire mirrors middleworker.Proposal.
+type ProposalWire struct {
 	SchemaVersion    string       `json:"schema_version"`
 	RequestID        string       `json:"request_id"`
 	DataVersion      string       `json:"data_version"`
 	Status           string       `json:"status"`
-	Intent           *string      `json:"intent,omitempty"`
+	Intent           *string      `json:"intent"`
 	Language         string       `json:"language"`
 	Actions          []ActionWire `json:"actions"`
-	SpeechKey        *string      `json:"speech_key,omitempty"`
+	SpeechKey        *string      `json:"speech_key"`
 	ClarificationIDs []string     `json:"clarification_ids"`
 	EvidenceIDs      []string     `json:"evidence_ids"`
 }
 
-// ActionWire mirrors contracts.Action (loose; the runner only
-// needs the type and target identifiers for accounting).
+// ActionWire mirrors the action variants the worker emits.
 type ActionWire struct {
 	Type      string   `json:"type"`
 	TargetID  string   `json:"target_id,omitempty"`
@@ -377,34 +400,8 @@ type ActionWire struct {
 	Language  string   `json:"language,omitempty"`
 }
 
-// PipelineTemplateWire mirrors contracts.PipelineTemplate.
-type PipelineTemplateWire struct {
-	SpeechKey       string        `json:"speech_key"`
-	TemplateVersion int           `json:"template_version"`
-	Args            []TemplateArg `json:"args,omitempty"`
-}
-
-// TemplateArg mirrors contracts.PipelineTemplateArg.
-type TemplateArg struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
-}
-
-// PipelineAudioWire mirrors contracts.PipelineAudio.
-type PipelineAudioWire struct {
-	AudioID         string `json:"audio_id"`
-	ContentType     string `json:"content_type"`
-	ByteSize        int64  `json:"byte_size"`
-	ChecksumSHA256  string `json:"checksum_sha256"`
-	CacheHit        bool   `json:"cache_hit"`
-	Language        string `json:"language"`
-	ModelRevision   string `json:"model_revision"`
-	VoiceRevision   string `json:"voice_revision"`
-	TemplateVersion int    `json:"template_version"`
-	SourceVersion   int    `json:"source_version"`
-}
-
-// TTSWorkerResponseWire mirrors contracts.TTSWorkerResponse.
+// TTSWorkerResponseWire mirrors the ttsworker /synthesize response
+// (SynthesizeResponse / contracts.TTSWorkerResponse).
 type TTSWorkerResponseWire struct {
 	RequestID      string `json:"request_id"`
 	SpeechKey      string `json:"speech_key"`
@@ -416,6 +413,7 @@ type TTSWorkerResponseWire struct {
 	ModelRevision  string `json:"model_revision,omitempty"`
 	VoiceRevision  string `json:"voice_revision,omitempty"`
 	ByteSize       int64  `json:"byte_size,omitempty"`
+	CacheHit       bool   `json:"cache_hit"`
 }
 
 // --- helpers ---------------------------------------------------------
@@ -450,13 +448,6 @@ func httpStatusError(code int) error {
 func boundedRead(r interface{ Read(p []byte) (int, error) }, max int64) ([]byte, error) {
 	// Use stdlib via io.LimitReader to avoid pulling in extra deps.
 	return ioLimitReaderRead(r, max)
-}
-
-func stringPtr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }
 
 // actionToString serializes an ActionWire to a stable identifier
