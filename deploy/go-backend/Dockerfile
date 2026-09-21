@@ -26,16 +26,21 @@ RUN go mod download
 
 # Cache migrate module downloads. The migrate module is stdlib-only so this
 # step is essentially free, but it keeps the layer-cache pattern uniform.
+# WORKDIR stays at /src/backend during this step but COPY sources are
+# always resolved relative to the build context root, so the paths below
+# land at /src/backend/migrate/{go.mod,cmd/}.
 COPY deploy/go-backend/migrate/go.mod ./migrate/go.mod
 COPY deploy/go-backend/migrate/cmd ./migrate/cmd
 
-WORKDIR /src/migrate
+# Move into the migrate module root for `go mod download`.
+WORKDIR /src/backend/migrate
 RUN go mod download || true
 
-# Copy the source trees for both modules.
+# Copy the source trees for both modules. Resetting WORKDIR to /src first
+# so the COPY destinations are clean.
 WORKDIR /src
 COPY backend/ ./backend/
-COPY deploy/go-backend/migrate/ ./migrate/
+COPY deploy/go-backend/migrate/ ./backend/migrate/
 
 # Build both binaries.
 #   sthira      — API server, owned by Worker 1
@@ -48,13 +53,11 @@ ENV CGO_ENABLED=0 GOOS=linux GOFLAGS=-mod=readonly
 # `-trimpath` removes absolute paths from the binary so a leaked stacktrace
 # never reveals build-host layout. `-ldflags="-s -w"` strips DWARF for a
 # smaller image; debugging symbols are not needed inside the runtime image.
-RUN go build -trimpath -ldflags="-s -w" -o /out/sthira ./cmd/sthira
-
-WORKDIR /src/migrate
-RUN CGO_ENABLED=0 GOOS=linux GOFLAGS=-mod=mod \
-    go build -trimpath -ldflags="-s -w" -o /out/sthmigrate ./cmd/sthmigrate \
+RUN go build -trimpath -ldflags="-s -w" -o /out/sthira ./cmd/sthira \
  && CGO_ENABLED=0 GOOS=linux GOFLAGS=-mod=mod \
-    go build -trimpath -ldflags="-s -w" -o /out/pgdsn-env ./cmd/pgdsn-env
+    go build -trimpath -ldflags="-s -w" -o /out/sthmigrate ./migrate/cmd/sthmigrate \
+ && CGO_ENABLED=0 GOOS=linux GOFLAGS=-mod=mod \
+    go build -trimpath -ldflags="-s -w" -o /out/pgdsn-env ./migrate/cmd/pgdsn-env
 
 # ---- runtime stage --------------------------------------------------------
 # Distroless base: minimal Debian userland, no shell, no package manager.
