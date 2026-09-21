@@ -1,0 +1,9 @@
+{
+  "_comment": "DRAFT input index. Map scenario_id -> workspace-relative package path. Use --exercise-clock to anchor the run.",
+  "catalogue": "catalogue.json",
+  "scenarios": {
+    "REPLACE_ME_SCENARIO_ID": "REPLACE_ME_PACKAGE_REL_PATH"
+  },
+  "exercise_clock": "REPLACE_ME_RFC3339",
+  "notes": "DRAFT; replace before validate."
+}

@@ -1,0 +1,21 @@
+{
+  "_comment": "DRAFT operational-package skeleton. opkg.Validate requires a checksum; the tool will refuse to run on placeholder data. REPLACE_ME values fail validation.",
+  "provenance": {
+    "dataset_id": "REPLACE_ME_DATASET_ID",
+    "evidence_class": "SYNTHETIC_DEMO",
+    "version": 1,
+    "jurisdiction": "REPLACE_ME_STATE_CODE",
+    "authority": "REPLACE_ME_AUTHORITY",
+    "effective_at": "REPLACE_ME_RFC3339",
+    "expires_at": "REPLACE_ME_RFC3339",
+    "checksum_sha256": "REPLACE_ME_HEX_64"
+  },
+  "alert": { "identifier": "REPLACE_ME_ALERT_ID" },
+  "red_zones": [],
+  "safe_zones": [],
+  "approved_routes": [],
+  "instruction_assets": [],
+  "facilities": [],
+  "allocation_policy": { "order": [] },
+  "emergency_contacts": []
+}

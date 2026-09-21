@@ -1,0 +1,92 @@
+{
+  "provenance": {
+    "dataset_id": "PKG-EX-SYNTH-1",
+    "evidence_class": "SYNTHETIC_DEMO",
+    "version": 1,
+    "jurisdiction": "EX",
+    "authority": "example.synthetic.ddma",
+    "effective_at": "2026-09-12T04:00:00Z",
+    "expires_at": "2026-09-13T04:00:00Z",
+    "checksum_sha256": "182a6d73e1250562addfbb9a454ce2d503bd904452431a8690b28ae045330b8c"
+  },
+  "alert": {
+    "identifier": "ALERT-EX-SYNTH-1"
+  },
+  "red_zones": [
+    {
+      "id": "RZ-EX-01"
+    }
+  ],
+  "safe_zones": [
+    {
+      "id": "SZ-EX-01",
+      "capacity": 100,
+      "location": [
+        76.5,
+        11.5
+      ],
+      "status": "OPEN"
+    },
+    {
+      "id": "SZ-EX-02",
+      "capacity": 50,
+      "location": [
+        76.6,
+        11.6
+      ],
+      "status": "OPEN"
+    }
+  ],
+  "approved_routes": [
+    {
+      "id": "RT-EX-01",
+      "from_zone_id": "RZ-EX-01",
+      "to_safe_zone_id": "SZ-EX-01",
+      "approval": "SYNTHETIC_DEMO",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.0,
+            11.4
+          ],
+          [
+            76.5,
+            11.5
+          ]
+        ]
+      },
+      "mode": "FOOT"
+    }
+  ],
+  "instruction_assets": [
+    {
+      "id": "INS-EX-EN",
+      "language": "en-IN"
+    },
+    {
+      "id": "INS-EX-LOCAL",
+      "language": "ex-IN"
+    }
+  ],
+  "facilities": [
+    {
+      "id": "FAC-EX-01",
+      "safe_zone_id": "SZ-EX-01"
+    }
+  ],
+  "allocation_policy": {
+    "order": [
+      "SZ-EX-01",
+      "SZ-EX-02"
+    ],
+    "reservation_expiry_seconds": 600,
+    "allow_walk_ins": true
+  },
+  "emergency_contacts": [
+    {
+      "name": "Synthetic Operations",
+      "number": "112"
+    }
+  ]
+}
