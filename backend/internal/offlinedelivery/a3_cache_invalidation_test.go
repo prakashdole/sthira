@@ -303,7 +303,7 @@ func (l *localPublicationSource) readerFor(r *store.PublishedResource) *readerCl
 // lifecycleBus fans events out to subscribers (in production: a real
 // bus that crosses instances; here an in-process channel for tests).
 type lifecycleBus struct {
-	mu  sync.Mutex
+	mu   sync.Mutex
 	subs []offlinedelivery.PublicationLifecycleObserver
 }
 

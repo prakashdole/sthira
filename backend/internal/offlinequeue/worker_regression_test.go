@@ -688,4 +688,3 @@ func TestValidateSuccessEnvelope_StayEventsBindingAndTransfer(t *testing.T) {
 		t.Fatalf("expected valid arrive accepted, got %s", reason)
 	}
 }
-

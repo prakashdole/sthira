@@ -552,11 +552,11 @@ func isPermanentCode(code string) bool {
 //   - body must contain a `data` field that is a non-null JSON object;
 //   - method must be POST;
 //   - endpoint must be strictly allowlisted:
-//     * POST /api/v3/reservations: data must include reservation_id AND stay_id;
-//     * POST /api/v3/reservations/{stay_id}/events: data must include stay_id
-//       matching path, recognized type (ARRIVE|CANCEL|DEPART|EXTEND|TRANSFER),
-//       response stay_id and type bound to submitted payload, and TRANSFER requires
-//       both new_stay_id and new_reservation_id.
+//   - POST /api/v3/reservations: data must include reservation_id AND stay_id;
+//   - POST /api/v3/reservations/{stay_id}/events: data must include stay_id
+//     matching path, recognized type (ARRIVE|CANCEL|DEPART|EXTEND|TRANSFER),
+//     response stay_id and type bound to submitted payload, and TRANSFER requires
+//     both new_stay_id and new_reservation_id.
 //   - Any unknown endpoint is rejected.
 func validateSuccessEnvelope(method, path string, status int, body, payload []byte) (ok bool, code, reason string) {
 	if status != http.StatusOK && status != http.StatusCreated {

@@ -237,8 +237,8 @@ func (o *Orchestrator) Process(ctx context.Context, req contracts.PipelineReques
 	}
 
 	// 8. STAGE: TTS (optional). Render only when the proposal has a
-// speech_key AND the caller asked for render=tts. Silent actions
-// (RECENTER, FOCUS_PLACE without speech_key) NEVER call TTS.
+	// speech_key AND the caller asked for render=tts. Silent actions
+	// (RECENTER, FOCUS_PLACE without speech_key) NEVER call TTS.
 	var audio *contracts.PipelineAudio
 	if req.Render.Kind == contracts.PipelineRenderTTS && tplOut.Text != "" {
 		audioOut, err := o.stageTTS(runCtx, id, scoped, tplOut, req.Language, middleResp.ModelRevision)

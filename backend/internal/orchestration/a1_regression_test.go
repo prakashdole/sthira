@@ -377,8 +377,8 @@ func TestA1_NonOKStatusWithActionRejected(t *testing.T) {
 				Status:        contracts.StatusUnsupported,
 				Language:      "en-IN",
 				// Non-OK carrying actions is forbidden — defensively meaningless.
-				Actions:       []contracts.Action{{Type: contracts.ActionRecenter}},
-				Intent:        nil,
+				Actions:          []contracts.Action{{Type: contracts.ActionRecenter}},
+				Intent:           nil,
 				ClarificationIDs: nil,
 			},
 		}, nil
@@ -723,10 +723,10 @@ func TestA1_HTTPWorkerClientConcurrently(t *testing.T) {
 			defer wg.Done()
 			rid := fmt.Sprintf("req-%d", i)
 			resp, err := c.Transcribe(context.Background(), contracts.ASRWorkerRequest{
-				RequestID:    rid,
-				Language:     "en-IN",
-				ContentType:  "audio/wav",
-				AudioB64:     base64.StdEncoding.EncodeToString([]byte("a")),
+				RequestID:   rid,
+				Language:    "en-IN",
+				ContentType: "audio/wav",
+				AudioB64:    base64.StdEncoding.EncodeToString([]byte("a")),
 			})
 			if err != nil {
 				errs <- err
