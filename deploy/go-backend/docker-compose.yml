@@ -1,0 +1,128 @@
+# Go backend + PostgreSQL deployment package owned by deploy/go-backend/.
+#
+# Project scope: a single-host, local/staging bring-up of the bounded /api/v3
+# backend with a durable PostGIS store. Distinct from
+# deploy/docker-compose.demo.yml (Python demo) and from
+# backend/deploy/recovery/compose.recovery.yml (P7 rehearsal). Neither of
+# those is edited by this package.
+#
+# Operational rules honoured here:
+#   - The API is the only service published to the host loopback. PostgreSQL
+#     and any future model worker port stay on the internal network.
+#   - All resource names carry the project prefix so this stack never collides
+#     with another compose project or with the recovery/demo stacks.
+#   - Bounded resources (CPUs, memory, PIDs) prevent a runaway replica from
+#     starving the host.
+#   - Migrations are *not* applied automatically on API startup. The package's
+#     explicit `scripts/go-migrate.sh` runs them once.
+
+name: sthira-go
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    container_name: sthira-go-postgres
+    # No `ports:` section — PostgreSQL stays on the internal network. The
+    # API talks to it over `postgres:5432` inside the compose network.
+    networks:
+      - sthira-go-backend
+    environment:
+      POSTGRES_USER: ${STHIRA_PG_USER:?STHIRA_PG_USER is required}
+      POSTGRES_PASSWORD: ${STHIRA_PG_PASSWORD:?STHIRA_PG_PASSWORD is required}
+      POSTGRES_DB: ${STHIRA_PG_DATABASE:?STHIRA_PG_DATABASE is required}
+      # pg_isready returns "PONG" within ~1s when ready. Distroless base
+      # cannot run pg_isready, so we delegate the API healthcheck to it
+      # instead.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    # Bounded resource envelope; tune via overrides for staging.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1Gi
+        reservations:
+          cpus: "0.25"
+          memory: 256Mi
+    security_opt:
+      - no-new-privileges:true
+    # Read-only root filesystem is left default-rw because Postgres writes
+    # its own runtime files; protect only the API side instead.
+
+  api:
+    image: ${STHIRA_DEPLOY_IMAGE:-sthira-go-backend:local}
+    container_name: sthira-go-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sthira-go-backend
+    # Publish only on the loopback interface. PostgreSQL is not published.
+    ports:
+      - target: 8080
+        published: "127.0.0.1:${STHIRA_API_HOST_PORT:-8080}"
+        protocol: tcp
+        mode: host
+    environment:
+      STHIRA_ADDR: 127.0.0.1:8080
+      STHIRA_DATABASE_DSN: ${STHIRA_DATABASE_DSN}
+      # Optional external worker URLs. When *all three* are set the API
+      # wires its voice orchestrator; otherwise voice stays unavailable
+      # (the server reports 503, which is the documented fail-closed
+      # posture). The deploy/go-backend package does not bundle ASR/middle/
+      # TTS workers, model weights, or attempt to verify their contracts;
+      # those are owned by Worker 2 (plan/next-two-worker-2.md).
+      STHIRA_ASR_URL: ${STHIRA_ASR_URL:-}
+      STHIRA_ASR_TOKEN: ${STHIRA_ASR_TOKEN:-}
+      STHIRA_MIDDLE_URL: ${STHIRA_MIDDLE_URL:-}
+      STHIRA_MIDDLE_TOKEN: ${STHIRA_MIDDLE_TOKEN:-}
+      STHIRA_TTS_URL: ${STHIRA_TTS_URL:-}
+      STHIRA_TTS_TOKEN: ${STHIRA_TTS_TOKEN:-}
+    healthcheck:
+      # Distroless runtime has no shell/curl/wget, so Docker cannot run an
+      # in-container HTTP probe. The package's `go-status.sh` instead probes
+      # /health/live and /health/ready from the host loopback. Compose's
+      # `depends_on: condition: service_healthy` would only meaningfully use
+      # this for postgres-to-api ordering, which we intentionally do not
+      # enforce: the API process tolerates DB outages (readiness flips),
+      # and the migrate runner has its own dependency check on postgres.
+      disable: true
+    # Bounded resource envelope.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 768Mi
+        reservations:
+          cpus: "0.25"
+          memory: 128Mi
+    security_opt:
+      - no-new-privileges:true
+    # Read-only root filesystem; writable only the small /tmp scratch for
+    # any tool that needs it.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64Mi
+
+networks:
+  sthira-go-backend:
+    driver: bridge
+    internal: false
+    # Internal-only would prevent the API from reaching optional external
+    # worker URLs (e.g. STHIRA_ASR_URL). We leave `internal: false` so the
+    # API can reach those worker endpoints when configured, but PostgreSQL
+    # has no published port so the only ingress remains the loopback API.
+
+volumes:
+  pgdata:
+    name: sthira-go-pgdata
