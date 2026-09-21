@@ -1,0 +1,26 @@
+{
+  "_doc": "Outside-repo CONSENTED-case manifest. Keep personal audio out of Git. Each entry maps a CONSENTED case to the path its audio lives at, with the sha256 digest. Until O03/O11 resolve, this file does not exist — the runner just runs the synthetic suite.",
+  "cases": [
+    {
+      "case_id": "real.placeholder.001",
+      "audio_path": "/outside-repo/consented/audio/real.placeholder.001.wav",
+      "audio_digest": "sha256:REPLACE_WITH_REAL_SHA256",
+      "language": "ml-IN",
+      "category": "NEAREST_ROUTE",
+      "provenance": {
+        "kind": "CONSENTED",
+        "source": "REPLACE_WITH_AGENCY",
+        "license": "REPLACE_WITH_SPDX",
+        "consent_id": "REPLACE_WITH_CONSENT",
+        "recorded_at": "REPLACE_WITH_ISO8601",
+        "notes": "Placeholder — replace before any real run."
+      },
+      "expected": {
+        "outcome": "OK",
+        "intents": ["LIST_DESTINATIONS"],
+        "evidence_ids": ["FACILITY-PLACEHOLDER-1"],
+        "latency_budget_ms": 1500
+      }
+    }
+  ]
+}
