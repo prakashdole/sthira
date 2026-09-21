@@ -48,11 +48,13 @@ repeated full test suite, per the lane instructions.
 
 ## New commits (local, not pushed)
 
-After this worktree completes the local stages, Worker 1 will be given
-the ordered SHA list for cherry-pick integration onto its
-`codex/backend-authority-closure` branch. The committed stages are:
+| Stage | SHA | Description |
+| --- | --- | --- |
+| 1 | `cf5947fbb2b091f14efd250b9d7a85563e5d12fc` | initial CLI + internal/scenarioprep + example workspace + docs |
 
-(stage SHAs are populated below after each `git commit`)
+Worker 1 should cherry-pick these onto its
+`codex/backend-authority-closure` branch. No shared contract changes
+are required.
 
 ## API gap report
 
