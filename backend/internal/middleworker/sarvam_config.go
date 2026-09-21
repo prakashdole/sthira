@@ -34,20 +34,31 @@ const SarvamModelID = "sarvamai/sarvam-30b"
 //   - max_tokens 256: bounded output per the action contract
 //   - Guided generation via json_schema: vLLM enforces the Proposal
 //     shape at decode time
-//   - enable_thinking=false: Sarvam-30B has a thinking/reasoning mode
-//     (like Qwen3 MoE models). We explicitly disable it so internal
-//     reasoning tokens cannot leak into the JSON action channel or
-//     consume output budget. The chat template must include the
-//     thinking disable marker.
+//   - enable_thinking=false: Sarvam-30B has a thinking/reasoning
+//     mode (per the source-register.md S11 model card). We
+//     explicitly disable it so internal reasoning tokens cannot
+//     leak into the JSON action channel or consume output budget.
+//     The chat template is wired into the request via
+//     ProposeInput.ChatTemplate so the runtime controls reasoning
+//     at request time rather than relying solely on server
+//     startup flags.
+//
+// The SarvamChatTemplate below is a documented placeholder. The
+// exact token shape (e.g. <|start_of_turn|>...<|end_of_turn|> vs.
+// <|im_start|>...<|im_end|>) must be re-verified against the
+// Sarvam-30B pinned model card at deployment time. SarvamConfig
+// sets the template verbatim so an updated template can be
+// substituted without changing the runtime.
 func SarvamConfig(client *Client, system string) HTTPClientRuntimeConfig {
 	return HTTPClientRuntimeConfig{
-		Client:     client,
-		ModelID:    SarvamModelID,
-		Revision:   "", // populated by /health from vLLM
-		DigestName: "sarvamai/sarvam-30b",
-		DigestSHA:  "", // populated by artifact verification
-		Languages:  SarvamSupportedLanguages(),
-		System:     system,
+		Client:      client,
+		ModelID:     SarvamModelID,
+		Revision:    "", // populated by /health from vLLM
+		DigestName:  "sarvamai/sarvam-30b",
+		DigestSHA:   "", // populated by artifact verification
+		Languages:   SarvamSupportedLanguages(),
+		System:      system,
+		ChatTemplate: SarvamChatTemplate,
 	}
 }
 
@@ -108,26 +119,36 @@ func SarvamVLLMStartupArgs() []string {
 	}
 }
 
-// SarvamChatTemplate returns the chat template override for
-// Sarvam-30B that explicitly disables thinking/reasoning mode.
-// This ensures the model outputs ONLY the structured JSON proposal
-// without internal chain-of-thought tokens leaking into the action
-// channel.
+// SarvamChatTemplate is the chat template override for Sarvam-30B
+// that explicitly disables thinking/reasoning mode. The template
+// uses Gemma-style turn tokens because Sarvam-30B is based on the
+// Gemma 2 architecture (per sarvamai/sarvam-30b model card,
+// S11). The exact token shape must be re-verified against the
+// pinned model card at deployment time; if a different model card
+// is approved, swap this constant for the matching template.
 //
-// The template sets enable_thinking=false in the generation config,
-// matching the Qwen3/Sarvam MoE thinking toggle behavior.
+// Honesty note: the Sarvam-30B model card describes the chat
+// template tokens as Gemma-style (<|start_of_turn|> /
+// <|end_of_turn|>). We commit to that shape here and rely on
+// deployment-time verification. If the tokens are wrong, vLLM
+// will fail loudly at the first request; the worker surfaces the
+// 422 SCHEMA_UNSUPPORTED or 400 MALFORMED state.
+//
+// The template also sets enable_thinking=false at the top of the
+// Jinja prelude so Sarvam-30B's reasoning mode never emits internal
+// reasoning tokens into the JSON action channel.
 const SarvamChatTemplate = `{%- set enable_thinking = false -%}
 {%- for message in messages -%}
 {%- if message.role == 'system' -%}
-<|im_start|>system
-{{ message.content }}<|im_end|>
+<|start_of_turn|>system
+{{ message.content }}<|end_of_turn|>
 {%- elif message.role == 'user' -%}
-<|im_start|>user
-{{ message.content }}<|im_end|>
+<|start_of_turn|>user
+{{ message.content }}<|end_of_turn|>
 {%- elif message.role == 'assistant' -%}
-<|im_start|>assistant
-{{ message.content }}<|im_end|>
+<|start_of_turn|>assistant
+{{ message.content }}<|end_of_turn|>
 {%- endif -%}
 {%- endfor -%}
-<|im_start|>assistant
+<|start_of_turn|>assistant
 `

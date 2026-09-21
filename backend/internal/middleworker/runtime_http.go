@@ -16,13 +16,14 @@ import (
 // load the model or perform real inference; the actual weights live
 // in the private vLLM process the Client calls.
 type HTTPClientRuntime struct {
-	client     *Client
-	modelID    string
-	revision   string
-	digestName string
-	digestSHA  string
-	langs      []string
-	system     string
+	client      *Client
+	modelID     string
+	revision    string
+	digestName  string
+	digestSHA   string
+	langs       []string
+	system      string
+	chatTpl     string // optional per-request template override (Sarvam enable_thinking=false)
 }
 
 // HTTPClientRuntimeConfig bundles construction. The model_id is the
@@ -30,13 +31,14 @@ type HTTPClientRuntime struct {
 // recorded for /health. system is the pinned voice-map-system-prompt
 // (see plan/voice-map-system-prompt.md).
 type HTTPClientRuntimeConfig struct {
-	Client     *Client
-	ModelID    string
-	Revision   string
-	DigestName string
-	DigestSHA  string
-	Languages  []string
-	System     string
+	Client      *Client
+	ModelID     string
+	Revision    string
+	DigestName  string
+	DigestSHA   string
+	Languages   []string
+	System      string
+	ChatTemplate string // optional per-request override (e.g. SarvamChatTemplate)
 }
 
 // NewHTTPClientRuntime validates the config and returns a runtime.
@@ -53,13 +55,14 @@ func NewHTTPClientRuntime(cfg HTTPClientRuntimeConfig) (*HTTPClientRuntime, erro
 		return nil, errors.New("http client runtime: System prompt required")
 	}
 	return &HTTPClientRuntime{
-		client:     cfg.Client,
-		modelID:    cfg.ModelID,
-		revision:   cfg.Revision,
-		digestName: cfg.DigestName,
-		digestSHA:  cfg.DigestSHA,
-		langs:      append([]string(nil), cfg.Languages...),
-		system:     cfg.System,
+		client:      cfg.Client,
+		modelID:     cfg.ModelID,
+		revision:    cfg.Revision,
+		digestName:  cfg.DigestName,
+		digestSHA:   cfg.DigestSHA,
+		langs:       append([]string(nil), cfg.Languages...),
+		system:      cfg.System,
+		chatTpl:     cfg.ChatTemplate,
 	}, nil
 }
 
@@ -84,6 +87,7 @@ func (h *HTTPClientRuntime) Propose(ctx context.Context, req RequestEnvelope) (*
 		RequestID:    req.RequestID,
 		SystemPrompt: h.system,
 		UserPayload:  payload,
+		ChatTemplate: h.chatTpl,
 	})
 }
 

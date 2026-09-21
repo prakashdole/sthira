@@ -163,43 +163,116 @@ type QueueStats struct {
 	MaxConcurrency int `json:"max_concurrency"`
 }
 
-// Health returns a snapshot for the /health envelope.
+// Health returns a snapshot for the /health envelope. The shape
+// mirrors contracts.WorkerHealth: the orchestrator reads it via
+// the same JSON field names regardless of which worker responded.
+type WorkerHealth struct {
+	Ready              bool           `json:"ready"`
+	Warm               bool           `json:"warm"`
+	Models             []ModelInfo    `json:"models"`
+	Artifacts          []ArtifactInfo `json:"artifacts"`
+	SupportedLanguages []string       `json:"supported_languages"`
+	Queue              QueueStats     `json:"queue"`
+	StartedAt          string         `json:"started_at,omitempty"`
+	BuildRevision      string         `json:"build_revision,omitempty"`
+	// Internal diagnostics — the orchestrator does not depend on
+	// these fields; they are surfaced for incident triage.
+	RuntimeRevision      string          `json:"runtime_revision,omitempty"`
+	RuntimeVoices        []VoiceInfo     `json:"runtime_voices,omitempty"`
+	CurrentSourceVersion int             `json:"current_source_version,omitempty"`
+	Inventory            Inventory       `json:"inventory,omitempty"`
+	Metrics              MetricsSnapshot `json:"metrics,omitempty"`
+}
+
+// ModelInfo is the worker-side mirror of contracts.ModelInfo.
+type ModelInfo struct {
+	ModelID        string `json:"model_id"`
+	Revision       string `json:"revision"`
+	ChecksumSHA256 string `json:"checksum_sha256,omitempty"`
+	License        string `json:"license,omitempty"`
+	Runtime        string `json:"runtime,omitempty"`
+	Hardware       string `json:"hardware,omitempty"`
+	RemoteCode     bool   `json:"remote_code"`
+}
+
+// ArtifactInfo is the worker-side mirror of contracts.ArtifactDigest.
+type ArtifactInfo struct {
+	Name           string `json:"name"`
+	Path           string `json:"path"`
+	ChecksumSHA256 string `json:"checksum_sha256"`
+	License        string `json:"license,omitempty"`
+}
+
+// Health returns a snapshot for the /health envelope. Field
+// names match contracts.WorkerHealth so the orchestrator
+// decodes the same way for ASR/middle/TTS.
 func (w *Worker) Health() WorkerHealth {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	langs := append([]string(nil), w.runtime.Languages()...)
+	rev := w.runtime.Revision()
+	dname, dsha := runtimeDigest(w.runtime)
+	// Models: the worker holds one model at a time.
+	var models []ModelInfo
+	if rev != "" || dname != "" {
+		models = []ModelInfo{{
+			ModelID:        "ai4bharat/indic-parler-tts",
+			Revision:       rev,
+			ChecksumSHA256: dsha,
+			License:        "LicensePending",
+			Runtime:        "transformers-pinned",
+			Hardware:       "private-loopback",
+			RemoteCode:     false,
+		}}
+	}
+	var artifacts []ArtifactInfo
+	if dname != "" {
+		artifacts = []ArtifactInfo{{
+			Name:           dname,
+			Path:           dname,
+			ChecksumSHA256: dsha,
+			License:        "LicensePending",
+		}}
+	}
 	return WorkerHealth{
 		Ready:                w.ready.Load(),
 		Warm:                 w.warm.Load(),
+		Models:               models,
+		Artifacts:            artifacts,
 		SupportedLanguages:   langs,
 		Queue: QueueStats{
 			Depth:          len(w.queue),
 			MaxDepth:       cap(w.queue),
 			MaxConcurrency: w.concurrencyBound(),
 		},
-		Inventory:            w.inventory,
-		RuntimeRevision:      w.runtime.Revision(),
-		RuntimeLanguages:     langs,
+		StartedAt:            w.startedAt.Format(time.RFC3339Nano),
+		BuildRevision:        buildRevision,
+		RuntimeRevision:      rev,
 		RuntimeVoices:        append([]VoiceInfo(nil), w.runtime.Voices()...),
 		CurrentSourceVersion: w.clock.Current(),
+		Inventory:            w.inventory,
 		Metrics:              w.snapshotLocked(),
 	}
 }
 
-// WorkerHealth is the worker's /health response. Mirrors the
-// contracts.WorkerHealth surface for the orchestrator.
-type WorkerHealth struct {
-	Ready                bool            `json:"ready"`
-	Warm                 bool            `json:"warm"`
-	SupportedLanguages   []string        `json:"supported_languages"`
-	Queue                QueueStats      `json:"queue"`
-	Inventory            Inventory       `json:"inventory"`
-	RuntimeRevision      string          `json:"runtime_revision"`
-	RuntimeLanguages     []string        `json:"runtime_languages"`
-	RuntimeVoices        []VoiceInfo     `json:"runtime_voices"`
-	CurrentSourceVersion int             `json:"current_source_version"`
-	Metrics              MetricsSnapshot `json:"metrics"`
+// runtimeDigest returns the runtime's artifact digest in the
+// (name, sha256) form the contracts.WorkerHealth expects.
+// Returns empty strings when the runtime is the stub.
+func runtimeDigest(r Runtime) (string, string) {
+	if d, ok := r.(DigestProvider); ok {
+		return d.Digest()
+	}
+	return "", ""
 }
+
+// DigestProvider is implemented by runtimes that expose an
+// artifact digest for /health. Optional; missing it leaves
+// the Models/Artifacts fields empty.
+type DigestProvider interface {
+	Digest() (name, sha256 string)
+}
+
+const buildRevision = "ttsworker-b4-corrections"
 
 // Metrics returns the cumulative counter snapshot.
 func (w *Worker) Metrics() MetricsSnapshot {
