@@ -391,8 +391,10 @@ func (s *Server) handleTranscribe(w http.ResponseWriter, r *http.Request) {
 		writeTypedError(w, req.RequestID, req.Language, "audio_b64 empty")
 		return
 	}
-	// Decode + resample + bound.
-	decoded, err := DecodeWAV(audio, req.ContentType, s.DefaultDecodeLimits)
+	// Decode + resample + bound. DecodeAudio dispatches to
+	// DecodeCompressed (ffmpeg subprocess) for Ogg/Opus/WebM inputs
+	// and to DecodeWAV for WAV input.
+	decoded, err := DecodeAudio(audio, req.ContentType, s.DefaultDecodeLimits)
 	if err != nil {
 		state := stateFromDecodeError(err)
 		writeTypedASRResponse(w, responseJSON{

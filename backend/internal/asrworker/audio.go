@@ -111,7 +111,7 @@ func (e *DecodeError) Unwrap() error { return e.Cause }
 //   - errors.Is(err, ErrUnsupportedCodec) when content_type is not in
 //     WorkerSupportedContentTypes.
 func DecodeWAV(audioBytes []byte, contentType string, limits AudioDecodeLimits) (*AudioDecodeResult, error) {
-	if !isWorkerSupportedCodec(contentType) {
+	if contentType != "audio/wav" {
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedCodec, contentType)
 	}
 	if int64(len(audioBytes)) > limits.CompressedBytes {

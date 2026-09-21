@@ -1,9 +1,13 @@
 package asrworker
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -220,11 +224,11 @@ type SubprocessRuntimeConfig struct {
 	ExtraEnv []string
 }
 
-// DefaultSubprocessRuntimeConfig targets the existing reference
-// Python module src/sthira_v2/speech_stt.py.
+// DefaultSubprocessRuntimeConfig targets the JSONL adapter module
+// src/sthira_v2/speech_asr_adapter.py.
 func DefaultSubprocessRuntimeConfig() SubprocessRuntimeConfig {
 	return SubprocessRuntimeConfig{
-		Module: "sthira_v2.speech_stt",
+		Module: "sthira_v2.speech_asr_adapter",
 		Cmd:    "python3",
 	}
 }
@@ -252,18 +256,24 @@ func DefaultSubprocessRuntimeConfig() SubprocessRuntimeConfig {
 // check; the worker will not silently fall back to a canned
 // transcript.
 type SubprocessRuntime struct {
-	cfg      SubprocessRuntimeConfig
-	closed   bool
-	mu       sync.Mutex
-	revision string
-	digest   string
+	cfg        SubprocessRuntimeConfig
+	closed     bool
+	mu         sync.Mutex
+	revision   string
+	digest     string
+	digestName string
+	languages  []string
+	// Subprocess state — nil until LoadModel succeeds.
+	proc    *exec.Cmd
+	stdin   io.WriteCloser
+	scanner *bufio.Scanner
 }
 
 // NewSubprocessRuntime returns the structural stub. Constructing it
-// does NOT spawn anything; the subprocess only spawns on the first
-// Transcribe call. Currently the first call returns
-// ErrRuntimeUnavailable so the worker surfaces UNAVAILABLE to the
-// caller without ever invoking real inference.
+// does NOT spawn anything; the subprocess spawns on LoadModel().
+// Until then, Transcribe returns ErrRuntimeUnavailable so the worker
+// surfaces UNAVAILABLE to the caller without ever invoking real
+// inference.
 func NewSubprocessRuntime(cfg SubprocessRuntimeConfig) *SubprocessRuntime {
 	return &SubprocessRuntime{
 		cfg:      cfg,
@@ -272,40 +282,65 @@ func NewSubprocessRuntime(cfg SubprocessRuntimeConfig) *SubprocessRuntime {
 	}
 }
 
-// Transcribe implements Runtime. Returns ErrRuntimeUnavailable
-// until a real adapter is wired in.
+// Transcribe implements Runtime. Dispatches to the loaded Python
+// adapter when available; returns ErrRuntimeUnavailable otherwise.
 func (s *SubprocessRuntime) Transcribe(ctx context.Context, req TranscribeRequest) (TranscribeResult, error) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return TranscribeResult{}, ErrRuntimeClosed
 	}
+	loaded := s.proc != nil
 	s.mu.Unlock()
-	// The real implementation is deliberately out of scope until
-	// model artifacts are available. Returning a typed
-	// UNAVAILABLE state is the honest "blocked real-inference"
-	// signal the worker prompt asks for: never a canned transcript.
-	return TranscribeResult{}, fmt.Errorf("%w: subprocess runtime not wired in this revision", ErrRuntimeUnavailable)
+
+	if loaded {
+		return s.transcribeViaAdapter(ctx, req)
+	}
+	return TranscribeResult{}, fmt.Errorf("%w: subprocess runtime not loaded; call LoadModel first", ErrRuntimeUnavailable)
 }
 
-// SupportedLanguages implements Runtime. Reported as empty so the
-// orchestrator knows no language is configured; this is the only
-// honest answer while the real adapter is unwired.
+// SupportedLanguages implements Runtime. Returns the languages
+// reported by the Python adapter after LoadModel, or nil if not
+// loaded.
 func (s *SubprocessRuntime) SupportedLanguages() []string {
-	return nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.languages...)
 }
 
-// Revision implements Runtime. Empty (no model loaded).
-func (s *SubprocessRuntime) Revision() string { return s.revision }
+// Revision implements Runtime. Empty until LoadModel populates it.
+func (s *SubprocessRuntime) Revision() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.revision
+}
 
-// Digest implements Runtime. Empty (no model loaded).
-func (s *SubprocessRuntime) Digest() (string, string) { return "", "" }
+// Digest implements Runtime. Empty until LoadModel populates it.
+func (s *SubprocessRuntime) Digest() (string, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.digestName, s.digest
+}
 
-// Close implements Runtime.
+// Close implements Runtime. Sends shutdown to the subprocess if
+// loaded, then kills the process.
 func (s *SubprocessRuntime) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed = true
+	if s.stdin != nil {
+		// Best-effort shutdown command.
+		shutReq, _ := json.Marshal(adapterRequest{Op: "shutdown"})
+		shutReq = append(shutReq, '\n')
+		_, _ = s.stdin.Write(shutReq)
+		_ = s.stdin.Close()
+		s.stdin = nil
+	}
+	if s.proc != nil && s.proc.Process != nil {
+		_ = s.proc.Process.Kill()
+		_ = s.proc.Wait()
+		s.proc = nil
+	}
 	return nil
 }
 

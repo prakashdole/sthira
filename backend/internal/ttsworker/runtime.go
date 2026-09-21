@@ -56,6 +56,10 @@ type SynthResult struct {
 	// Empty means the runtime did not produce output. The worker
 	// surfaces this as AUDIO_UNAVAILABLE without faking audio.
 	Empty bool
+	// WavBytes holds the raw WAV audio produced by the adapter.
+	// Non-nil only when Empty==false and the adapter returned real
+	// audio. The worker validates and hashes these bytes.
+	WavBytes []byte
 }
 
 // Errors the runtime returns. Each maps to a TTSState in the worker.
