@@ -169,8 +169,8 @@ COMMIT;
 	srcIDEM := strings.TrimSpace(mustQuery(t, env, srcDB, "SELECT state FROM idempotency_keys WHERE idem_key='"+runID+"-K'"))
 	srcReserved := strings.TrimSpace(mustQuery(t, env, srcDB, "SELECT reserved FROM facility_inventory WHERE facility_id='"+runID+"-F'"))
 	srcHead := strings.TrimSpace(mustQuery(t, env, srcDB, "SELECT event_hash FROM audit_events ORDER BY event_seq DESC LIMIT 1"))
-	if srcRev != "6" {
-		t.Fatalf("schema_revision = %q, want 6 (binary SchemaRevision constant)", srcRev)
+	if srcRev != "7" {
+		t.Fatalf("schema_revision = %q, want 7 (binary SchemaRevision constant)", srcRev)
 	}
 
 	// pg_dump -Fc -> SHA-256 -> restore into fresh DB.
