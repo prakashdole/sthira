@@ -1,0 +1,37 @@
+{
+  "catalogue_version": 1,
+  "historical_events": [
+    {
+      "event_id": "EV-EXAMPLE-2018",
+      "state": "EX",
+      "kind": "flood",
+      "occurred": "2018-08",
+      "source_ref": "example:user-supplied-2018-flood-report"
+    }
+  ],
+  "states": [
+    {
+      "state_code": "EX",
+      "name": "Example State (SYNTHETIC)",
+      "languages": [
+        { "language": "en-IN", "asr_supported": false, "tts_supported": false },
+        { "language": "ex-IN", "asr_supported": false, "tts_supported": false }
+      ],
+      "scenarios": [
+        {
+          "scenario_id": "SC-EX-2018-FLOOD",
+          "state": "EX",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-EXAMPLE-2018",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        },
+        {
+          "scenario_id": "SC-EX-SYNTH-1",
+          "state": "EX",
+          "evidence": "SYNTHETIC_EXERCISE",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        }
+      ]
+    }
+  ]
+}

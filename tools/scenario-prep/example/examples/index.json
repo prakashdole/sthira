@@ -1,0 +1,9 @@
+{
+  "catalogue": "examples/catalogue.json",
+  "scenarios": {
+    "SC-EX-2018-FLOOD": "examples/pkg-sc-hist-1.json",
+    "SC-EX-SYNTH-1": "examples/pkg-sc-synth-1.json"
+  },
+  "exercise_clock": "2026-09-12T04:00:00Z",
+  "notes": "SYNTHETIC EXAMPLE only; not a real event. The historical link references a user-supplied reference, not government authority."
+}
