@@ -474,6 +474,297 @@ func TestScopedContext_AllowsSyntheticApprovedRoute(t *testing.T) {
 	}
 }
 
+// TestScopedGuidance_ExactLanguageBinding: an approval for en-IN only must not authorize ml-IN.
+func TestScopedGuidance_ExactLanguageBinding(t *testing.T) {
+	fx := newP6Fixture(t)
+	defer fx.close()
+	now := nowUTC()
+	srcID := findKLP6Source(t, fx.store.DB())
+
+	// Seed approved translation for "en-IN" only.
+	if _, err := fx.store.DB().ExecContext(context.Background(), `
+		INSERT INTO approved_translations
+			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, approved_by, evidence_ref, approved_at)
+		VALUES ($1, $2, 'clarify_place', 'en-IN', 7, 7, $3, 'reviewer-1', 'doc-1', $4)`,
+		"APP-EN-"+uid("X"), fx.jurisdictionID, srcID, now); err != nil {
+		t.Fatalf("seed approved translation: %v", err)
+	}
+
+	resolver := NewScopedContextResolver(fx.store)
+	sc, err := resolver.Resolve(context.Background(), fx.jurisdictionID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	if !sc.IsSpeechKeyApprovedForLanguage("clarify_place", "en-IN") {
+		t.Errorf("expected clarify_place approved for en-IN")
+	}
+	if sc.IsSpeechKeyApprovedForLanguage("clarify_place", "ml-IN") {
+		t.Errorf("clarify_place must NOT be approved for ml-IN with en-IN only signoff")
+	}
+}
+
+// TestScopedGuidance_VersionAndSourceMismatchRejected: older versions or different source_id rejected.
+func TestScopedGuidance_VersionAndSourceMismatchRejected(t *testing.T) {
+	fx := newP6Fixture(t)
+	defer fx.close()
+	now := nowUTC()
+	srcID := findKLP6Source(t, fx.store.DB())
+
+	// 1. Older source/template version 6 (package is at version 7) -> must NOT approve
+	if _, err := fx.store.DB().ExecContext(context.Background(), `
+		INSERT INTO approved_translations
+			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, approved_by, evidence_ref, approved_at)
+		VALUES ($1, $2, 'old_key', 'en-IN', 6, 6, $3, 'reviewer-1', 'doc-1', $4)`,
+		"APP-OLD-"+uid("X"), fx.jurisdictionID, srcID, now); err != nil {
+		t.Fatalf("seed old translation: %v", err)
+	}
+
+	// 2. Different valid source_id -> must NOT approve for this package's context
+	otherSrcID := "SRC-OTHER-" + uid("X")
+	if _, err := fx.store.DB().ExecContext(context.Background(), `
+		INSERT INTO sources (source_id, government_owner, official_domain, state, version, updated_at)
+		VALUES ($1, 'gov-test', 'gov.example', 'OPERATIONAL', 1, $2)`,
+		otherSrcID, now); err != nil {
+		t.Fatalf("seed other source: %v", err)
+	}
+	if _, err := fx.store.DB().ExecContext(context.Background(), `
+		INSERT INTO approved_translations
+			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, approved_by, evidence_ref, approved_at)
+		VALUES ($1, $2, 'other_source_key', 'en-IN', 7, 7, $3, 'reviewer-1', 'doc-1', $4)`,
+		"APP-OTHER-"+uid("X"), fx.jurisdictionID, otherSrcID, now); err != nil {
+		t.Fatalf("seed other source translation: %v", err)
+	}
+
+	resolver := NewScopedContextResolver(fx.store)
+	sc, err := resolver.Resolve(context.Background(), fx.jurisdictionID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	if sc.IsSpeechKeyApprovedForLanguage("old_key", "en-IN") {
+		t.Errorf("old_key must NOT be approved when version does not match package")
+	}
+	if sc.IsSpeechKeyApprovedForLanguage("other_source_key", "en-IN") {
+		t.Errorf("other_source_key must NOT be approved when source_id does not match package")
+	}
+}
+
+// TestScopedGuidance_RevocationDuringInference: revocation during slow inference fails SnapshotRevalidate.
+func TestScopedGuidance_RevocationDuringInference(t *testing.T) {
+	fx := newP6Fixture(t)
+	defer fx.close()
+	now := nowUTC()
+	srcID := findKLP6Source(t, fx.store.DB())
+
+	transID := "APP-REVOKE-" + uid("X")
+	if _, err := fx.store.DB().ExecContext(context.Background(), `
+		INSERT INTO approved_translations
+			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, approved_by, evidence_ref, approved_at)
+		VALUES ($1, $2, 'welcome', 'en-IN', 7, 7, $3, 'reviewer-1', 'doc-1', $4)`,
+		transID, fx.jurisdictionID, srcID, now); err != nil {
+		t.Fatalf("seed translation: %v", err)
+	}
+
+	resolver := NewScopedContextResolver(fx.store)
+	sc, err := resolver.Resolve(context.Background(), fx.jurisdictionID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	// Initially valid
+	if err := resolver.SnapshotRevalidate(context.Background(), sc); err != nil {
+		t.Fatalf("initial revalidate should pass: %v", err)
+	}
+
+	// Simulate revocation during slow inference:
+	revokeTime := now.Add(time.Second)
+	if _, err := fx.store.DB().ExecContext(context.Background(), `
+		UPDATE approved_translations
+		SET revoked_at = $1
+		WHERE translation_id = $2`, revokeTime, transID); err != nil {
+		t.Fatalf("revoke translation: %v", err)
+	}
+
+	// Revalidate with clock at or after revokeTime
+	resolver = resolver.WithClock(func() time.Time { return revokeTime.Add(time.Second) })
+	err = resolver.SnapshotRevalidate(context.Background(), sc)
+	if err == nil {
+		t.Fatalf("expected SnapshotRevalidate to fail after translation revocation")
+	}
+	if !strings.Contains(err.Error(), contracts.ErrStaleSnapshot) {
+		t.Fatalf("expected ErrStaleSnapshot, got %v", err)
+	}
+}
+
+// TestScopedGuidance_BuildEligible_PolicyOrderingAndZeroCapacity: respects policy order and excludes zero capacity.
+func TestScopedGuidance_BuildEligible_PolicyOrderingAndZeroCapacity(t *testing.T) {
+	st, cleanup := disposableTestDB(t)
+	defer cleanup()
+	now := nowUTC()
+	jr := "JUR-KL-ELIG-" + uid("X")
+	srcID := "SRC-KL-ELIG-" + uid("X")
+	pkgID := "PKG-KL-ELIG-" + uid("X")
+	artID := "ART-KL-ELIG-" + uid("X")
+	authID := "AUTH-KL-ELIG-" + uid("X")
+
+	szID := "SZ-OPEN-" + uid("X")
+	szZeroID := "SZ-ZERO-" + uid("X")
+	fac1 := "FAC-PRIORITY-1-" + uid("X")
+	fac2 := "FAC-PRIORITY-2-" + uid("X")
+	facZero := "FAC-ZERO-CAP-" + uid("X")
+
+	// Notice allocation policy order has fac2 FIRST, then fac1, then facZero.
+	// Even though alphabetically fac1 < fac2, the policy order must be preserved!
+	body := []byte(`{
+		"safe_zones":[
+			{"id":"` + szID + `","status":"OPEN"},
+			{"id":"` + szZeroID + `","status":"OPEN"}
+		],
+		"facilities":[
+			{"id":"` + fac1 + `","safe_zone_id":"` + szID + `"},
+			{"id":"` + fac2 + `","safe_zone_id":"` + szID + `"},
+			{"id":"` + facZero + `","safe_zone_id":"` + szZeroID + `"}
+		],
+		"instruction_assets":[{"id":"INS-1","language":"en-IN"}],
+		"allocation_policy":{"order":["` + fac2 + `","` + fac1 + `","` + facZero + `"]}
+	}`)
+
+	if err := st.InTx(context.Background(), func(tx DBTX) error {
+		if _, err := tx.ExecContext(context.Background(), `
+			INSERT INTO sources (source_id, government_owner, official_domain, state, version, updated_at)
+			VALUES ($1, 'gov-test', 'gov.example', 'OPERATIONAL', 1, $2)`,
+			srcID, now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(), `
+			INSERT INTO source_authorizations
+				(authorization_id, source_id, granted_by, evidence_ref, jurisdiction, granted_at)
+			VALUES ($1,$2,$3,$4,$5,$6)`,
+			authID, srcID, "authority-1", "doc-1", jr, now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(), `
+			INSERT INTO source_artifacts (artifact_id, source_id, source_version, artifact_sha256, retrieved_at, evidence_class, payload_ref)
+			VALUES ($1,$2,1,$3,$4,'AUTHORIZED_OPERATIONAL',$5)`,
+			artID, srcID, strings.Repeat("a", 64), now, "memory://test"); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(), `
+			INSERT INTO packages (package_id, alert_id, source_id, artifact_id, version, jurisdiction, evidence_class, checksum_sha256, body, effective_at, expires_at)
+			VALUES ($1,$2,$3,$4,1,$5,'AUTHORIZED_OPERATIONAL',$6,$7,$8,$9)`,
+			pkgID, "ALERT-"+uid("X"), srcID, artID, jr, strings.Repeat("a", 64), body,
+			now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+			return err
+		}
+		// Safe zone capacity: szID has 100 capacity, szZeroID has 0 capacity!
+		if _, err := tx.ExecContext(context.Background(), `
+			INSERT INTO zone_versions (zone_id, package_id, kind, role, status, capacity, version, updated_at)
+			VALUES ($1, $2, 'SAFE', 'SAFE', 'OPEN', 100, 1, $4),
+			       ($3, $2, 'SAFE', 'SAFE', 'OPEN', 0, 1, $4)`,
+			szID, pkgID, szZeroID, now); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed fixture: %v", err)
+	}
+
+	resolver := NewScopedContextResolver(st)
+	sc, err := resolver.Resolve(context.Background(), jr)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	// facZero must be EXCLUDED because its safe zone has 0 capacity.
+	if len(sc.EligibleDestinations) != 2 {
+		t.Fatalf("expected 2 eligible destinations, got %d", len(sc.EligibleDestinations))
+	}
+
+	// Must respect policy order (fac2 rank 0, fac1 rank 1) — NOT alphabetical (fac1, fac2)!
+	if sc.EligibleDestinations[0].Facility.FacilityID != fac2 || sc.EligibleDestinations[0].PermittedRank != 0 {
+		t.Errorf("rank 0 must be %s (policy order), got %+v", fac2, sc.EligibleDestinations[0])
+	}
+	if sc.EligibleDestinations[1].Facility.FacilityID != fac1 || sc.EligibleDestinations[1].PermittedRank != 1 {
+		t.Errorf("rank 1 must be %s (policy order), got %+v", fac1, sc.EligibleDestinations[1])
+	}
+
+	// Browsing capacity must be unknown (honest, no promises)
+	for i, ed := range sc.EligibleDestinations {
+		if ed.Facility.CapacityKnown {
+			t.Errorf("dest %d CapacityKnown must be false for browsing", i)
+		}
+		if ed.Facility.Free != 0 {
+			t.Errorf("dest %d Free must be 0 for browsing", i)
+		}
+	}
+}
+
+// TestScopedGuidance_BuildEligible_EmptyPolicyYieldsNoEligibleChoices: no fabricated rank when policy order is absent.
+func TestScopedGuidance_BuildEligible_EmptyPolicyYieldsNoEligibleChoices(t *testing.T) {
+	st, cleanup := disposableTestDB(t)
+	defer cleanup()
+	now := nowUTC()
+	jr := "JUR-KL-EMPTY-" + uid("X")
+	srcID := "SRC-KL-EMPTY-" + uid("X")
+	pkgID := "PKG-KL-EMPTY-" + uid("X")
+	artID := "ART-KL-EMPTY-" + uid("X")
+	authID := "AUTH-KL-EMPTY-" + uid("X")
+	szID := "SZ-OPEN-" + uid("X")
+	facID := "FAC-1-" + uid("X")
+
+	// Allocation policy order is empty!
+	body := []byte(`{
+		"safe_zones":[{"id":"` + szID + `","status":"OPEN"}],
+		"facilities":[{"id":"` + facID + `","safe_zone_id":"` + szID + `"}],
+		"instruction_assets":[{"id":"INS-1","language":"en-IN"}],
+		"allocation_policy":{"order":[]}
+	}`)
+
+	if err := st.InTx(context.Background(), func(tx DBTX) error {
+		if _, err := tx.ExecContext(context.Background(), `
+			INSERT INTO sources (source_id, government_owner, official_domain, state, version, updated_at)
+			VALUES ($1, 'gov-test', 'gov.example', 'OPERATIONAL', 1, $2)`,
+			srcID, now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(), `
+			INSERT INTO source_authorizations
+				(authorization_id, source_id, granted_by, evidence_ref, jurisdiction, granted_at)
+			VALUES ($1,$2,$3,$4,$5,$6)`,
+			authID, srcID, "authority-1", "doc-1", jr, now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(), `
+			INSERT INTO source_artifacts (artifact_id, source_id, source_version, artifact_sha256, retrieved_at, evidence_class, payload_ref)
+			VALUES ($1,$2,1,$3,$4,'AUTHORIZED_OPERATIONAL',$5)`,
+			artID, srcID, strings.Repeat("a", 64), now, "memory://test"); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(), `
+			INSERT INTO packages (package_id, alert_id, source_id, artifact_id, version, jurisdiction, evidence_class, checksum_sha256, body, effective_at, expires_at)
+			VALUES ($1,$2,$3,$4,1,$5,'AUTHORIZED_OPERATIONAL',$6,$7,$8,$9)`,
+			pkgID, "ALERT-"+uid("X"), srcID, artID, jr, strings.Repeat("a", 64), body,
+			now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed fixture: %v", err)
+	}
+
+	resolver := NewScopedContextResolver(st)
+	sc, err := resolver.Resolve(context.Background(), jr)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	// Must NOT invent alphabetical ordering or PermittedRank
+	if len(sc.EligibleDestinations) != 0 {
+		t.Fatalf("EligibleDestinations must be empty when allocation_policy.order is absent, got %d", len(sc.EligibleDestinations))
+	}
+}
+
 // === helpers ===
 
 func countRows(t *testing.T, s *Store) int {

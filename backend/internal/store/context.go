@@ -37,6 +37,7 @@ type ContextSnapshot struct {
 	// "PKG-1:7" but now returns "PKG-1:8" is the canonical stale signal.
 	PackageID      string
 	PackageVersion int
+	SourceID       string
 }
 
 // packageBody is the minimal shape of the persisted packages.body JSON needed to
@@ -75,16 +76,17 @@ func ResolveContext(ctx context.Context, db DBTX, jurisdiction string, now time.
 		return ContextSnapshot{}, ErrNoOperationalContext
 	}
 	var (
-		pkgID   string
-		version int
-		body    []byte
+		pkgID    string
+		version  int
+		body     []byte
+		sourceID string
 	)
 	// One consistent row: the package and its source state are read together, so
 	// version/body always come from the same revision. The source must be
 	// OPERATIONAL (not suspended/retired/quarantined) and hold a valid
 	// authorization in the package's own jurisdiction.
 	err := db.QueryRowContext(ctx, `
-		SELECT p.package_id, p.version, p.body
+		SELECT p.package_id, p.version, p.body, p.source_id
 		FROM packages p
 		JOIN sources s ON s.source_id = p.source_id
 		WHERE p.jurisdiction = $2
@@ -98,7 +100,7 @@ func ResolveContext(ctx context.Context, db DBTX, jurisdiction string, now time.
 		  )
 		ORDER BY p.version DESC, p.package_id
 		LIMIT 1`, now, jurisdiction).
-		Scan(&pkgID, &version, &body)
+		Scan(&pkgID, &version, &body, &sourceID)
 	if err != nil {
 		if err.Error() == "sql: no rows in result set" {
 			return ContextSnapshot{}, ErrNoOperationalContext
@@ -113,17 +115,26 @@ func ResolveContext(ctx context.Context, db DBTX, jurisdiction string, now time.
 
 	known := map[string]bool{}
 	for _, z := range pb.RedZones {
-		known[z.ID] = true
+		if z.ID != "" {
+			known[z.ID] = true
+		}
 	}
 	for _, z := range pb.SafeZones {
-		known[z.ID] = true
+		if z.ID != "" {
+			known[z.ID] = true
+		}
 	}
-	for _, rt := range pb.Routes {
-		known[rt.ID] = true
+	for _, r := range pb.Routes {
+		if r.ID != "" {
+			known[r.ID] = true
+		}
 	}
 	for _, f := range pb.Facilities {
-		known[f.ID] = true
+		if f.ID != "" {
+			known[f.ID] = true
+		}
 	}
+
 	langs := map[string]bool{}
 	for _, a := range pb.Instructions {
 		if a.Language != "" {
@@ -138,6 +149,7 @@ func ResolveContext(ctx context.Context, db DBTX, jurisdiction string, now time.
 		EnabledLanguages: langs,
 		PackageID:        pkgID,
 		PackageVersion:   version,
+		SourceID:         sourceID,
 	}, nil
 }
 

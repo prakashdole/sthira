@@ -582,9 +582,9 @@ func (o *Orchestrator) stageTemplate(ctx context.Context, sc contracts.ScopedCon
 		return TemplateOutput{}, nil
 	}
 	speechKey := *proposal.SpeechKey
-	if !sc.IsTemplateKeyAllowed(speechKey) {
+	if !sc.IsSpeechKeyApprovedForLanguage(speechKey, proposal.Language) {
 		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
-			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template key not approved", Retryable: false,
+			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template key not approved for language", Retryable: false,
 		})
 	}
 	tpl, ok := o.cfg.Templates.Lookup(speechKey, proposal.Language)
@@ -596,6 +596,16 @@ func (o *Orchestrator) stageTemplate(ctx context.Context, sc contracts.ScopedCon
 	if tpl.SyntheticOnly {
 		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
 			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template is synthetic-only", Retryable: false,
+		})
+	}
+	if tpl.TemplateVersion != 0 && tpl.TemplateVersion != sc.TemplateVersion {
+		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
+			Stage: StageTemplate, Code: contracts.ErrStaleVersion, Reason: fmt.Sprintf("template version %d does not match active context %d", tpl.TemplateVersion, sc.TemplateVersion), Retryable: false,
+		})
+	}
+	if tpl.SourceVersion != 0 && tpl.SourceVersion != sc.SourceVersion {
+		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
+			Stage: StageTemplate, Code: contracts.ErrStaleVersion, Reason: fmt.Sprintf("template source version %d does not match active context %d", tpl.SourceVersion, sc.SourceVersion), Retryable: false,
 		})
 	}
 	// Validate args against the template's ArgSchema; the orchestrator

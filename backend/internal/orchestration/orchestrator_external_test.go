@@ -811,6 +811,86 @@ func TestSynthesize_InjectedTemplateArg(t *testing.T) {
 	}
 }
 
+// TestSynthesize_InventedArgIDRejected rejects server-derived IDs invented by caller in speech_args.
+func TestSynthesize_InventedArgIDRejected(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	sc.TemplateKeys = append(sc.TemplateKeys, "choice_prompt")
+	// sc knows FAC-KNOWN only
+	sc.KnownFacilities = map[string]contracts.FacilityRef{
+		"FAC-KNOWN": {FacilityID: "FAC-KNOWN"},
+	}
+	resolver := orchestrationtest.NewResolver(sc)
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	tpls.Add(contracts.ApprovedTemplate{
+		SpeechKey: "choice_prompt", Language: "en-IN", TemplateVersion: 1, SourceVersion: 1,
+		Text:      "Select destination: {facility_id}.",
+		ArgSchema: map[string]string{"facility_id": "string"},
+	})
+	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
+
+	req := contracts.TTSRequest{
+		RequestID:     "req-invented",
+		Jurisdiction:  "JTEST",
+		SpeechKey:     "choice_prompt",
+		Language:      "en-IN",
+		SourceVersion: 1,
+		Args: contracts.SpeechArgs{
+			Args: map[string]any{"facility_id": "FAC-INVENTED-999"},
+		},
+		Settings: contracts.TTSSynthesisSettings{SampleRate: 16000, BitDepth: 16, Channels: 1},
+	}
+	_, err := o.Synthesize(context.Background(), req, nil)
+	if err == nil {
+		t.Fatalf("expected validation error for invented ID in speech_args")
+	}
+	var pe *orchestration.PipelineError
+	if !errors.As(err, &pe) {
+		t.Fatalf("error is not *orchestration.PipelineError: %v", err)
+	}
+	if pe.Failures[0].Code != contracts.ErrValidation {
+		t.Errorf("Code = %s, want VALIDATION_ERROR", pe.Failures[0].Code)
+	}
+}
+
+// TestSynthesize_MismatchedTemplateVersionRejected rejects templates whose version diverges from active context.
+func TestSynthesize_MismatchedTemplateVersionRejected(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	sc.TemplateKeys = append(sc.TemplateKeys, "welcome")
+	sc.TemplateVersion = 1
+	resolver := orchestrationtest.NewResolver(sc)
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	tpls.Add(contracts.ApprovedTemplate{
+		SpeechKey: "welcome", Language: "en-IN", TemplateVersion: 2, SourceVersion: 1,
+		Text:      "Welcome to Sthira.",
+	})
+	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
+
+	req := contracts.TTSRequest{
+		RequestID:     "req-stale-tpl",
+		Jurisdiction:  "JTEST",
+		SpeechKey:     "welcome",
+		Language:      "en-IN",
+		SourceVersion: 1,
+		Args:          contracts.SpeechArgs{},
+		Settings:      contracts.TTSSynthesisSettings{SampleRate: 16000, BitDepth: 16, Channels: 1},
+	}
+	_, err := o.Synthesize(context.Background(), req, nil)
+	if err == nil {
+		t.Fatalf("expected error for mismatched template version")
+	}
+	var pe *orchestration.PipelineError
+	if !errors.As(err, &pe) {
+		t.Fatalf("error is not *orchestration.PipelineError: %v", err)
+	}
+	if pe.Failures[0].Code != contracts.ErrStaleVersion {
+		t.Errorf("Code = %s, want STALE_VERSION", pe.Failures[0].Code)
+	}
+}
+
 // TestSynthesize_SourceWithdrawalDuringSynthesis verifies that snapshot invalidation
 // during synthesis fails closed with 409 STALE_SNAPSHOT.
 func TestSynthesize_SourceWithdrawalDuringSynthesis(t *testing.T) {

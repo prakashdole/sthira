@@ -63,8 +63,11 @@ type packageBodyP6 struct {
 // template lifecycle is owned by the P6 templates worker and would be
 // its own column; the derivation here is documented and conservative.
 func BuildScopedContext(ctx context.Context, db DBTX, jurisdiction, packageID string, sourceVersion int, now time.Time) (contracts.ScopedContext, error) {
-	var body []byte
-	err := db.QueryRowContext(ctx, `SELECT body FROM packages WHERE package_id = $1`, packageID).Scan(&body)
+	var (
+		body     []byte
+		sourceID string
+	)
+	err := db.QueryRowContext(ctx, `SELECT body, source_id FROM packages WHERE package_id = $1`, packageID).Scan(&body, &sourceID)
 	if err != nil {
 		return contracts.ScopedContext{}, fmt.Errorf("%w: package body: %v", ErrNoScopedContext, err)
 	}
@@ -75,6 +78,7 @@ func BuildScopedContext(ctx context.Context, db DBTX, jurisdiction, packageID st
 
 	// Build typed references.
 	sc := contracts.ScopedContext{
+		SourceID:        sourceID,
 		DataVersion:     packageID + ":" + fmt.Sprintf("%d", sourceVersion),
 		Jurisdiction:    jurisdiction,
 		SchemaVersion:   contracts.SchemaVersionV3,
@@ -207,11 +211,12 @@ func BuildScopedContext(ctx context.Context, db DBTX, jurisdiction, packageID st
 	for _, l := range sc.AllowedLanguages {
 		allowedLangs[l] = struct{}{}
 	}
-	approved, err := readApprovedSpeechKeys(ctx, db, jurisdiction, sourceVersion, now, allowedLangs)
+	approved, approvedLangs, err := readApprovedSpeechKeys(ctx, db, jurisdiction, sourceVersion, sc.TemplateVersion, sourceID, now, allowedLangs)
 	if err != nil {
 		return contracts.ScopedContext{}, fmt.Errorf("store: read approved translations: %w", err)
 	}
 	sc.TemplateKeys = approved
+	sc.ApprovedSpeechKeys = approvedLangs
 
 	// Place aliases: each alias maps a normalized lookup key to a place
 	// ID; we expose them as KnownPlaces with kind guessed from where
@@ -244,11 +249,11 @@ func BuildScopedContext(ctx context.Context, db DBTX, jurisdiction, packageID st
 		}
 	}
 
-	// Eligible destinations: server-permitted order, joined against
-	// facility_inventory so unknown capacity is reported honestly. We
-	// reuse the existing ChoiceQuerier for the eligibility verdict; the
-	// ordering comes from packageRows as documented by the P4 contract.
-	if err := buildEligible(ctx, db, packageID, jurisdiction, now, &sc); err != nil {
+	// Eligible destinations: server-permitted order from the package's
+	// allocation_policy.order. General destination browsing does not assume
+	// party size or duration (no synthetic capacity promises). If allocation
+	// policy order is empty, no arbitrary alphabetical order or PermittedRank is fabricated.
+	if err := buildEligible(ctx, db, packageID, jurisdiction, pb.AllocationPolicy.Order, now, &sc); err != nil {
 		return contracts.ScopedContext{}, fmt.Errorf("store: eligible destinations: %w", err)
 	}
 
@@ -319,50 +324,55 @@ func readAliases(ctx context.Context, db DBTX, jurisdiction string) ([]PlaceCand
 }
 
 // readApprovedSpeechKeys returns the distinct, ascending set of
-// speech_keys currently approved for the jurisdiction at or before
-// sourceVersion and active at now, backed by the persisted
-// approved_translations authority table. A row with a NULL language is
-// approved for every allowed language; a row with a concrete language is
-// surfaced only when that language is in allowed. An empty jurisdiction
-// (nothing reviewed) yields an empty set, which the orchestrator treats
-// as authoritative "no approval" and fails closed on.
-func readApprovedSpeechKeys(ctx context.Context, db DBTX, jurisdiction string, sourceVersion int, now time.Time, allowed map[string]struct{}) ([]string, error) {
+// speech_keys currently approved for the jurisdiction matching
+// sourceVersion, templateVersion and sourceID, active at now,
+// backed by the persisted approved_translations authority table.
+// A row with a NULL language is approved for every allowed language ("*");
+// a concrete language is surfaced only when that language is in allowed.
+// Returns both the unique keys and a map of key -> approved languages.
+func readApprovedSpeechKeys(ctx context.Context, db DBTX, jurisdiction string, sourceVersion, templateVersion int, sourceID string, now time.Time, allowed map[string]struct{}) ([]string, map[string][]string, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT speech_key, language
 		FROM approved_translations
 		WHERE jurisdiction = $1
+		  AND source_version = $2
+		  AND template_version = $3
+		  AND (source_id IS NULL OR $4 = '' OR source_id = $4)
 		  AND revoked_at IS NULL
-		  AND approved_at <= $2
-		  AND source_version <= $3`,
-		jurisdiction, now, sourceVersion)
+		  AND approved_at <= $5
+		ORDER BY speech_key, language`,
+		jurisdiction, sourceVersion, templateVersion, sourceID, now)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	seen := map[string]struct{}{}
+	approvedLangs := map[string][]string{}
 	var out []string
 	for rows.Next() {
 		var key string
 		var lang sql.NullString
 		if err := rows.Scan(&key, &lang); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if lang.Valid {
 			if _, ok := allowed[lang.String]; !ok {
 				continue
 			}
+			approvedLangs[key] = append(approvedLangs[key], lang.String)
+		} else {
+			approvedLangs[key] = append(approvedLangs[key], "*")
 		}
-		if _, dup := seen[key]; dup {
-			continue
+		if _, dup := seen[key]; !dup {
+			seen[key] = struct{}{}
+			out = append(out, key)
 		}
-		seen[key] = struct{}{}
-		out = append(out, key)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sort.Strings(out)
-	return out, nil
+	return out, approvedLangs, nil
 }
 
 func isInMap(id string, m map[string]contracts.ZoneRef) bool { _, ok := m[id]; return ok }
@@ -377,57 +387,59 @@ func isFacilityID(id string, m map[string]contracts.FacilityRef) bool {
 	return ok
 }
 
-// buildEligible populates sc.EligibleDestinations using the existing
-// ChoiceQuerier for the per-facility verdict. The ordering follows the
-// package's allocation_policy.order (server-authoritative). The
-// ChoiceQuerier itself does not assume party size or duration; here
-// we constrain the call to the canonical "general destination browsing"
-// path (PartySize unconstrained marker; zero values, not 1) so the
-// snapshot never claims an arbitrary user's temporary-stay suitability
-// from a synthetic single-person/one-day inference.
-func buildEligible(ctx context.Context, db DBTX, packageID, jurisdiction string, now time.Time, sc *contracts.ScopedContext) error {
-	dates := []time.Time{now.UTC().Truncate(24 * time.Hour)}
-	q := ChoiceQuery{
-		Jurisdiction: jurisdiction,
-		PackageID:    packageID,
-		// PartySize intentionally 0 (unconstrained marker). The
-		// choice querier will surface unknown party size honestly
-		// when callers later request reservation. Silently using
-		// PartySize=1 misrepresents suitability for the citizen.
-		PartySize: 0,
-		StartDate: dates[0],
-		EndDate:   dates[0].Add(24 * time.Hour),
-		// RouteGateOpen is intentionally false here. The scope's
-		// VerifiedRoutes already documents route availability; the
-		// operational gate is enforced by Worker 9's choice path
-		// (D38).
-		RouteGateOpen: false,
+// buildEligible populates sc.EligibleDestinations using the package's
+// authoritative allocation_policy.order. General destination browsing does
+// not assume party size or duration (PartySize and dates are unknown), so
+// it does not make synthetic capacity promises (CapacityKnown=false, Free=0).
+// Facilities must be in OPEN or PUBLISHED safe zones and non-zero total capacity.
+// If allocation policy order is empty, no arbitrary alphabetical order or
+// PermittedRank is fabricated.
+func buildEligible(ctx context.Context, db DBTX, packageID, jurisdiction string, policyOrder []string, now time.Time, sc *contracts.ScopedContext) error {
+	if len(policyOrder) == 0 {
+		// No server-permitted order: leave sc.EligibleDestinations empty.
+		// Never fabricate an alphabetical or guessed rank.
+		return nil
 	}
-	dests, err := (ChoiceQuerier{}).Eligible(ctx, db, q, now)
-	if err != nil {
-		return err
-	}
-	// Order from the package's allocation_policy.order is the
-	// operator's authority; absent that we keep the DB INSERT order
-	// (the underlying ORDER BY f.facility_id from the querier). The
-	// earlier alphabetical-as-nearest sort was a silent assumption
-	// that could distort actual operator policy; document the change
-	// here. Stable secondary order remains by persisted ID for
-	// determinism only — never labeled "nearest".
-	sort.SliceStable(dests, func(i, j int) bool { return dests[i].FacilityID < dests[j].FacilityID })
-	for i, d := range dests {
-		fac, ok := sc.KnownFacilities[d.FacilityID]
+
+	for _, facID := range policyOrder {
+		fac, ok := sc.KnownFacilities[facID]
 		if !ok {
 			continue
 		}
-		fac.CapacityKnown = d.CapacityKnown
-		if d.CapacityKnown {
-			fac.Free = d.Free
+		// Facility must be in an OPEN or PUBLISHED safe zone.
+		sz, ok := sc.KnownSafeZones[fac.SafeZoneID]
+		if !ok || (sz.Status != contracts.ZoneStatusOpen && sz.Status != contracts.ZoneStatusPublished) {
+			continue
 		}
-		sc.KnownFacilities[d.FacilityID] = fac
+
+		// Check that the facility does not have zero total capacity in zone_versions.
+		var zoneCap *int
+		err := db.QueryRowContext(ctx, `
+			SELECT zv.capacity FROM zone_versions zv
+			WHERE zv.zone_id = $1 AND zv.package_id = $2`, fac.SafeZoneID, packageID).Scan(&zoneCap)
+		if err == nil && zoneCap != nil && *zoneCap <= 0 {
+			// Zero zone capacity: ineligible
+			continue
+		}
+
+		// Check facility inventory if any row exists; if inventory exists and all rows have capacity <= 0, ineligible.
+		var maxInvCap *int
+		err = db.QueryRowContext(ctx, `
+			SELECT MAX(capacity) FROM facility_inventory
+			WHERE facility_id = $1`, facID).Scan(&maxInvCap)
+		if err == nil && maxInvCap != nil && *maxInvCap <= 0 {
+			// Zero inventory capacity: ineligible
+			continue
+		}
+
+		// Capacity is unknown for general browsing (no party size or dates assumed).
+		fac.CapacityKnown = false
+		fac.Free = 0
+		sc.KnownFacilities[facID] = fac
+
 		sc.EligibleDestinations = append(sc.EligibleDestinations, contracts.EligibleChoice{
 			Facility:      fac,
-			PermittedRank: i,
+			PermittedRank: len(sc.EligibleDestinations),
 		})
 	}
 	return nil
@@ -489,7 +501,8 @@ func (r *ScopedContextResolver) Resolve(ctx context.Context, jurisdiction string
 
 // SnapshotRevalidate re-reads the persisted snapshot for the same
 // jurisdiction and returns ErrStaleSnapshot when (SourceVersion,
-// TemplateVersion, DataVersion) changed. Cancellation is honored via ctx.
+// TemplateVersion, DataVersion) changed, or when any translation
+// approval in the active context was revoked or modified.
 func (r *ScopedContextResolver) SnapshotRevalidate(ctx context.Context, sc contracts.ScopedContext) error {
 	if r.store == nil {
 		return ErrNoScopedContext
@@ -514,5 +527,55 @@ func (r *ScopedContextResolver) SnapshotRevalidate(ctx context.Context, sc contr
 	if (snap.PackageID + ":" + fmt.Sprintf("%d", snap.PackageVersion)) != sc.DataVersion {
 		return errors.New(contracts.ErrStaleSnapshot)
 	}
+
+	// Revalidate approval withdrawal during inference/TTS:
+	// 1. Any key in sc.TemplateKeys must not have been revoked at or before r.now().
+	for _, key := range sc.TemplateKeys {
+		var isRevoked bool
+		err := r.store.DB().QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM approved_translations
+				WHERE jurisdiction = $1
+				  AND source_version = $2
+				  AND template_version = $3
+				  AND speech_key = $4
+				  AND (source_id IS NULL OR $5 = '' OR source_id = $5)
+				  AND revoked_at IS NOT NULL
+				  AND revoked_at <= $6
+			)`, sc.Jurisdiction, sc.SourceVersion, sc.TemplateVersion, key, sc.SourceID, r.now()).Scan(&isRevoked)
+		if err == nil && isRevoked {
+			return errors.New(contracts.ErrStaleSnapshot)
+		}
+	}
+
+	// 2. Active approved speech keys and languages must match the snapshot.
+	allowedLangs := make(map[string]struct{}, len(sc.AllowedLanguages))
+	for _, l := range sc.AllowedLanguages {
+		allowedLangs[l] = struct{}{}
+	}
+	currentKeys, currentApprovedLangs, err := readApprovedSpeechKeys(ctx, r.store.DB(), sc.Jurisdiction, sc.SourceVersion, sc.TemplateVersion, sc.SourceID, r.now(), allowedLangs)
+	if err != nil {
+		return err
+	}
+	if len(currentKeys) != len(sc.TemplateKeys) {
+		return errors.New(contracts.ErrStaleSnapshot)
+	}
+	for i, k := range currentKeys {
+		if k != sc.TemplateKeys[i] {
+			return errors.New(contracts.ErrStaleSnapshot)
+		}
+	}
+	for k, langs := range sc.ApprovedSpeechKeys {
+		curr, ok := currentApprovedLangs[k]
+		if !ok || len(curr) != len(langs) {
+			return errors.New(contracts.ErrStaleSnapshot)
+		}
+		for i, l := range langs {
+			if l != curr[i] {
+				return errors.New(contracts.ErrStaleSnapshot)
+			}
+		}
+	}
+
 	return nil
 }
