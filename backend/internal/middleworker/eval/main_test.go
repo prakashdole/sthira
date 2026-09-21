@@ -21,14 +21,14 @@ func TestEval_HarnessCheckPrintsBlocker(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	s := string(bs)
-	if !strings.Contains(s, "Qwen3-4B-Instruct-2507") {
+	if !strings.Contains(s, "sarvamai/sarvam-30b") {
 		t.Errorf("manifest missing model id: %s", s)
 	}
 	if !strings.Contains(s, "Apache-2.0") {
 		t.Errorf("manifest missing license: %s", s)
 	}
-	if !strings.Contains(s, `"trust_remote_code":false`) {
-		t.Errorf("manifest missing trust_remote_code=false: %s", s)
+	if !strings.Contains(s, `"trust_remote_code":true`) {
+		t.Errorf("manifest missing trust_remote_code=true: %s", s)
 	}
 	if !strings.Contains(s, "NOT_EVALUATED") {
 		t.Errorf("manifest must surface NOT_EVALUATED for unverified fields: %s", s)
@@ -48,7 +48,7 @@ func TestEval_ManifestModeWritesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
-	if !strings.Contains(string(got), "Qwen3-4B-Instruct-2507") {
+	if !strings.Contains(string(got), "sarvamai/sarvam-30b") {
 		t.Errorf("manifest file missing model id")
 	}
 }

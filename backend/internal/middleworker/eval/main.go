@@ -35,7 +35,7 @@ import (
 	"sthira/backend/internal/middleworker"
 )
 
-// PinnedModel is the documented first candidate. Fields marked
+// PinnedModel is the documented active candidate. Fields marked
 // "NOT_EVALUATED" are NOT invented; they are placeholders for the
 // recorded evidence that real-inference acceptance requires.
 type PinnedModel struct {
@@ -47,6 +47,7 @@ type PinnedModel struct {
 	VLLMImageTag    string       `json:"vllm_image_tag"`
 	BF16Artifact    ArtifactInfo `json:"bf16"`
 	AWQInt4Artifact ArtifactInfo `json:"awq_int4"`
+	FP8Artifact     ArtifactInfo `json:"fp8"`
 }
 
 type ArtifactInfo struct {
@@ -62,21 +63,23 @@ type ArtifactInfo struct {
 	Status string `json:"status"`
 }
 
-// Pinned is the recorded first candidate per plan/tech-stack.md.
+// Pinned is the recorded active candidate per plan/decisions.md D59.
+// Supersedes the earlier Qwen3-4B-Instruct-2507 candidate (preserved as historical).
 // All artifact fields are NOT_EVALUATED until real artifacts are
 // present.
 var Pinned = PinnedModel{
-	ModelID:         "Qwen/Qwen3-4B-Instruct-2507",
+	ModelID:         "sarvamai/sarvam-30b",
 	License:         "Apache-2.0",
-	ParamsB:         "4.0",
-	Thinking:        "non-thinking",
-	TrustRemoteCode: false,
+	ParamsB:         "30B MoE (2.4B active non-embedding, FP8)",
+	Thinking:        "disabled (enable_thinking=false)",
+	TrustRemoteCode: true,
 	// vLLM image tag is left for the integrator to pin; we do
 	// not invent a tag. The pinned image must be recorded in
 	// HARDWARE_BLOCKER.md alongside the verification date.
 	VLLMImageTag:    "NOT_EVALUATED",
 	BF16Artifact:    ArtifactInfo{Status: "BLOCKED_HARDWARE"},
 	AWQInt4Artifact: ArtifactInfo{Status: "BLOCKED_HARDWARE"},
+	FP8Artifact:     ArtifactInfo{Status: "BLOCKED_HARDWARE"},
 }
 
 func main() {
@@ -140,41 +143,34 @@ func runHarnessCheck() {
 	fmt.Printf("vllm_image_tag:     %s\n", Pinned.VLLMImageTag)
 	fmt.Println()
 	fmt.Println("artifact status:")
-	fmt.Printf("  BF16:             %s\n", Pinned.BF16Artifact.Status)
+	fmt.Printf("  FP8 (selected):   %s\n", Pinned.FP8Artifact.Status)
+	fmt.Printf("  BF16 (ref):       %s\n", Pinned.BF16Artifact.Status)
 	fmt.Printf("  AWQ-int4:         %s\n", Pinned.AWQInt4Artifact.Status)
 	fmt.Println()
 	fmt.Println("real-inference evaluation is BLOCKED until:")
-	fmt.Println("  - BF16 weights inventoried and SHA-256 recorded")
-	fmt.Println("  - AWQ-int4 weights inventoried and SHA-256 recorded")
-	fmt.Println("  - vLLM image tag pinned and recorded")
-	fmt.Println("  - private GPU (24 GB class) available")
+	fmt.Println("  - FP8 weights (~30 GB) inventoried and SHA-256 recorded")
+	fmt.Println("  - vLLM PR #33942 / fork / hotpatch or SGLang runtime verified")
+	fmt.Println("  - private GPU (48 GB+ or multi-GPU TP for FP8 MoE) available")
 	fmt.Println("  - reviewer signed off on artifact + license + remote-code")
 	fmt.Println()
 	fmt.Println("Reproducible commands (when artifacts are present):")
 	fmt.Println()
-	fmt.Println("  # 1. Pin the vLLM image and start the private server")
+	fmt.Println("  # 1. Pin the runtime image and start the private server")
 	fmt.Println("  docker run --gpus all --network=host \\")
 	fmt.Println("    vllm/vllm-openai:<PINNED_TAG> \\")
-	fmt.Println("    --model Qwen/Qwen3-4B-Instruct-2507 \\")
-	fmt.Println("    --trust-remote-code false \\")
-	fmt.Println("    --guided-decoding-backend lm-format-enforcer \\")
+	fmt.Println("    --model sarvamai/sarvam-30b \\")
+	fmt.Println("    --trust-remote-code true \\")
+	fmt.Println("    --quantization fp8 \\")
 	fmt.Println("    --max-model-len 4096 \\")
 	fmt.Println("    --max-num-seqs 2 \\")
 	fmt.Println("    --port 8000")
 	fmt.Println()
-	fmt.Println("  # 2. Run BF16 evaluation")
+	fmt.Println("  # 2. Run FP8 evaluation")
 	fmt.Println("  middleworker-eval -mode benchmark \\")
-	fmt.Println("    -quantization bf16 \\")
+	fmt.Println("    -quantization fp8 \\")
 	fmt.Println("    -endpoint http://127.0.0.1:8000 \\")
 	fmt.Println("    -corpus eval/corpus/synthetic.jsonl \\")
-	fmt.Println("    -out eval/results/bf16.json")
-	fmt.Println()
-	fmt.Println("  # 3. Run AWQ-int4 evaluation on the same reviewed corpus")
-	fmt.Println("  middleworker-eval -mode benchmark \\")
-	fmt.Println("    -quantization awq-int4 \\")
-	fmt.Println("    -endpoint http://127.0.0.1:8000 \\")
-	fmt.Println("    -corpus eval/corpus/synthetic.jsonl \\")
-	fmt.Println("    -out eval/results/awq.json")
+	fmt.Println("    -out eval/results/fp8.json")
 	fmt.Println()
 	fmt.Println("  # 4. Compare the two result files; report any measured regressions.")
 	fmt.Println()

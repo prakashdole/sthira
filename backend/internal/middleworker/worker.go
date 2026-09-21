@@ -88,7 +88,7 @@ type Config struct {
 	StartedAt time.Time
 
 	// SystemHint is an optional advisory text for the worker
-	// (e.g. "Qwen3-4B-Instruct-2507 pinned BF16"). Reported in
+	// (e.g. "Sarvam-30B FP8 MoE"). Reported in
 	// /health for incident triage; not consulted by the runtime.
 	SystemHint string
 }
@@ -438,7 +438,7 @@ func runtimeModelID(r Runtime) string {
 
 func runtimeLicense(r Runtime) string {
 	if _, ok := r.(*HTTPClientRuntime); ok {
-		return "Apache-2.0" // pinned for Qwen3-4B-Instruct-2507
+		return "Apache-2.0" // pinned for Sarvam-30B
 	}
 	return ""
 }

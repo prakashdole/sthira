@@ -26,7 +26,7 @@ type HTTPClientRuntime struct {
 }
 
 // HTTPClientRuntimeConfig bundles construction. The model_id is the
-// Qwen3-4B-Instruct-2507 model identifier; revision and digest are
+// Sarvam-30B model identifier; revision and digest are
 // recorded for /health. system is the pinned voice-map-system-prompt
 // (see plan/voice-map-system-prompt.md).
 type HTTPClientRuntimeConfig struct {

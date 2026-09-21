@@ -1,62 +1,48 @@
 # Hardware and artifact blocker — p6-middle
 
-2026-09-21 · recorded by Worker 6 (p6-middle) at the contract-freeze
-state. **Real vLLM evaluation is BLOCKED** until every item below is
-addressed and the recorded evidence is reviewed.
+2026-09-21 · recorded at the contract-freeze / Sarvam-30B adoption state. **Real inference evaluation is BLOCKED** until every item below is addressed and the recorded evidence is reviewed.
 
-## Pinned first candidate
+## User-selected middle candidate
 
 | Field | Value |
 | --- | --- |
-| Model | `Qwen/Qwen3-4B-Instruct-2507` |
-| Parameters | 4.0B (verified from model card, source register S01) |
-| License | Apache-2.0 (verified) |
-| Thinking mode | non-thinking |
-| Trust remote code | **false** (explicit; no silent trust) |
-| vLLM image tag | **NOT_EVALUATED** (to be pinned during integration) |
+| Model | `sarvamai/sarvam-30b` (user-selected, superseding earlier Qwen candidate) |
+| Architecture | Mixture-of-Experts (MoE): 128 experts, top-6 routed |
+| Parameters | 30B total, 2.4B active non-embedding parameters |
+| Precision/Quantization | FP8 weights selected (~30 GB resident weight memory) |
+| License | Apache-2.0 (verified from upstream model card) |
+| Thinking mode | disabled (`enable_thinking=false` in chat template; non-thinking JSON output) |
+| Trust remote code | **true** (required for Sarvam-30B architecture in transformers/vLLM) |
+| vLLM / SGLang image tag | **NOT_EVALUATED** (vLLM PR #33942 / fork / hotpatch or SGLang) |
+| FP8 artifact SHA-256 | **NOT_EVALUATED** |
 | BF16 artifact SHA-256 | **NOT_EVALUATED** |
-| AWQ-int4 artifact SHA-256 | **NOT_EVALUATED** |
 
 ## Blocked items (must be addressed before benchmark)
 
-1. **GPU hardware.** A 24 GB-class private GPU is required to
-   benchmark the 4B model with realistic concurrency. The
-   approval scope (O08, O12) does not authorize GPU rental.
-   The 4B model at BF16 needs roughly 8 GB just for the weights;
-   AWQ-int4 needs roughly 2–3 GB. Neither includes KV cache,
-   runtime workspace, quantization overhead, or concurrency.
-2. **Artifact inventory.** Both BF16 and AWQ-int4 weight
-   snapshots must be downloaded, hashed, and recorded here.
-   No tag, digest or path may be invented.
-3. **vLLM image tag.** The exact vLLM Docker image tag must
-   be pinned and recorded here. The image must support
-   guided JSON-schema generation (per source register S02);
-   a version that drifts from the documented
-   `/v1/chat/completions` schema is a deployment blocker.
-4. **License + remote-code review.** The reviewer must confirm
-   that the Qwen3-4B-Instruct-2507 weights do NOT require
-   remote code; the worker sets `trust_remote_code=false` at
-   the API surface.
-5. **Reviewer sign-off.** Per O15, real-model evaluation must
-   be approved before any reviewer-led run.
+1. **GPU hardware.** Sarvam-30B in FP8 requires ~30 GB resident weight memory alone, plus scales, KV cache, activations, workspace and concurrency overhead (recommend 48 GB+ or 2x 24 GB / 1x 80 GB A100/H100). The approval scope (O04, O08) does not authorize GPU rental. Active parameter count (2.4B) determines compute/FLOPs per token, NOT resident memory.
+2. **Artifact inventory.** FP8 (and BF16 reference) weight snapshots must be downloaded, hashed, and recorded here. No tag, digest or path may be invented.
+3. **vLLM/SGLang runtime support.** The runtime must support Sarvam-30B MoE (via vLLM PR #33942, custom fork, hotpatch, or SGLang) and guided JSON-schema generation (source register S02).
+4. **License + remote-code review.** Upstream declares Apache-2.0 and requires `trust_remote_code=true`.
+5. **Reviewer sign-off.** Per O15, real-model evaluation must be approved before any reviewer-led run.
 
 ## Reproducible commands (when artifacts and GPU are present)
 
 ```sh
-# 1. Pin the vLLM image and start the private server (loopback only).
+# 1. Pin the runtime image and start the private server (loopback only).
 docker run --gpus all --network=host \
   vllm/vllm-openai:<PINNED_TAG> \
-  --model Qwen/Qwen3-4B-Instruct-2507 \
-  --trust-remote-code false \
+  --model sarvamai/sarvam-30b \
+  --trust-remote-code true \
+  --quantization fp8 \
   --guided-decoding-backend lm-format-enforcer \
   --max-model-len 4096 \
   --max-num-seqs 2 \
   --port 8000
 
-# 2. Run BF16 evaluation against the reviewed synthetic corpus.
+# 2. Run FP8 evaluation against the reviewed synthetic corpus.
 go run ./backend/internal/middleworker/eval \
   -mode benchmark \
-  -quantization bf16 \
+  -quantization fp8 \
   -endpoint http://127.0.0.1:8000 \
   -corpus eval/corpus/synthetic.jsonl \
   -out eval/results/bf16.json

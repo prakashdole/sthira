@@ -46,21 +46,24 @@
 //
 // Pinned model + runtime (subject to real-inference verification):
 //
-//   - model_id:  Qwen/Qwen3-4B-Instruct-2507 (first candidate)
+//   - model_id:  sarvamai/sarvam-30b (adopted stack candidate per D59;
+//     supersedes earlier Qwen/Qwen3-4B-Instruct-2507 candidate)
 //   - license:   Apache-2.0 (verified from the model card, source
-//     register S01)
-//   - params:    4.0B (verified from the model card)
-//   - thinking:  non-thinking (the model supports both; we use the
-//     non-thinking variant)
-//   - vLLM:      pinned via the deployed image tag (see Eval image
+//     register S11)
+//   - params:    30B MoE total (128 experts, top-6 routed, 2.4B active
+//     non-embedding parameters)
+//   - thinking:  disabled (enable_thinking=false in chat template;
+//     non-thinking structured JSON output)
+//   - vLLM/SGLang: pinned via the deployed image tag (see Eval image
 //     reference). Structured-output JSON-schema is supported
-//     per source register S02.
+//     per source register S02. Requires vLLM PR #33942 / fork / hotpatch or SGLang.
 //   - tokenizer: ships with the model repo (no separate tokenizer pin).
-//   - trust_remote_code: false.
-//   - quantizations evaluated: BF16, AWQ-int4 (supported by vLLM for
-//     this model class per the Qwen3 reference; actual artifact
-//     presence and SHA-256 are NOT_EVALUATED until hardware is
-//     available — see MANIFEST and eval/HARDWARE_BLOCKER.md).
+//   - trust_remote_code: true (declared in upstream model card).
+//   - quantizations evaluated: FP8 (selected format, ~30 GB weights),
+//     BF16 (reference ~60 GB). Actual artifact presence and SHA-256
+//     are NOT_EVALUATED until hardware is available — see MANIFEST
+//     and eval/HARDWARE_BLOCKER.md. Capacity planning accounts for
+//     resident weight memory, not active parameter count.
 //
 // The schema fixture in schema/model_output.schema.json is the
 // authoritative JSON Schema for the model's structured-output mode.
