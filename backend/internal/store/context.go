@@ -30,6 +30,13 @@ type ContextSnapshot struct {
 	Jurisdiction     string
 	KnownIDs         map[string]bool
 	EnabledLanguages map[string]bool
+	// PackageID + PackageVersion are populated by ResolveContext and by
+	// BuildScopedContext's revalidation path. Worker 4 (p6-context)
+	// reads these to detect a snapshot change between dispatch and
+	// reconciliation. A query that previously returned DataVersion
+	// "PKG-1:7" but now returns "PKG-1:8" is the canonical stale signal.
+	PackageID      string
+	PackageVersion int
 }
 
 // packageBody is the minimal shape of the persisted packages.body JSON needed to
@@ -129,6 +136,8 @@ func ResolveContext(ctx context.Context, db DBTX, jurisdiction string, now time.
 		Jurisdiction:     jurisdiction,
 		KnownIDs:         known,
 		EnabledLanguages: langs,
+		PackageID:        pkgID,
+		PackageVersion:   version,
 	}, nil
 }
 
