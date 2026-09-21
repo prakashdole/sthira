@@ -41,6 +41,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -75,12 +76,21 @@ func disposableDB(t *testing.T) (string, func()) {
 		_ = cmd.Run()
 	}
 	dsn := strings.Replace(admin, "/postgres", "/"+dbName, 1)
-	// Apply migrations 0001..0006 in order.
-	for _, m := range []string{"0001_p3_foundation", "0002_p4_stays", "0003_p4_operator", "0004_p4_operator_grants", "0005_p4_operator_identity", "0006_p5_offline_publication"} {
-		migPath := filepath.Join("..", "..", "migrations", m+".sql")
-		if _, err := os.Stat(migPath); err != nil {
-			t.Fatalf("migration file not found: %s: %v", migPath, err)
+	migDir := filepath.Join("..", "..", "migrations")
+	entries, err := os.ReadDir(migDir)
+	if err != nil {
+		cleanup()
+		t.Fatalf("ReadDir(%s): %v", migDir, err)
+	}
+	var migFiles []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") {
+			migFiles = append(migFiles, entry.Name())
 		}
+	}
+	sort.Strings(migFiles)
+	for _, f := range migFiles {
+		migPath := filepath.Join(migDir, f)
 		runPsql(t, dsn, migPath, "")
 	}
 	return dsn, cleanup
@@ -88,7 +98,7 @@ func disposableDB(t *testing.T) (string, func()) {
 
 func runPsql(t *testing.T, dsn, file, sql string) {
 	t.Helper()
-	args := []string{dsn}
+	args := []string{dsn, "-v", "ON_ERROR_STOP=1"}
 	if file != "" {
 		args = append(args, "-q", "-f", file)
 	}

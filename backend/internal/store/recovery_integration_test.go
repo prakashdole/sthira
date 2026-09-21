@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -122,16 +123,20 @@ func TestBackupRestoreAndReconnect(t *testing.T) {
 		}
 	}
 
-	// Apply every migration file (0001..0006) in order.
+	// Apply every migration file in order.
 	migDir := filepath.Join("..", "..", "migrations")
-	for _, f := range []string{
-		"0001_p3_foundation.sql",
-		"0002_p4_stays.sql",
-		"0003_p4_operator.sql",
-		"0004_p4_operator_grants.sql",
-		"0005_p4_operator_identity.sql",
-		"0006_p5_offline_publication.sql",
-	} {
+	entries, err := os.ReadDir(migDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", migDir, err)
+	}
+	var migFiles []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") {
+			migFiles = append(migFiles, entry.Name())
+		}
+	}
+	sort.Strings(migFiles)
+	for _, f := range migFiles {
 		if out, err := runPsql(t, env, srcDB, "-q", "-f", filepath.Join(migDir, f)); err != nil {
 			t.Fatalf("apply %s: %v\n%s", f, err, out)
 		}

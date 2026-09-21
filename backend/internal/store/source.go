@@ -68,6 +68,30 @@ func (s *SourceStore) Transition(ctx context.Context, db DBTX, sourceID string, 
 	if err != nil {
 		return err
 	}
+	// Propagate restriction or withdrawal to published manifests and cards
+	if target == sourceact.Quarantined {
+		if _, qerr := db.ExecContext(ctx, `
+			UPDATE published_manifests SET quarantined = true
+			WHERE source_id = $1 OR package_id IN (SELECT package_id FROM packages WHERE source_id = $1)`, sourceID); qerr != nil {
+			return qerr
+		}
+		if _, qerr := db.ExecContext(ctx, `
+			UPDATE published_cards SET quarantined = true
+			WHERE source_id = $1 OR package_id IN (SELECT package_id FROM packages WHERE source_id = $1)`, sourceID); qerr != nil {
+			return qerr
+		}
+	} else if target == sourceact.Retired || target == sourceact.Suspended {
+		if _, werr := db.ExecContext(ctx, `
+			UPDATE published_manifests SET source_status = 'WITHDRAWN'
+			WHERE source_id = $1 OR package_id IN (SELECT package_id FROM packages WHERE source_id = $1)`, sourceID); werr != nil {
+			return werr
+		}
+		if _, werr := db.ExecContext(ctx, `
+			UPDATE published_cards SET source_status = 'WITHDRAWN'
+			WHERE source_id = $1 OR package_id IN (SELECT package_id FROM packages WHERE source_id = $1)`, sourceID); werr != nil {
+			return werr
+		}
+	}
 	if s.audit != nil {
 		if err := s.audit.Record(ctx, db, AuditEvent{
 			EventID:   eventID,

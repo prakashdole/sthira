@@ -583,3 +583,109 @@ func jsonMustMarshal(t *testing.T, v any) []byte {
 	}
 	return b
 }
+
+func TestValidateSuccessEnvelope_StatusRules(t *testing.T) {
+	goodBody := []byte(`{"request_id":"r1","data":{"reservation_id":"RES-1","stay_id":"STAY-1"}}`)
+	// 200 and 201 are accepted
+	if ok, _, reason := validateSuccessEnvelope("POST", "/api/v3/reservations", 200, goodBody, nil); !ok {
+		t.Fatalf("expected status 200 accepted, got %s", reason)
+	}
+	if ok, _, reason := validateSuccessEnvelope("POST", "/api/v3/reservations", 201, goodBody, nil); !ok {
+		t.Fatalf("expected status 201 accepted, got %s", reason)
+	}
+	// 202 is rejected (asynchronous/non-terminal)
+	if ok, _, _ := validateSuccessEnvelope("POST", "/api/v3/reservations", 202, goodBody, nil); ok {
+		t.Fatal("expected status 202 rejected")
+	}
+	// 204 is rejected
+	if ok, _, _ := validateSuccessEnvelope("POST", "/api/v3/reservations", 204, goodBody, nil); ok {
+		t.Fatal("expected status 204 rejected")
+	}
+}
+
+func TestValidateSuccessEnvelope_Allowlist(t *testing.T) {
+	body := []byte(`{"request_id":"r1","data":{"foo":"bar"}}`)
+	// Non-allowlisted endpoints rejected
+	for _, badPath := range []string{"/api/v3/places/resolve", "/api/v3/guidance/query", "/api/v3/unknown", "/api/v3/reservations/events"} {
+		if ok, _, _ := validateSuccessEnvelope("POST", badPath, 200, body, nil); ok {
+			t.Fatalf("expected endpoint %s rejected", badPath)
+		}
+	}
+}
+
+func TestValidateSuccessEnvelope_DuplicateKeysAndTrailingData(t *testing.T) {
+	// Duplicate key in top-level
+	dupTop := []byte(`{"request_id":"r1","data":{"reservation_id":"R","stay_id":"S"},"request_id":"r2"}`)
+	if ok, _, reason := validateSuccessEnvelope("POST", "/api/v3/reservations", 200, dupTop, nil); ok {
+		t.Fatalf("expected duplicate key rejected, got success")
+	} else if !strings.Contains(reason, "duplicate key") {
+		t.Fatalf("expected duplicate key reason, got %q", reason)
+	}
+
+	// Duplicate key inside data
+	dupInner := []byte(`{"request_id":"r1","data":{"reservation_id":"R","stay_id":"S","stay_id":"S2"}}`)
+	if ok, _, reason := validateSuccessEnvelope("POST", "/api/v3/reservations", 200, dupInner, nil); ok {
+		t.Fatalf("expected duplicate key inside data rejected, got success")
+	} else if !strings.Contains(reason, "duplicate key") {
+		t.Fatalf("expected duplicate key reason, got %q", reason)
+	}
+
+	// Trailing data
+	trailing := []byte(`{"request_id":"r1","data":{"reservation_id":"R","stay_id":"S"}} trailing`)
+	if ok, _, reason := validateSuccessEnvelope("POST", "/api/v3/reservations", 200, trailing, nil); ok {
+		t.Fatalf("expected trailing data rejected, got success")
+	} else if !strings.Contains(reason, "trailing data") {
+		t.Fatalf("expected trailing data reason, got %q", reason)
+	}
+}
+
+func TestValidateSuccessEnvelope_StayEventsBindingAndTransfer(t *testing.T) {
+	path := "/api/v3/reservations/STAY-99/events"
+	submittedPayload := []byte(`{"type":"TRANSFER","new_facility_id":"FAC-2","snapshot_version":1}`)
+
+	// Mismatched stay_id
+	badStayID := []byte(`{"request_id":"r1","data":{"stay_id":"STAY-MISMATCH","type":"TRANSFER","new_stay_id":"STAY-100","new_reservation_id":"RES-100"}}`)
+	if ok, _, reason := validateSuccessEnvelope("POST", path, 200, badStayID, submittedPayload); ok {
+		t.Fatal("expected stay_id mismatch rejection")
+	} else if !strings.Contains(reason, "does not match path stay_id") {
+		t.Fatalf("unexpected reason: %s", reason)
+	}
+
+	// Mismatched event type
+	mismatchedType := []byte(`{"request_id":"r1","data":{"stay_id":"STAY-99","type":"ARRIVE"}}`)
+	if ok, _, reason := validateSuccessEnvelope("POST", path, 200, mismatchedType, submittedPayload); ok {
+		t.Fatal("expected event type mismatch rejection")
+	} else if !strings.Contains(reason, "does not match submitted payload type") {
+		t.Fatalf("unexpected reason: %s", reason)
+	}
+
+	// TRANSFER missing new_stay_id
+	missingNewStay := []byte(`{"request_id":"r1","data":{"stay_id":"STAY-99","type":"TRANSFER","new_reservation_id":"RES-100"}}`)
+	if ok, _, reason := validateSuccessEnvelope("POST", path, 200, missingNewStay, submittedPayload); ok {
+		t.Fatal("expected transfer missing new_stay_id rejection")
+	} else if !strings.Contains(reason, "transfer event response missing") {
+		t.Fatalf("unexpected reason: %s", reason)
+	}
+
+	// TRANSFER missing new_reservation_id
+	missingNewRes := []byte(`{"request_id":"r1","data":{"stay_id":"STAY-99","type":"TRANSFER","new_stay_id":"STAY-100"}}`)
+	if ok, _, reason := validateSuccessEnvelope("POST", path, 200, missingNewRes, submittedPayload); ok {
+		t.Fatal("expected transfer missing new_reservation_id rejection")
+	} else if !strings.Contains(reason, "transfer event response missing") {
+		t.Fatalf("unexpected reason: %s", reason)
+	}
+
+	// TRANSFER complete with replacement IDs
+	goodTransfer := []byte(`{"request_id":"r1","data":{"stay_id":"STAY-99","type":"TRANSFER","new_stay_id":"STAY-100","new_reservation_id":"RES-100"}}`)
+	if ok, _, reason := validateSuccessEnvelope("POST", path, 200, goodTransfer, submittedPayload); !ok {
+		t.Fatalf("expected valid transfer accepted, got %s", reason)
+	}
+
+	// ARRIVE complete
+	arrivePayload := []byte(`{"type":"ARRIVE","stay_id":"STAY-99"}`)
+	goodArrive := []byte(`{"request_id":"r1","data":{"stay_id":"STAY-99","type":"ARRIVE"}}`)
+	if ok, _, reason := validateSuccessEnvelope("POST", path, 200, goodArrive, arrivePayload); !ok {
+		t.Fatalf("expected valid arrive accepted, got %s", reason)
+	}
+}
+

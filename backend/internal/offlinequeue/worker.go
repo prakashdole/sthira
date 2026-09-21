@@ -1,10 +1,12 @@
 package offlinequeue
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -355,7 +357,7 @@ func (w *ReplayWorker) Submit(ctx context.Context, op PendingOperation) (SubmitO
 			// evidence — the cost of a false-positive here is a duplicate
 			// reservation on the next replay, which is the worst outcome
 			// for a citizen during an emergency.
-			if ok, code, reason := validateSuccessEnvelope(current.Method, current.Endpoint, status, body); !ok {
+			if ok, code, reason := validateSuccessEnvelope(current.Method, current.Endpoint, status, body, current.Payload); !ok {
 				msg := fmt.Sprintf("2xx envelope rejected: %s", reason)
 				if code != "" {
 					msg = fmt.Sprintf("2xx envelope rejected: %s (code=%s)", reason, code)
@@ -544,16 +546,27 @@ func isPermanentCode(code string) bool {
 // when the next drain replays.
 //
 // Validation rules:
-//   - body must be valid JSON (any non-2xx-ish proxy output is rejected);
-//   - body must NOT contain an errors[].code field (a 2xx that carries an
-//     error envelope is not a success);
+//   - status must be 200 OK or 201 Created (202 Accepted is rejected);
+//   - body must be valid JSON without duplicate keys or trailing data;
+//   - body must NOT contain an errors[].code field;
 //   - body must contain a `data` field that is a non-null JSON object;
-//   - POST /api/v3/reservations: data must include reservation_id AND stay_id;
-//   - POST /api/v3/reservations/{id}/events: data must include stay_id AND a
-//     recognized type (ARRIVE|CANCEL|DEPART|EXTEND|TRANSFER).
-func validateSuccessEnvelope(method, path string, status int, body []byte) (ok bool, code, reason string) {
+//   - method must be POST;
+//   - endpoint must be strictly allowlisted:
+//     * POST /api/v3/reservations: data must include reservation_id AND stay_id;
+//     * POST /api/v3/reservations/{stay_id}/events: data must include stay_id
+//       matching path, recognized type (ARRIVE|CANCEL|DEPART|EXTEND|TRANSFER),
+//       response stay_id and type bound to submitted payload, and TRANSFER requires
+//       both new_stay_id and new_reservation_id.
+//   - Any unknown endpoint is rejected.
+func validateSuccessEnvelope(method, path string, status int, body, payload []byte) (ok bool, code, reason string) {
+	if status != http.StatusOK && status != http.StatusCreated {
+		return false, "", fmt.Sprintf("status %d is not a terminal success (expected 200 or 201)", status)
+	}
 	if len(body) == 0 {
 		return false, "", "empty body"
+	}
+	if err := checkNoDuplicateKeys(body); err != nil {
+		return false, "", fmt.Sprintf("invalid JSON structure: %v", err)
 	}
 	var env struct {
 		RequestID string          `json:"request_id"`
@@ -589,25 +602,121 @@ func validateSuccessEnvelope(method, path string, status int, body []byte) (ok b
 			return false, "", "missing reservation_id or stay_id"
 		}
 		return true, "", ""
+
 	case strings.HasPrefix(path, "/api/v3/reservations/") && strings.HasSuffix(path, "/events"):
+		parts := strings.Split(strings.Trim(path, "/"), "/")
+		if len(parts) != 5 || parts[0] != "api" || parts[1] != "v3" || parts[2] != "reservations" || parts[4] != "events" || parts[3] == "" {
+			return false, "", fmt.Sprintf("malformed reservations event path %q", path)
+		}
+		pathStayID := parts[3]
+
 		sid, _ := data["stay_id"].(string)
 		typ, _ := data["type"].(string)
 		if sid == "" {
 			return false, "", "missing stay_id"
 		}
+		if sid != pathStayID {
+			return false, "", fmt.Sprintf("response stay_id %q does not match path stay_id %q", sid, pathStayID)
+		}
 		switch strings.ToUpper(typ) {
 		case "ARRIVE", "CANCEL", "DEPART", "EXTEND", "TRANSFER":
-			return true, "", ""
+			// ok
 		default:
 			return false, "", fmt.Sprintf("unknown stay event type %q", typ)
 		}
-	default:
-		// Other /api/v3 endpoints: accept the envelope if it has data; the
-		// queue currently only carries reservation.create and stay.* but
-		// a future endpoint (e.g. /api/v3/sessions) gets the same
-		// envelope check without an endpoint-specific identifier rule.
+
+		if len(payload) > 0 {
+			var submitted struct {
+				Type   string `json:"type"`
+				StayID string `json:"stay_id"`
+			}
+			if err := json.Unmarshal(payload, &submitted); err == nil {
+				if submitted.Type != "" && !strings.EqualFold(submitted.Type, typ) {
+					return false, "", fmt.Sprintf("response event type %q does not match submitted payload type %q", typ, submitted.Type)
+				}
+				if submitted.StayID != "" && submitted.StayID != sid {
+					return false, "", fmt.Sprintf("response stay_id %q does not match submitted payload stay_id %q", sid, submitted.StayID)
+				}
+			}
+		}
+
+		if strings.ToUpper(typ) == "TRANSFER" {
+			newStayID, _ := data["new_stay_id"].(string)
+			newResID, _ := data["new_reservation_id"].(string)
+			if newStayID == "" || newResID == "" {
+				return false, "", "transfer event response missing new_stay_id or new_reservation_id"
+			}
+		}
 		return true, "", ""
+
+	default:
+		// Explicit allowlist: only /api/v3/reservations and /api/v3/reservations/{stay_id}/events are accepted.
+		return false, "", fmt.Sprintf("unsupported endpoint %q", path)
 	}
+}
+
+func checkNoDuplicateKeys(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return errors.New("empty JSON data")
+	}
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	if err := walkJSONTokens(dec, 0, 32); err != nil {
+		return err
+	}
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); err != io.EOF {
+		return errors.New("trailing data after top-level JSON value")
+	}
+	return nil
+}
+
+func walkJSONTokens(dec *json.Decoder, depth, maxDepth int) error {
+	if maxDepth > 0 && depth > maxDepth {
+		return fmt.Errorf("depth %d exceeds maximum depth %d", depth, maxDepth)
+	}
+	tok, err := dec.Token()
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return errors.New("truncated JSON")
+		}
+		return err
+	}
+	switch delim := tok.(type) {
+	case json.Delim:
+		switch delim {
+		case '{':
+			seen := make(map[string]struct{})
+			for dec.More() {
+				t, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				key, ok := t.(string)
+				if !ok {
+					return errors.New("non-string object key")
+				}
+				if _, exists := seen[key]; exists {
+					return fmt.Errorf("duplicate key %q", key)
+				}
+				seen[key] = struct{}{}
+				if err := walkJSONTokens(dec, depth+1, maxDepth); err != nil {
+					return err
+				}
+			}
+			_, err = dec.Token() // consume '}'
+			return err
+		case '[':
+			for dec.More() {
+				if err := walkJSONTokens(dec, depth+1, maxDepth); err != nil {
+					return err
+				}
+			}
+			_, err = dec.Token() // consume ']'
+			return err
+		}
+	}
+	return nil
 }
 
 // serverErrorMessage and transportErrorMessage build redacted diagnostic

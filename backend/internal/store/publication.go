@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -79,15 +78,15 @@ func (s *Store) PublishManifest(ctx context.Context, m *PublishedManifest) error
 		return errors.New("store: invalid checksum length")
 	}
 
-	var parsed offlinepkg.Manifest
-	if err := json.Unmarshal(m.RawJSON, &parsed); err != nil {
+	parsed, err := offlinepkg.ParseManifest(m.RawJSON, offlinepkg.Limits{MaxBytes: 262144})
+	if err != nil {
 		return fmt.Errorf("store: parse manifest json: %w", err)
-	}
-	if err := offlinepkg.ValidateManifestStructure(&parsed); err != nil {
-		return fmt.Errorf("store: validate manifest structure: %w", err)
 	}
 	if parsed.ChecksumSHA256 != m.ChecksumSHA256 {
 		return fmt.Errorf("store: manifest checksum mismatch: payload has %q, record has %q", parsed.ChecksumSHA256, m.ChecksumSHA256)
+	}
+	if m.SourceStatus == "" {
+		m.SourceStatus = "CURRENT"
 	}
 
 	// Check existing row for immutability
@@ -103,7 +102,7 @@ WHERE jurisdiction = $1 AND revision = $2`
 		existingStatus   string
 	)
 	row := s.db.QueryRowContext(ctx, checkQuery, m.Jurisdiction, m.Revision)
-	err := row.Scan(&existingChecksum, &existingRaw, &existingQuar, &existingStatus)
+	err = row.Scan(&existingChecksum, &existingRaw, &existingQuar, &existingStatus)
 	if err == nil {
 		// Row exists: check immutability
 		if existingChecksum != m.ChecksumSHA256 || !bytes.Equal(existingRaw, m.RawJSON) {
@@ -125,13 +124,18 @@ WHERE jurisdiction = $1 AND revision = $2`
 
 	// Insert new row
 	const insertQuery = `
-INSERT INTO published_manifests (manifest_id, jurisdiction, revision, package_id, raw_json, checksum_sha256, source_status, quarantined)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+INSERT INTO published_manifests (manifest_id, jurisdiction, revision, package_id, source_id, raw_json, checksum_sha256, source_status, quarantined)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+	var sourceID sql.NullString
+	if m.SourceID != "" {
+		sourceID = sql.NullString{String: m.SourceID, Valid: true}
+	}
 	_, err = s.db.ExecContext(ctx, insertQuery,
 		m.ManifestID,
 		m.Jurisdiction,
 		m.Revision,
 		m.PackageID,
+		sourceID,
 		m.RawJSON,
 		m.ChecksumSHA256,
 		m.SourceStatus,
@@ -143,7 +147,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 // GetPublishedManifest retrieves the highest-revision published manifest for a jurisdiction.
 func (s *Store) GetPublishedManifest(ctx context.Context, jurisdiction string) (*PublishedManifest, error) {
 	const query = `
-SELECT manifest_id, jurisdiction, revision, package_id, raw_json, checksum_sha256, source_status, quarantined, created_at
+SELECT manifest_id, jurisdiction, revision, package_id, COALESCE(source_id, ''), raw_json, checksum_sha256, source_status, quarantined, created_at
 FROM published_manifests
 WHERE jurisdiction = $1
 ORDER BY revision DESC
@@ -155,6 +159,7 @@ LIMIT 1`
 		&m.Jurisdiction,
 		&m.Revision,
 		&m.PackageID,
+		&m.SourceID,
 		&m.RawJSON,
 		&m.ChecksumSHA256,
 		&m.SourceStatus,
@@ -210,6 +215,45 @@ WHERE jurisdiction = $1 AND revision = $2`
 	return nil
 }
 
+// PromoteManifest marks a staged manifest revision as CURRENT and marks prior CURRENT manifests for that jurisdiction as SUPERSEDED.
+func (s *Store) PromoteManifest(ctx context.Context, jurisdiction string, revision int) error {
+	return s.InTx(ctx, func(tx DBTX) error {
+		var status string
+		var quarantined bool
+		err := tx.QueryRowContext(ctx, `
+			SELECT source_status, quarantined
+			FROM published_manifests
+			WHERE jurisdiction = $1 AND revision = $2
+			FOR UPDATE`, jurisdiction, revision).Scan(&status, &quarantined)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if quarantined {
+			return errors.New("store: cannot promote quarantined manifest")
+		}
+		if status == "WITHDRAWN" {
+			return errors.New("store: cannot promote withdrawn manifest")
+		}
+		_, err = tx.ExecContext(ctx, `
+			UPDATE published_manifests
+			SET source_status = 'SUPERSEDED'
+			WHERE jurisdiction = $1 AND revision < $2 AND source_status = 'CURRENT'`,
+			jurisdiction, revision)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `
+			UPDATE published_manifests
+			SET source_status = 'CURRENT'
+			WHERE jurisdiction = $1 AND revision = $2`,
+			jurisdiction, revision)
+		return err
+	})
+}
+
 // PublishCard stores an immutable public incident card. Boundary checks validate
 // schema, checksum, and payload length before persistence. Duplicate publish with
 // identical content and checksum is idempotent; any content mutation under an
@@ -234,15 +278,18 @@ func (s *Store) PublishCard(ctx context.Context, c *PublishedCard) error {
 		return errors.New("store: invalid checksum length")
 	}
 
-	var parsed offlinepkg.PublicIncidentCard
-	if err := json.Unmarshal(c.RawJSON, &parsed); err != nil {
+	parsed, err := offlinepkg.ParseCard(c.RawJSON, offlinepkg.Limits{MaxBytes: 65536})
+	if err != nil {
 		return fmt.Errorf("store: parse card json: %w", err)
-	}
-	if err := offlinepkg.ValidateCardStructure(&parsed); err != nil {
-		return fmt.Errorf("store: validate card structure: %w", err)
 	}
 	if parsed.ChecksumSHA256 != c.ChecksumSHA256 {
 		return fmt.Errorf("store: card checksum mismatch: payload has %q, record has %q", parsed.ChecksumSHA256, c.ChecksumSHA256)
+	}
+	if c.SourceStatus == "" {
+		c.SourceStatus = "CURRENT"
+	}
+	if c.Jurisdiction == "" && parsed.Jurisdiction != "" {
+		c.Jurisdiction = parsed.Jurisdiction
 	}
 
 	// Check existing row for immutability
@@ -258,7 +305,7 @@ WHERE package_id = $1 AND version = $2`
 		existingStatus   string
 	)
 	row := s.db.QueryRowContext(ctx, checkQuery, c.PackageID, c.Version)
-	err := row.Scan(&existingChecksum, &existingRaw, &existingQuar, &existingStatus)
+	err = row.Scan(&existingChecksum, &existingRaw, &existingQuar, &existingStatus)
 	if err == nil {
 		// Row exists: check immutability
 		if existingChecksum != c.ChecksumSHA256 || !bytes.Equal(existingRaw, c.RawJSON) {
@@ -280,11 +327,20 @@ WHERE package_id = $1 AND version = $2`
 
 	// Insert new row
 	const insertQuery = `
-INSERT INTO published_cards (package_id, version, raw_json, checksum_sha256, source_status, quarantined)
-VALUES ($1, $2, $3, $4, $5, $6)`
+INSERT INTO published_cards (package_id, version, source_id, jurisdiction, raw_json, checksum_sha256, source_status, quarantined)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+	var sourceID, jurisdiction sql.NullString
+	if c.SourceID != "" {
+		sourceID = sql.NullString{String: c.SourceID, Valid: true}
+	}
+	if c.Jurisdiction != "" {
+		jurisdiction = sql.NullString{String: c.Jurisdiction, Valid: true}
+	}
 	_, err = s.db.ExecContext(ctx, insertQuery,
 		c.PackageID,
 		c.Version,
+		sourceID,
+		jurisdiction,
 		c.RawJSON,
 		c.ChecksumSHA256,
 		c.SourceStatus,
@@ -296,7 +352,7 @@ VALUES ($1, $2, $3, $4, $5, $6)`
 // GetPublishedCard retrieves the published incident card for a package and version.
 func (s *Store) GetPublishedCard(ctx context.Context, packageID string, version int) (*PublishedCard, error) {
 	const query = `
-SELECT package_id, version, raw_json, checksum_sha256, source_status, quarantined, created_at
+SELECT package_id, version, COALESCE(source_id, ''), COALESCE(jurisdiction, ''), raw_json, checksum_sha256, source_status, quarantined, created_at
 FROM published_cards
 WHERE package_id = $1 AND version = $2`
 	row := s.db.QueryRowContext(ctx, query, packageID, version)
@@ -304,6 +360,8 @@ WHERE package_id = $1 AND version = $2`
 	err := row.Scan(
 		&c.PackageID,
 		&c.Version,
+		&c.SourceID,
+		&c.Jurisdiction,
 		&c.RawJSON,
 		&c.ChecksumSHA256,
 		&c.SourceStatus,
@@ -357,6 +415,45 @@ WHERE package_id = $1 AND version = $2`
 		return ErrNotFound
 	}
 	return nil
+}
+
+// PromoteCard marks a staged card as CURRENT and marks prior CURRENT versions for that package as SUPERSEDED.
+func (s *Store) PromoteCard(ctx context.Context, packageID string, version int) error {
+	return s.InTx(ctx, func(tx DBTX) error {
+		var status string
+		var quarantined bool
+		err := tx.QueryRowContext(ctx, `
+			SELECT source_status, quarantined
+			FROM published_cards
+			WHERE package_id = $1 AND version = $2
+			FOR UPDATE`, packageID, version).Scan(&status, &quarantined)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if quarantined {
+			return errors.New("store: cannot promote quarantined card")
+		}
+		if status == "WITHDRAWN" {
+			return errors.New("store: cannot promote withdrawn card")
+		}
+		_, err = tx.ExecContext(ctx, `
+			UPDATE published_cards
+			SET source_status = 'SUPERSEDED'
+			WHERE package_id = $1 AND version < $2 AND source_status = 'CURRENT'`,
+			packageID, version)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `
+			UPDATE published_cards
+			SET source_status = 'CURRENT'
+			WHERE package_id = $1 AND version = $2`,
+			packageID, version)
+		return err
+	})
 }
 
 // PublishResource stores a content-addressed auxiliary asset. Boundary checks validate
