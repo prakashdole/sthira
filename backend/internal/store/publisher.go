@@ -296,7 +296,23 @@ func (p *Publisher) PublishCard(ctx context.Context, c *PublishedCard) error {
 	}
 
 	return p.st.InTx(ctx, func(tx DBTX) error {
-		// 1. Package check (FOR UPDATE)
+		// 1. Source OPERATIONAL check (FOR UPDATE) FIRST to maintain global lock order (sources -> packages)
+		var state string
+		err := tx.QueryRowContext(ctx, `
+			SELECT s.state FROM sources s WHERE s.source_id = $1
+			FOR UPDATE`, c.SourceID).Scan(&state)
+		if err != nil {
+			return fmt.Errorf("%w: source lookup: %v", ErrPublicationAuthority, err)
+		}
+		switch state {
+		case "OPERATIONAL":
+		case "QUARANTINED":
+			return fmt.Errorf("%w: source is QUARANTINED", ErrPublicationAuthority)
+		default:
+			return fmt.Errorf("%w: source state=%q (must be OPERATIONAL)", ErrPublicationAuthority, state)
+		}
+
+		// 2. Package check (FOR UPDATE) SECOND
 		var (
 			pkgSource       string
 			pkgVersion      int
@@ -304,7 +320,7 @@ func (p *Publisher) PublishCard(ctx context.Context, c *PublishedCard) error {
 			superseded      bool
 			active          bool
 		)
-		err := tx.QueryRowContext(ctx, `
+		err = tx.QueryRowContext(ctx, `
 			SELECT p.source_id, p.version, p.jurisdiction, (p.superseded_by IS NOT NULL),
 			       (p.effective_at <= $2 AND p.expires_at > $2)
 			FROM packages p WHERE p.package_id = $1
@@ -326,22 +342,6 @@ func (p *Publisher) PublishCard(ctx context.Context, c *PublishedCard) error {
 		}
 		if c.Jurisdiction != "" && pkgJurisdiction != c.Jurisdiction {
 			return fmt.Errorf("%w: package jurisdiction=%q does not match card jurisdiction=%q", ErrPublicationAuthority, pkgJurisdiction, c.Jurisdiction)
-		}
-
-		// 2. Source OPERATIONAL check (FOR UPDATE)
-		var state string
-		err = tx.QueryRowContext(ctx, `
-			SELECT s.state FROM sources s WHERE s.source_id = $1
-			FOR UPDATE`, c.SourceID).Scan(&state)
-		if err != nil {
-			return fmt.Errorf("%w: source lookup: %v", ErrPublicationAuthority, err)
-		}
-		switch state {
-		case "OPERATIONAL":
-		case "QUARANTINED":
-			return fmt.Errorf("%w: source is QUARANTINED", ErrPublicationAuthority)
-		default:
-			return fmt.Errorf("%w: source state=%q (must be OPERATIONAL)", ErrPublicationAuthority, state)
 		}
 
 		// 3. Live authorization check in the card's jurisdiction

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"sthira/backend/internal/offlinepkg"
@@ -144,13 +145,15 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 	return err
 }
 
-// GetPublishedManifest retrieves the highest-revision published manifest for a jurisdiction.
+// GetPublishedManifest retrieves the current published manifest for a jurisdiction.
+// Staging a newer publication must not hide the valid CURRENT one.
+// STAGED manifests are excluded from active selection.
 func (s *Store) GetPublishedManifest(ctx context.Context, jurisdiction string) (*PublishedManifest, error) {
 	const query = `
 SELECT manifest_id, jurisdiction, revision, package_id, COALESCE(source_id, ''), raw_json, checksum_sha256, source_status, quarantined, created_at
 FROM published_manifests
-WHERE jurisdiction = $1
-ORDER BY revision DESC
+WHERE jurisdiction = $1 AND source_status != 'STAGED'
+ORDER BY (CASE WHEN source_status = 'CURRENT' THEN 1 ELSE 0 END) DESC, revision DESC
 LIMIT 1`
 	row := s.db.QueryRowContext(ctx, query, jurisdiction)
 	var m PublishedManifest
@@ -216,15 +219,24 @@ WHERE jurisdiction = $1 AND revision = $2`
 }
 
 // PromoteManifest marks a staged manifest revision as CURRENT and marks prior CURRENT manifests for that jurisdiction as SUPERSEDED.
+// It transactionally binds promotion to attributed source, package, jurisdiction, live authorization,
+// active unexpired non-superseded package, and manifest-card version relationship.
+// Rejects legacy unattributed promotion with no writes.
 func (s *Store) PromoteManifest(ctx context.Context, jurisdiction string, revision int) error {
+	now := time.Now().UTC()
 	return s.InTx(ctx, func(tx DBTX) error {
-		var status string
-		var quarantined bool
+		var (
+			manifestID   string
+			packageID    string
+			sourceIDNull sql.NullString
+			status       string
+			quarantined  bool
+		)
 		err := tx.QueryRowContext(ctx, `
-			SELECT source_status, quarantined
+			SELECT manifest_id, package_id, source_id, source_status, quarantined
 			FROM published_manifests
-			WHERE jurisdiction = $1 AND revision = $2
-			FOR UPDATE`, jurisdiction, revision).Scan(&status, &quarantined)
+			WHERE jurisdiction = $1 AND revision = $2`, jurisdiction, revision).
+			Scan(&manifestID, &packageID, &sourceIDNull, &status, &quarantined)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return ErrNotFound
@@ -237,6 +249,97 @@ func (s *Store) PromoteManifest(ctx context.Context, jurisdiction string, revisi
 		if status == "WITHDRAWN" {
 			return errors.New("store: cannot promote withdrawn manifest")
 		}
+		if status == "CURRENT" {
+			return nil // idempotent
+		}
+		// Reject legacy unattributed row (source_id is NULL or empty) with no writes
+		if !sourceIDNull.Valid || strings.TrimSpace(sourceIDNull.String) == "" {
+			return fmt.Errorf("%w: cannot promote unattributed manifest: source_id required", ErrPublicationAuthority)
+		}
+		sourceID := sourceIDNull.String
+
+		// Strict lock order across transactions:
+		// 1. sources (FOR UPDATE)
+		// 2. packages (FOR UPDATE)
+		// 3. published_manifests (FOR UPDATE)
+		var srcState string
+		err = tx.QueryRowContext(ctx, `
+			SELECT state FROM sources WHERE source_id = $1 FOR UPDATE`, sourceID).Scan(&srcState)
+		if err != nil {
+			return fmt.Errorf("%w: source lookup: %v", ErrPublicationAuthority, err)
+		}
+		if srcState != "OPERATIONAL" {
+			return fmt.Errorf("%w: source state is %q (must be OPERATIONAL)", ErrPublicationAuthority, srcState)
+		}
+
+		// Check live authorization in jurisdiction
+		var authExists bool
+		err = tx.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM source_authorizations
+				WHERE source_id = $1 AND jurisdiction = $2
+				  AND (expires_at IS NULL OR expires_at > $3)
+			)`, sourceID, jurisdiction, now).Scan(&authExists)
+		if err != nil {
+			return fmt.Errorf("%w: authorization lookup: %v", ErrPublicationAuthority, err)
+		}
+		if !authExists {
+			return fmt.Errorf("%w: no live authorization for %q", ErrPublicationAuthority, jurisdiction)
+		}
+
+		// 2. Lock packages FOR UPDATE
+		var (
+			pkgVersion    int
+			pkgSuperseded bool
+			pkgActive     bool
+		)
+		err = tx.QueryRowContext(ctx, `
+			SELECT version, (superseded_by IS NOT NULL), (effective_at <= $3 AND expires_at > $3)
+			FROM packages
+			WHERE source_id = $1 AND package_id = $2
+			FOR UPDATE`, sourceID, packageID, now).Scan(&pkgVersion, &pkgSuperseded, &pkgActive)
+		if err != nil {
+			return fmt.Errorf("%w: package lookup: %v", ErrPublicationAuthority, err)
+		}
+		if pkgSuperseded {
+			return fmt.Errorf("%w: package %q is superseded", ErrPublicationAuthority, packageID)
+		}
+		if !pkgActive {
+			return fmt.Errorf("%w: package %q is expired or not yet effective", ErrPublicationAuthority, packageID)
+		}
+
+		// Check manifest CriticalCard package and version
+		var rawJSON []byte
+		err = tx.QueryRowContext(ctx, `
+			SELECT raw_json FROM published_manifests
+			WHERE jurisdiction = $1 AND revision = $2`, jurisdiction, revision).Scan(&rawJSON)
+		if err == nil && len(rawJSON) > 0 {
+			parsed, perr := offlinepkg.ParseManifest(rawJSON, offlinepkg.Limits{MaxBytes: 262144})
+			if perr == nil {
+				if parsed.CriticalCard.PackageID != packageID {
+					return fmt.Errorf("%w: manifest critical_card package_id %q does not match manifest package_id %q", ErrPublicationAuthority, parsed.CriticalCard.PackageID, packageID)
+				}
+				if parsed.CriticalCard.Version != pkgVersion {
+					return fmt.Errorf("%w: manifest critical_card version %d does not match package version %d", ErrPublicationAuthority, parsed.CriticalCard.Version, pkgVersion)
+				}
+			}
+		}
+
+		// 3. Lock published_manifests FOR UPDATE and execute promotion
+		var currentStatus string
+		var currentQuar bool
+		err = tx.QueryRowContext(ctx, `
+			SELECT source_status, quarantined
+			FROM published_manifests
+			WHERE jurisdiction = $1 AND revision = $2
+			FOR UPDATE`, jurisdiction, revision).Scan(&currentStatus, &currentQuar)
+		if err != nil {
+			return err
+		}
+		if currentQuar || currentStatus == "WITHDRAWN" {
+			return fmt.Errorf("%w: manifest state changed concurrently", ErrPublicationAuthority)
+		}
+
 		_, err = tx.ExecContext(ctx, `
 			UPDATE published_manifests
 			SET source_status = 'SUPERSEDED'
@@ -459,15 +562,23 @@ WHERE package_id = $1 AND version = $2`
 }
 
 // PromoteCard marks a staged card as CURRENT and marks prior CURRENT versions for that package as SUPERSEDED.
+// It transactionally binds promotion to attributed source, package, jurisdiction, live authorization,
+// active unexpired non-superseded package, and version relationship.
+// Rejects legacy unattributed promotion with no writes.
 func (s *Store) PromoteCard(ctx context.Context, packageID string, version int) error {
+	now := time.Now().UTC()
 	return s.InTx(ctx, func(tx DBTX) error {
-		var status string
-		var quarantined bool
+		var (
+			sourceIDNull sql.NullString
+			jurisdiction sql.NullString
+			status       string
+			quarantined  bool
+		)
 		err := tx.QueryRowContext(ctx, `
-			SELECT source_status, quarantined
+			SELECT source_id, jurisdiction, source_status, quarantined
 			FROM published_cards
-			WHERE package_id = $1 AND version = $2
-			FOR UPDATE`, packageID, version).Scan(&status, &quarantined)
+			WHERE package_id = $1 AND version = $2`, packageID, version).
+			Scan(&sourceIDNull, &jurisdiction, &status, &quarantined)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return ErrNotFound
@@ -480,6 +591,90 @@ func (s *Store) PromoteCard(ctx context.Context, packageID string, version int) 
 		if status == "WITHDRAWN" {
 			return errors.New("store: cannot promote withdrawn card")
 		}
+		if status == "CURRENT" {
+			return nil // idempotent
+		}
+		// Reject legacy unattributed row (source_id is NULL or empty) with no writes
+		if !sourceIDNull.Valid || strings.TrimSpace(sourceIDNull.String) == "" {
+			return fmt.Errorf("%w: cannot promote unattributed card: source_id required", ErrPublicationAuthority)
+		}
+		sourceID := sourceIDNull.String
+		jur := jurisdiction.String
+
+		// Strict lock order across transactions:
+		// 1. sources (FOR UPDATE)
+		// 2. packages (FOR UPDATE)
+		// 3. published_cards (FOR UPDATE)
+		var srcState string
+		err = tx.QueryRowContext(ctx, `
+			SELECT state FROM sources WHERE source_id = $1 FOR UPDATE`, sourceID).Scan(&srcState)
+		if err != nil {
+			return fmt.Errorf("%w: source lookup: %v", ErrPublicationAuthority, err)
+		}
+		if srcState != "OPERATIONAL" {
+			return fmt.Errorf("%w: source state is %q (must be OPERATIONAL)", ErrPublicationAuthority, srcState)
+		}
+
+		// Check live authorization in jurisdiction (if jurisdiction present)
+		if jur != "" {
+			var authExists bool
+			err = tx.QueryRowContext(ctx, `
+				SELECT EXISTS (
+					SELECT 1 FROM source_authorizations
+					WHERE source_id = $1 AND jurisdiction = $2
+					  AND (expires_at IS NULL OR expires_at > $3)
+				)`, sourceID, jur, now).Scan(&authExists)
+			if err != nil {
+				return fmt.Errorf("%w: authorization lookup: %v", ErrPublicationAuthority, err)
+			}
+			if !authExists {
+				return fmt.Errorf("%w: no live authorization for %q", ErrPublicationAuthority, jur)
+			}
+		}
+
+		// 2. Lock packages FOR UPDATE
+		var (
+			pkgVersion      int
+			pkgJurisdiction string
+			pkgSuperseded   bool
+			pkgActive       bool
+		)
+		err = tx.QueryRowContext(ctx, `
+			SELECT version, jurisdiction, (superseded_by IS NOT NULL), (effective_at <= $3 AND expires_at > $3)
+			FROM packages
+			WHERE source_id = $1 AND package_id = $2
+			FOR UPDATE`, sourceID, packageID, now).Scan(&pkgVersion, &pkgJurisdiction, &pkgSuperseded, &pkgActive)
+		if err != nil {
+			return fmt.Errorf("%w: package lookup: %v", ErrPublicationAuthority, err)
+		}
+		if pkgVersion != version {
+			return fmt.Errorf("%w: card version %d does not match package version %d", ErrPublicationAuthority, version, pkgVersion)
+		}
+		if jur != "" && pkgJurisdiction != jur {
+			return fmt.Errorf("%w: package jurisdiction %q does not match card jurisdiction %q", ErrPublicationAuthority, pkgJurisdiction, jur)
+		}
+		if pkgSuperseded {
+			return fmt.Errorf("%w: package %q is superseded", ErrPublicationAuthority, packageID)
+		}
+		if !pkgActive {
+			return fmt.Errorf("%w: package %q is expired or not yet effective", ErrPublicationAuthority, packageID)
+		}
+
+		// 3. Lock published_cards FOR UPDATE and execute promotion
+		var currentStatus string
+		var currentQuar bool
+		err = tx.QueryRowContext(ctx, `
+			SELECT source_status, quarantined
+			FROM published_cards
+			WHERE package_id = $1 AND version = $2
+			FOR UPDATE`, packageID, version).Scan(&currentStatus, &currentQuar)
+		if err != nil {
+			return err
+		}
+		if currentQuar || currentStatus == "WITHDRAWN" {
+			return fmt.Errorf("%w: card state changed concurrently", ErrPublicationAuthority)
+		}
+
 		_, err = tx.ExecContext(ctx, `
 			UPDATE published_cards
 			SET source_status = 'SUPERSEDED'
@@ -495,6 +690,43 @@ func (s *Store) PromoteCard(ctx context.Context, packageID string, version int) 
 			packageID, version)
 		return err
 	})
+}
+
+// PromoteCardWithObserver atomically promotes the card and,
+// on success, fires the observer so cached delivery is purged under
+// the documented consistency bound.
+func (s *Store) PromoteCardWithObserver(ctx context.Context, packageID string, version int, observer PublicationLifecycleObserver) error {
+	if err := s.PromoteCard(ctx, packageID, version); err != nil {
+		return err
+	}
+	if observer != nil {
+		observer.OnPackageSuperseded(ctx, packageID, []int{version})
+	}
+	return nil
+}
+
+// WithdrawCardAndInvalidate sets the card status to WITHDRAWN
+// in one transaction and notifies the observer outside the tx.
+func (s *Store) WithdrawCardAndInvalidate(ctx context.Context, packageID string, version int, observer PublicationLifecycleObserver) error {
+	if err := s.SetCardStatus(ctx, packageID, version, "WITHDRAWN"); err != nil {
+		return err
+	}
+	if observer != nil {
+		observer.OnPackageSuperseded(ctx, packageID, []int{version})
+	}
+	return nil
+}
+
+// QuarantineCardAndInvalidate quarantines the card and
+// notifies the observer. Same semantics as WithdrawCardAndInvalidate.
+func (s *Store) QuarantineCardAndInvalidate(ctx context.Context, packageID string, version int, observer PublicationLifecycleObserver) error {
+	if err := s.QuarantineCard(ctx, packageID, version, true); err != nil {
+		return err
+	}
+	if observer != nil {
+		observer.OnSourceQuarantined(ctx, "card:"+packageID)
+	}
+	return nil
 }
 
 // PublishResource stores a content-addressed auxiliary asset. Boundary checks validate

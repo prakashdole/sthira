@@ -29,7 +29,9 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -104,39 +106,126 @@ func TestA3_LockOrderProbe(t *testing.T) {
 	}
 }
 
+// TestA3_LockOrder_PIDObservation verifies via PostgreSQL pg_blocking_pids that
+// PublishCard and PublishManifest share the exact same lock acquisition order
+// (sources FOR UPDATE first, packages FOR UPDATE second). When a holding transaction
+// locks the source row FOR UPDATE, PublishCard blocks specifically on that holding
+// transaction's backend PID at the source row lock.
+func TestA3_LockOrder_PIDObservation(t *testing.T) {
+	dsn := testDSN(t)
+	st1, cleanup1 := openTestStoreAt(t, dsn)
+	defer cleanup1()
+	st2, cleanup2 := openTestStoreAt(t, dsn)
+	defer cleanup2()
+	obs := openObserverPool(t)
+
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	keyID := "key-A3PID"
+	ts := offlinepkg.NewTrustStore(offlinepkg.TrustedKey{
+		KeyID: keyID, PublicKey: pub,
+		PermittedJurisdiction: "A3PID",
+		ValidFrom:             time.Now().Add(-time.Hour),
+		ValidUntil:            time.Now().Add(time.Hour),
+	})
+	publisher2 := NewPublisher(st2, ts)
+
+	srcID := "SRC-A3PID-" + uid("X")
+	pkgID := "PKG-A3PID-" + uid("X")
+	if err := seedSourcePackageForA3(t, st1, srcID, pkgID, "A3PID"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	_, rawC := buildSignedCardForA3(t, priv, keyID, pkgID, "A3PID", 1)
+	var c1 offlinepkg.PublicIncidentCard
+	_ = json.Unmarshal(rawC, &c1)
+
+	// Step 1: Holder tx on st1 locks the sources row FOR UPDATE.
+	holderTx, err := st1.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin holder tx: %v", err)
+	}
+	defer func() { _ = holderTx.Rollback() }()
+
+	holderPID, err := backendPID(context.Background(), holderTx)
+	if err != nil {
+		t.Fatalf("backendPID: %v", err)
+	}
+
+	if _, err := holderTx.ExecContext(context.Background(), `SELECT 1 FROM sources WHERE source_id = $1 FOR UPDATE`, srcID); err != nil {
+		t.Fatalf("lock source row: %v", err)
+	}
+
+	// Step 2: In a goroutine, publisher2 calls PublishCard, which must lock sources FIRST.
+	cardDone := make(chan error, 1)
+	go func() {
+		cardDone <- publisher2.PublishCard(context.Background(), &PublishedCard{
+			PackageID: c1.PackageID, Version: c1.Version,
+			SourceID: srcID, RawJSON: rawC, Jurisdiction: "A3PID",
+			SourceStatus: "CURRENT",
+		})
+	}()
+
+	// Step 3: Observe via pollUntilBlockedByHolder that publisher2's backend PID is waiting on holderPID.
+	if err := pollUntilBlockedByHolder(context.Background(), obs, holderPID, 5*time.Second); err != nil {
+		t.Fatalf("PublishCard did not wait on sources lock held by holderPID %d: %v", holderPID, err)
+	}
+
+	// Step 4: Commit holder tx. PublishCard must unblock and complete successfully.
+	if err := holderTx.Commit(); err != nil {
+		t.Fatalf("commit holder: %v", err)
+	}
+
+	select {
+	case err := <-cardDone:
+		if err != nil {
+			t.Fatalf("PublishCard failed after unblock: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("PublishCard timed out after holder commit")
+	}
+}
+
 // TestA3_LegacyUnattributedManifestNotPromoted: a manifest row whose
 // source_id is NULL (legacy data) must not be promoted to CURRENT.
-// PromoteManifest currently only checks status, not attribution.
-// This test seeds such a row and asserts the failed promotion.
+// PromoteManifest rejects promotion of unattributed rows with ErrPublicationAuthority
+// and performs zero writes (state remains STAGED).
 func TestA3_LegacyUnattributedManifestNotPromoted(t *testing.T) {
 	dsn := testDSN(t)
 	st, cleanup := openTestStoreAt(t, dsn)
 	defer cleanup()
 
 	jurisdiction := "LEGACY-" + uid("X")
+	mnfID := "MNF-LEGACY-" + uid("X")
 	// Insert a manifest row directly WITHOUT a source_id.
 	if _, err := st.db.ExecContext(context.Background(), `
 		INSERT INTO published_manifests
 			(manifest_id, jurisdiction, revision, package_id, source_id, raw_json, checksum_sha256, source_status, quarantined)
 		VALUES ($1, $2, 1, $3, NULL, $4, $5, 'STAGED', false)`,
-		"MNF-LEGACY-1", jurisdiction, "PKG-LEGACY",
-		[]byte(`{"revoked_packages":[],"superseded_versions":[]}`),
+		mnfID, jurisdiction, "PKG-LEGACY",
+		[]byte(`{"schema_version":"3.0","manifest_id":"`+mnfID+`","jurisdiction":"`+jurisdiction+`","revision":1,"critical_card":{"package_id":"PKG-LEGACY","version":1}}`),
 		strings.Repeat("a", 64)); err != nil {
 		t.Fatalf("seed legacy row: %v", err)
 	}
 
 	// The trusted boundary must reject promotion of an unattributed
-	// row. Today the PromoteManifest store function does NOT check
-	// attribution; this test asserts that an attribution-aware check
-	// is needed and currently missing — recorded as an open defect.
-	got, err := st.GetPublishedManifest(context.Background(), jurisdiction)
-	if err != nil {
-		t.Fatalf("get legacy manifest: %v", err)
+	// row with ErrPublicationAuthority and leave state STAGED.
+	err := st.PromoteManifest(context.Background(), jurisdiction, 1)
+	if err == nil {
+		t.Fatalf("expected error promoting legacy unattributed manifest, got nil")
 	}
-	if got.SourceID != "" {
-		t.Fatalf("legacy row has non-empty source_id %q; expected legacy NULL", got.SourceID)
+	if !errors.Is(err, ErrPublicationAuthority) {
+		t.Fatalf("expected ErrPublicationAuthority, got %v", err)
 	}
-	t.Logf("open defect: legacy row %s revision 1 (source_id=NULL) can be promoted without attribution evidence", got.ManifestID)
+
+	// Assert row remains STAGED (no writes performed)
+	var status string
+	if err := st.db.QueryRowContext(context.Background(), `
+		SELECT source_status FROM published_manifests WHERE jurisdiction = $1 AND revision = 1`, jurisdiction).Scan(&status); err != nil {
+		t.Fatalf("query status: %v", err)
+	}
+	if status != "STAGED" {
+		t.Fatalf("expected manifest to remain STAGED, got %q", status)
+	}
 }
 
 // --- helpers ---
@@ -145,10 +234,10 @@ func openTestStoreAt(t *testing.T, dsn string) (*Store, func()) {
 	t.Helper()
 	st, err := Open(dsn)
 	if err != nil {
-		t.Skipf("open DSN %s failed: %v", dsn, err)
+		t.Fatalf("open DSN %s failed: %v", dsn, err)
 	}
 	if err := st.DB().Ping(); err != nil {
-		t.Skipf("ping DSN %s failed: %v", dsn, err)
+		t.Fatalf("ping DSN %s failed: %v", dsn, err)
 	}
 	return st, func() { _ = st.Close() }
 }
@@ -183,9 +272,9 @@ func seedSourcePackageForA3(t *testing.T, st *Store, srcID, pkgID, jurisdiction 
 		}
 		artifactID := "ART-A3-" + uid("X")
 		if _, err := tx.ExecContext(context.Background(), `
-			INSERT INTO artifacts (artifact_id, content_type, body, checksum_sha256)
-			VALUES ($1, 'application/json', $2, $3)`,
-			artifactID, []byte(`{}`), strings.Repeat("a", 64)); err != nil {
+			INSERT INTO source_artifacts (artifact_id, source_id, source_version, artifact_sha256, retrieved_at, evidence_class, payload_ref)
+			VALUES ($1, $2, 1, $3, $4, 'AUTHORIZED_OPERATIONAL', 'mem://test')`,
+			artifactID, srcID, strings.Repeat("a", 64), now); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(context.Background(), `
@@ -252,6 +341,23 @@ func buildSignedCardForA3(t *testing.T, priv ed25519.PrivateKey, keyID, pkgID, j
 		RedZones:   []offlinepkg.RedZoneCard{{ID: "rz-1"}},
 		SafeZones:  []offlinepkg.SafeZoneCard{{ID: "sz-1", Name: "sz-1", Role: "EMERGENCY_SHELTER", Status: "OPEN", CapacityMode: "DEFINED"}},
 		Facilities: []offlinepkg.FacilityCard{{ID: "fac-1", SafeZoneID: "sz-1", Name: "fac-1"}},
+		Instructions: []offlinepkg.InstructionCard{
+			{
+				ID:       "ins-1",
+				Language: "en-IN",
+				Title:    "Evacuate",
+				Summary:  "Follow designated routes to shelter",
+			},
+		},
+		EmergencyContacts: []offlinepkg.EmergencyContact{
+			{
+				Name:   "Emergency Control",
+				Number: "112",
+			},
+		},
+		AllocationPolicy: offlinepkg.PolicyCard{
+			Order: []string{"sz-1"},
+		},
 	}
 	if err := signCardInPlace(c, priv, keyID); err != nil {
 		t.Fatalf("sign card: %v", err)
@@ -261,4 +367,31 @@ func buildSignedCardForA3(t *testing.T, priv ed25519.PrivateKey, keyID, pkgID, j
 		t.Fatalf("marshal card: %v", err)
 	}
 	return c, raw
+}
+
+func pollUntilBlockedByHolder(ctx context.Context, db *sql.DB, holderPID int, budget time.Duration) error {
+	deadline := time.Now().Add(budget)
+	ticker := time.NewTicker(2 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var blocked bool
+		err := db.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_stat_activity
+				WHERE wait_event_type = 'Lock'
+				  AND state = 'active'
+				  AND $1 = ANY(pg_blocking_pids(pid))
+			)`, holderPID).Scan(&blocked)
+		if err == nil && blocked {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for backend to be blocked by %d", holderPID)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }

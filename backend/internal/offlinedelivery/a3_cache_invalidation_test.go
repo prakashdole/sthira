@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"os"
@@ -87,9 +88,12 @@ func TestA3_LifecycleInvalidatesAcrossInstances(t *testing.T) {
 	if err := publisher.PublishManifest(context.Background(), &store.PublishedManifest{
 		ManifestID: m.ManifestID, Jurisdiction: m.Jurisdiction, Revision: m.Revision,
 		PackageID: m.CriticalCard.PackageID, SourceID: srcID, RawJSON: rawM,
-		SourceStatus: "CURRENT",
+		SourceStatus: "STAGED",
 	}); err != nil {
 		t.Fatalf("publish: %v", err)
+	}
+	if err := st.PromoteManifest(context.Background(), jurisdiction, m.Revision); err != nil {
+		t.Fatalf("promote: %v", err)
 	}
 
 	// Two CachedSource instances (processes A and B) back the delivery.
@@ -154,6 +158,7 @@ func TestA3_LegacyUnattributedRowCannotBePromoted(t *testing.T) {
 		t.Skip("STHIRA_TEST_DSN not set; A3 integration tests require a disposable PostgreSQL")
 	}
 	jurisdiction := "LEGACY-A3-" + uid("X")
+	mnfID := "MNF-LEGACY-" + uid("X")
 	st, err := store.Open(dsn)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -165,24 +170,31 @@ func TestA3_LegacyUnattributedRowCannotBePromoted(t *testing.T) {
 		INSERT INTO published_manifests
 			(manifest_id, jurisdiction, revision, package_id, source_id, raw_json, checksum_sha256, source_status, quarantined)
 		VALUES ($1, $2, 1, $3, NULL, $4, $5, 'STAGED', false)`,
-		"MNF-LEGACY-1", jurisdiction, "PKG-LEGACY-A3",
-		[]byte(`{"revoked_packages":[],"superseded_versions":[]}`),
+		mnfID, jurisdiction, "PKG-LEGACY-A3",
+		[]byte(`{"schema_version":"3.0","manifest_id":"`+mnfID+`","jurisdiction":"`+jurisdiction+`","revision":1,"critical_card":{"package_id":"PKG-LEGACY-A3","version":1}}`),
 		strings.Repeat("a", 64)); err != nil {
 		t.Fatalf("seed legacy row: %v", err)
 	}
 
-	// Currently the store's PromoteManifest does NOT validate
-	// attribution; this test records it as an open defect and
-	// asserts the row is flagged. Production must introduce an
-	// attribution check before promotion is permitted.
-	got, err := st.GetPublishedManifest(context.Background(), jurisdiction)
-	if err != nil {
-		t.Fatalf("get legacy manifest: %v", err)
+	// Attempting promotion of an unattributed row MUST fail with ErrPublicationAuthority
+	// and perform zero writes (status remains STAGED).
+	err = st.PromoteManifest(context.Background(), jurisdiction, 1)
+	if err == nil {
+		t.Fatalf("expected error promoting legacy unattributed manifest, got nil")
 	}
-	if got.SourceID != "" {
-		t.Fatalf("legacy row has source_id %q; expected empty", got.SourceID)
+	if !errors.Is(err, store.ErrPublicationAuthority) {
+		t.Fatalf("expected ErrPublicationAuthority, got %v", err)
 	}
-	t.Logf("open defect: legacy unattributed row %s can be promoted without evidence", got.ManifestID)
+
+	// Assert row remains STAGED (no writes performed)
+	var status string
+	if err := st.DB().QueryRowContext(context.Background(), `
+		SELECT source_status FROM published_manifests WHERE jurisdiction = $1 AND revision = 1`, jurisdiction).Scan(&status); err != nil {
+		t.Fatalf("query status: %v", err)
+	}
+	if status != "STAGED" {
+		t.Fatalf("expected manifest to remain STAGED, got %q", status)
+	}
 }
 
 // --- helpers ---
@@ -206,9 +218,9 @@ func seedA3Fixture(t *testing.T, st *store.Store, srcID, pkgID, jurisdiction str
 		}
 		artifactID := "ART-A3CI-" + uid("X")
 		if _, err := tx.ExecContext(context.Background(), `
-			INSERT INTO artifacts (artifact_id, content_type, body, checksum_sha256)
-			VALUES ($1, 'application/json', $2, $3)`,
-			artifactID, []byte(`{}`), strings.Repeat("a", 64)); err != nil {
+			INSERT INTO source_artifacts (artifact_id, source_id, source_version, artifact_sha256, retrieved_at, evidence_class, payload_ref)
+			VALUES ($1, $2, 1, $3, $4, 'AUTHORIZED_OPERATIONAL', 'mem://test')`,
+			artifactID, srcID, strings.Repeat("a", 64), now); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(context.Background(), `
@@ -252,6 +264,9 @@ func (l *localPublicationSource) GetManifest(ctx context.Context, jurisdiction s
 	if m.Quarantined {
 		return nil, offlinedelivery.ErrQuarantined
 	}
+	if m.SourceStatus != "CURRENT" {
+		return nil, offlinedelivery.ErrNotFound
+	}
 	return &offlinedelivery.ManifestRecord{
 		Jurisdiction:   m.Jurisdiction,
 		Revision:       m.Revision,
@@ -267,6 +282,9 @@ func (l *localPublicationSource) GetCard(ctx context.Context, packageID string, 
 	}
 	if c.Quarantined {
 		return nil, offlinedelivery.ErrQuarantined
+	}
+	if c.SourceStatus != "CURRENT" {
+		return nil, offlinedelivery.ErrNotFound
 	}
 	return &offlinedelivery.CardRecord{
 		PackageID:      c.PackageID,

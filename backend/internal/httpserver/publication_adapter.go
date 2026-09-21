@@ -29,6 +29,9 @@ func (a *storePublicationAdapter) GetManifest(ctx context.Context, jurisdiction 
 	if m.Quarantined {
 		return nil, offlinedelivery.ErrQuarantined
 	}
+	if m.SourceStatus != "CURRENT" {
+		return nil, offlinedelivery.ErrNotFound
+	}
 	return &offlinedelivery.ManifestRecord{
 		Jurisdiction:   m.Jurisdiction,
 		Revision:       m.Revision,
@@ -48,6 +51,9 @@ func (a *storePublicationAdapter) GetCard(ctx context.Context, packageID string,
 	}
 	if c.Quarantined {
 		return nil, offlinedelivery.ErrQuarantined
+	}
+	if c.SourceStatus != "CURRENT" {
+		return nil, offlinedelivery.ErrNotFound
 	}
 	return &offlinedelivery.CardRecord{
 		PackageID:      c.PackageID,
