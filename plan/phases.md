@@ -1,5 +1,7 @@
 # Phases and readiness gates
 
+> **2026-09-21 priority override:** Round-two prototype/UI/real-model demo and pitch take priority through September 28–29. Read [round-two-demo.md](round-two-demo.md) first. Frontend prototype work may proceed before Gate B; production gates and the long-term roadmap remain intact.
+
 Updated 2026-09-19. New Go/mobile phases have not been executed. Historical Python work is captured in [changes.md](changes.md); detailed executable instructions and the single status ledger are in [prompt.md](prompt.md).
 
 | Phase | Deliverable | Verification gate |

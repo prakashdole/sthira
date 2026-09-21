@@ -78,3 +78,7 @@
 ## Recording later decisions
 
 For a change, record owner/date, problem, chosen option, alternatives, concrete evidence, affected files/contracts, consequences and rollback/revisit trigger. Do not close an open route/source/capacity policy without the responsible authority's evidence. Never recycle an old decision ID to conceal a changed meaning.
+
+## Round-two sequencing decision — 2026-09-21
+
+Accepted explicit user change: prioritize the September 28–29 prototype, actual three-model demo, laptop/phone UI, founder/team understanding and pitch. Preserve production work and architecture; defer broad production completion. This temporarily supersedes D03/frontend sequencing and the Gate-B-before-prototype restriction. It does not waive live-data authority or production acceptance. See [round-two-demo.md](round-two-demo.md).

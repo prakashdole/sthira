@@ -1,5 +1,7 @@
 # Phase execution prompts and evidence ledger
 
+> **2026-09-21 priority override:** Round-two prototype/UI/real-model demo and pitch take priority through September 28–29. Read [round-two-demo.md](round-two-demo.md) first. Frontend prototype work may proceed before Gate B; production gates and the long-term roadmap remain intact.
+
 2026-09-19 · Go/mobile production-preparation plan. The 2026-09-19 planning task changes documents only; these prompts are instructions for subsequently authorized implementation. No phase is automatically completed by generating this file.
 
 ## How to continue
