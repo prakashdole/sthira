@@ -119,6 +119,9 @@ func (ChoiceQuerier) Eligible(ctx context.Context, db DBTX, q ChoiceQuery, now t
 		if capNullable == nil {
 			// Unknown capacity: informational only, never a promise.
 			d.CapacityKnown = false
+		} else if *capNullable <= 0 {
+			// Zero zone capacity: not eligible
+			continue
 		} else {
 			d.CapacityKnown = true
 			// Free across the whole interval: the minimum free over all dates.
@@ -161,8 +164,8 @@ func minFreeOverInterval(ctx context.Context, db DBTX, facilityID string, dates 
 			return 0, false, err
 		}
 		free := capacity - held - occupied
-		if free < partySize {
-			return 0, false, nil // cannot fit the whole interval
+		if free <= 0 || (partySize > 0 && free < partySize) {
+			return 0, false, nil // cannot fit the whole interval or zero free capacity
 		}
 		if minFree < 0 || free < minFree {
 			minFree = free

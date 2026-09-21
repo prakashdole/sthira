@@ -110,6 +110,19 @@ func seedVoicePackageFixture(t *testing.T, st *store.Store, jurisdiction, pkgID,
 			facID, now.Format("2006-01-02"), now); err != nil {
 			return err
 		}
+		// Approved translation authority (isolated fixture): the model's
+		// "destination_options" speech_key is only servable because a
+		// translation authority recorded a jurisdiction/source-version
+		// bound approval here. Nothing in production synthesises un-
+		// approved speech.
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO approved_translations
+				(translation_id, jurisdiction, speech_key, language, source_version, template_version, approved_by, evidence_ref, approved_at)
+			VALUES ($1,$2,$3,$4,1,1,$5,$6,$7)`,
+			"APPROVE-"+pkgID+"-destination_options", jurisdiction, "destination_options", "en-IN",
+			"translator-voice", "doc-voice-translate", now); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		t.Fatalf("seedVoicePackageFixture: %v", err)
@@ -274,7 +287,20 @@ func TestVoiceProcess_RealHTTP_PersistedScopedContext_Pipeline(t *testing.T) {
 
 	resolver := store.NewScopedContextResolver(st)
 	validator := orchestration.NewProductionValidator()
-	templateRegistry := orchestration.DefaultTemplateRegistry()
+	// Isolated approval fixture: a NON-synthetic, jurisdiction/source/
+	// version-bound template mirroring the approved_translations row
+	// seeded above. DefaultTemplateRegistry is synthetic-only and the
+	// operational path correctly refuses to synthesise it (fail closed),
+	// so the citizen happy path must carry an actually-approved template.
+	templateRegistry := orchestration.NewMapTemplateRegistry()
+	templateRegistry.Add(contracts.ApprovedTemplate{
+		SpeechKey:       "destination_options",
+		Language:        "en-IN",
+		TemplateVersion: 1,
+		SourceVersion:   1,
+		Text:            "Destination choices are displayed on screen.",
+		SyntheticOnly:   false,
+	})
 
 	orch, err := orchestration.NewOrchestrator(orchestration.PipelineConfig{
 		Limits:    orchestration.DefaultLimits(),

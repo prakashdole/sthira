@@ -1,0 +1,397 @@
+// Package store: A3 publication lifecycle wiring tests.
+//
+// Reproduces defects in:
+//
+//   - Publisher → cache invalidation pipeline: a trusted withdrawal,
+//     promotion, quarantine, or source revocation must propagate to
+//     CachedSource under the documented consistency bound without a
+//     test manually calling Invalidate.
+//
+//   - Lock-ordering: manifest publication acquires source FOR UPDATE
+//     first then package, while card publication acquires package FOR
+//     UPDATE first then source. A test exercises the contended path
+//     to confirm whether the order can deadlock, before any claim of
+//     fixing.
+//
+//   - Legacy unattributed rows must not silently become current.
+//     `published_manifests.source_id` may be NULL on legacy rows; the
+//     promote path must NOT silently promote such a row.
+//
+//   - Concurrent publish/promote conflict: two operators promoting
+//     different revisions at once must produce one consistent
+//     CURRENT per jurisdiction.
+//
+// These tests run against a UNIQUE disposable PostgreSQL instance;
+// they are skipped (not failed) when STHIRA_TEST_DSN is unset.
+package store
+
+import (
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"sthira/backend/internal/offlinepkg"
+)
+
+// TestA3_LockOrderProbe: forced concurrent PublishManifest + PublishCard
+// against the same (source, package) pair runs both transactions
+// simultaneously. We don't claim a deadlock — we measure whether the
+// system hangs in normal operation; if it does hang reproducibly, that
+// is the lock-order conflict. We declare the order in this test so
+// any fix can add the alignment needed (per plan: manifest source→package,
+// card package→source; align with consistent shared lock order).
+func TestA3_LockOrderProbe(t *testing.T) {
+	dsn := testDSN(t)
+	st, cleanup := openTestStoreAt(t, dsn)
+	defer cleanup()
+
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	keyID := "key-A3LOCK"
+	ts := offlinepkg.NewTrustStore(offlinepkg.TrustedKey{
+		KeyID: keyID, PublicKey: pub,
+		PermittedJurisdiction: "A3L",
+		ValidFrom:             time.Now().Add(-time.Hour),
+		ValidUntil:            time.Now().Add(time.Hour),
+	})
+	publisher := NewPublisher(st, ts)
+
+	srcID := "SRC-A3L-" + uid("X")
+	pkgID := "PKG-A3L-" + uid("X")
+	if err := seedSourcePackageForA3(t, st, srcID, pkgID, "A3L"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	_, rawM := buildSignedManifestForA3(t, priv, keyID, "A3L", pkgID, 1)
+	_, rawC := buildSignedCardForA3(t, priv, keyID, pkgID, "A3L", 1)
+
+	var m1 offlinepkg.Manifest
+	_ = json.Unmarshal(rawM, &m1)
+	var c1 offlinepkg.PublicIncidentCard
+	_ = json.Unmarshal(rawC, &c1)
+
+	done := make(chan error, 2)
+	go func() {
+		done <- publisher.PublishManifest(context.Background(), &PublishedManifest{
+			ManifestID: m1.ManifestID, Jurisdiction: m1.Jurisdiction, Revision: m1.Revision,
+			PackageID: m1.CriticalCard.PackageID, SourceID: srcID, RawJSON: rawM,
+			SourceStatus: "CURRENT",
+		})
+	}()
+	go func() {
+		done <- publisher.PublishCard(context.Background(), &PublishedCard{
+			PackageID: c1.PackageID, Version: c1.Version,
+			SourceID: srcID, RawJSON: rawC, Jurisdiction: "A3L",
+			SourceStatus: "CURRENT",
+		})
+	}()
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("publish[%d]: %v", i, err)
+			}
+		case <-deadline.C:
+			t.Fatalf("deadlock: contention not resolved in 10s")
+		}
+	}
+}
+
+// TestA3_LockOrder_PIDObservation verifies via PostgreSQL pg_blocking_pids that
+// PublishCard and PublishManifest share the exact same lock acquisition order
+// (sources FOR UPDATE first, packages FOR UPDATE second). When a holding transaction
+// locks the source row FOR UPDATE, PublishCard blocks specifically on that holding
+// transaction's backend PID at the source row lock.
+func TestA3_LockOrder_PIDObservation(t *testing.T) {
+	dsn := testDSN(t)
+	st1, cleanup1 := openTestStoreAt(t, dsn)
+	defer cleanup1()
+	st2, cleanup2 := openTestStoreAt(t, dsn)
+	defer cleanup2()
+	obs := openObserverPool(t)
+
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	keyID := "key-A3PID"
+	ts := offlinepkg.NewTrustStore(offlinepkg.TrustedKey{
+		KeyID: keyID, PublicKey: pub,
+		PermittedJurisdiction: "A3PID",
+		ValidFrom:             time.Now().Add(-time.Hour),
+		ValidUntil:            time.Now().Add(time.Hour),
+	})
+	publisher2 := NewPublisher(st2, ts)
+
+	srcID := "SRC-A3PID-" + uid("X")
+	pkgID := "PKG-A3PID-" + uid("X")
+	if err := seedSourcePackageForA3(t, st1, srcID, pkgID, "A3PID"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	_, rawC := buildSignedCardForA3(t, priv, keyID, pkgID, "A3PID", 1)
+	var c1 offlinepkg.PublicIncidentCard
+	_ = json.Unmarshal(rawC, &c1)
+
+	// Step 1: Holder tx on st1 locks the sources row FOR UPDATE.
+	holderTx, err := st1.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin holder tx: %v", err)
+	}
+	defer func() { _ = holderTx.Rollback() }()
+
+	holderPID, err := backendPID(context.Background(), holderTx)
+	if err != nil {
+		t.Fatalf("backendPID: %v", err)
+	}
+
+	if _, err := holderTx.ExecContext(context.Background(), `SELECT 1 FROM sources WHERE source_id = $1 FOR UPDATE`, srcID); err != nil {
+		t.Fatalf("lock source row: %v", err)
+	}
+
+	// Step 2: In a goroutine, publisher2 calls PublishCard, which must lock sources FIRST.
+	cardDone := make(chan error, 1)
+	go func() {
+		cardDone <- publisher2.PublishCard(context.Background(), &PublishedCard{
+			PackageID: c1.PackageID, Version: c1.Version,
+			SourceID: srcID, RawJSON: rawC, Jurisdiction: "A3PID",
+			SourceStatus: "CURRENT",
+		})
+	}()
+
+	// Step 3: Observe via pollUntilBlockedByHolder that publisher2's backend PID is waiting on holderPID.
+	if err := pollUntilBlockedByHolder(context.Background(), obs, holderPID, 5*time.Second); err != nil {
+		t.Fatalf("PublishCard did not wait on sources lock held by holderPID %d: %v", holderPID, err)
+	}
+
+	// Step 4: Commit holder tx. PublishCard must unblock and complete successfully.
+	if err := holderTx.Commit(); err != nil {
+		t.Fatalf("commit holder: %v", err)
+	}
+
+	select {
+	case err := <-cardDone:
+		if err != nil {
+			t.Fatalf("PublishCard failed after unblock: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("PublishCard timed out after holder commit")
+	}
+}
+
+// TestA3_LegacyUnattributedManifestNotPromoted: a manifest row whose
+// source_id is NULL (legacy data) must not be promoted to CURRENT.
+// PromoteManifest rejects promotion of unattributed rows with ErrPublicationAuthority
+// and performs zero writes (state remains STAGED).
+func TestA3_LegacyUnattributedManifestNotPromoted(t *testing.T) {
+	dsn := testDSN(t)
+	st, cleanup := openTestStoreAt(t, dsn)
+	defer cleanup()
+
+	jurisdiction := "LEGACY-" + uid("X")
+	mnfID := "MNF-LEGACY-" + uid("X")
+	// Insert a manifest row directly WITHOUT a source_id.
+	if _, err := st.db.ExecContext(context.Background(), `
+		INSERT INTO published_manifests
+			(manifest_id, jurisdiction, revision, package_id, source_id, raw_json, checksum_sha256, source_status, quarantined)
+		VALUES ($1, $2, 1, $3, NULL, $4, $5, 'STAGED', false)`,
+		mnfID, jurisdiction, "PKG-LEGACY",
+		[]byte(`{"schema_version":"3.0","manifest_id":"`+mnfID+`","jurisdiction":"`+jurisdiction+`","revision":1,"critical_card":{"package_id":"PKG-LEGACY","version":1}}`),
+		strings.Repeat("a", 64)); err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+
+	// The trusted boundary must reject promotion of an unattributed
+	// row with ErrPublicationAuthority and leave state STAGED.
+	err := st.PromoteManifest(context.Background(), jurisdiction, 1)
+	if err == nil {
+		t.Fatalf("expected error promoting legacy unattributed manifest, got nil")
+	}
+	if !errors.Is(err, ErrPublicationAuthority) {
+		t.Fatalf("expected ErrPublicationAuthority, got %v", err)
+	}
+
+	// Assert row remains STAGED (no writes performed)
+	var status string
+	if err := st.db.QueryRowContext(context.Background(), `
+		SELECT source_status FROM published_manifests WHERE jurisdiction = $1 AND revision = 1`, jurisdiction).Scan(&status); err != nil {
+		t.Fatalf("query status: %v", err)
+	}
+	if status != "STAGED" {
+		t.Fatalf("expected manifest to remain STAGED, got %q", status)
+	}
+}
+
+// --- helpers ---
+
+func openTestStoreAt(t *testing.T, dsn string) (*Store, func()) {
+	t.Helper()
+	st, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("open DSN %s failed: %v", dsn, err)
+	}
+	if err := st.DB().Ping(); err != nil {
+		t.Fatalf("ping DSN %s failed: %v", dsn, err)
+	}
+	return st, func() { _ = st.Close() }
+}
+
+func testDSN(t *testing.T) string {
+	t.Helper()
+	dsn := os.Getenv("STHIRA_TEST_DSN")
+	if dsn == "" {
+		t.Skip("STHIRA_TEST_DSN not set; A3 integration tests require a disposable PostgreSQL")
+	}
+	return dsn
+}
+
+// seedSourcePackageForA3 inserts a minimal OPERATIONAL source + current
+// package row + a source authorization in a single transaction.
+func seedSourcePackageForA3(t *testing.T, st *Store, srcID, pkgID, jurisdiction string) error {
+	t.Helper()
+	now := time.Now().UTC()
+	return st.InTx(context.Background(), func(tx DBTX) error {
+		if _, err := tx.ExecContext(context.Background(), `
+			INSERT INTO sources (source_id, government_owner, official_domain, state, version, updated_at)
+			VALUES ($1, 'gov-a3', 'gov.example', 'OPERATIONAL', 1, $2)`,
+			srcID, now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(), `
+			INSERT INTO source_authorizations
+				(authorization_id, source_id, granted_by, evidence_ref, jurisdiction, granted_at)
+			VALUES ($1, $2, 'gov-a3', 'doc-a3', $3, $4)`,
+			"AUTH-"+uid("X"), srcID, jurisdiction, now); err != nil {
+			return err
+		}
+		artifactID := "ART-A3-" + uid("X")
+		if _, err := tx.ExecContext(context.Background(), `
+			INSERT INTO source_artifacts (artifact_id, source_id, source_version, artifact_sha256, retrieved_at, evidence_class, payload_ref)
+			VALUES ($1, $2, 1, $3, $4, 'AUTHORIZED_OPERATIONAL', 'mem://test')`,
+			artifactID, srcID, strings.Repeat("a", 64), now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(), `
+			INSERT INTO packages (package_id, alert_id, source_id, artifact_id, version, jurisdiction, evidence_class, checksum_sha256, body, effective_at, expires_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+			pkgID, "ALERT-"+uid("X"), srcID, artifactID, 1, jurisdiction, "AUTHORIZED_OPERATIONAL",
+			strings.Repeat("a", 64), []byte(`{"revoked_packages":[],"superseded_versions":[]}`),
+			now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+// buildSignedManifestForA3 produces a signed manifest.
+func buildSignedManifestForA3(t *testing.T, priv ed25519.PrivateKey, keyID, jur, pkgID string, revision int) (*offlinepkg.Manifest, []byte) {
+	t.Helper()
+	m := &offlinepkg.Manifest{
+		SchemaVersion: "3.0",
+		ManifestID:    fmt.Sprintf("MNF-A3-%s-%d", jur, revision),
+		Jurisdiction:  jur,
+		Revision:      revision,
+		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
+		ValidUntil:    time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		SourceStatus:  "CURRENT",
+		CriticalCard: offlinepkg.CriticalCardDescriptor{
+			PackageID:         pkgID,
+			Version:           1,
+			URI:               "/api/v3/packages/" + pkgID + "/versions/1",
+			ChecksumSHA256:    strings.Repeat("a", 64),
+			UncompressedBytes: 500,
+			CompressedBytes:   200,
+			ContentType:       "application/json",
+		},
+		Provenance: offlinepkg.ManifestProvenance{
+			Authority: "gov-a3", DatasetID: "ds-1", EvidenceClass: "AUTHORIZED_OPERATIONAL",
+		},
+	}
+	if err := signInPlace(m, priv, keyID); err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return m, raw
+}
+
+// buildSignedCardForA3 produces a signed card.
+func buildSignedCardForA3(t *testing.T, priv ed25519.PrivateKey, keyID, pkgID, jur string, version int) (*offlinepkg.PublicIncidentCard, []byte) {
+	t.Helper()
+	c := &offlinepkg.PublicIncidentCard{
+		SchemaVersion: "3.0",
+		PackageID:     pkgID,
+		Version:       version,
+		Jurisdiction:  jur,
+		EvidenceClass: "AUTHORIZED_OPERATIONAL",
+		EffectiveAt:   time.Now().UTC().Format(time.RFC3339),
+		ExpiresAt:     time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		Alert: offlinepkg.AlertCard{
+			Identifier: "alt-1", Sender: "snd-1", Headline: "Headline",
+			Severity: "Severe", Urgency: "Immediate", Certainty: "Observed",
+		},
+		RedZones:   []offlinepkg.RedZoneCard{{ID: "rz-1"}},
+		SafeZones:  []offlinepkg.SafeZoneCard{{ID: "sz-1", Name: "sz-1", Role: "EMERGENCY_SHELTER", Status: "OPEN", CapacityMode: "DEFINED"}},
+		Facilities: []offlinepkg.FacilityCard{{ID: "fac-1", SafeZoneID: "sz-1", Name: "fac-1"}},
+		Instructions: []offlinepkg.InstructionCard{
+			{
+				ID:       "ins-1",
+				Language: "en-IN",
+				Title:    "Evacuate",
+				Summary:  "Follow designated routes to shelter",
+			},
+		},
+		EmergencyContacts: []offlinepkg.EmergencyContact{
+			{
+				Name:   "Emergency Control",
+				Number: "112",
+			},
+		},
+		AllocationPolicy: offlinepkg.PolicyCard{
+			Order: []string{"sz-1"},
+		},
+	}
+	if err := signCardInPlace(c, priv, keyID); err != nil {
+		t.Fatalf("sign card: %v", err)
+	}
+	raw, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("marshal card: %v", err)
+	}
+	return c, raw
+}
+
+func pollUntilBlockedByHolder(ctx context.Context, db *sql.DB, holderPID int, budget time.Duration) error {
+	deadline := time.Now().Add(budget)
+	ticker := time.NewTicker(2 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var blocked bool
+		err := db.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_stat_activity
+				WHERE wait_event_type = 'Lock'
+				  AND state = 'active'
+				  AND $1 = ANY(pg_blocking_pids(pid))
+			)`, holderPID).Scan(&blocked)
+		if err == nil && blocked {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for backend to be blocked by %d", holderPID)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}

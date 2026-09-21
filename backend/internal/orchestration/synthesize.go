@@ -166,9 +166,9 @@ func (o *Orchestrator) Synthesize(ctx context.Context, req contracts.TTSRequest,
 		})
 	}
 
-	if !sc.IsTemplateKeyAllowed(req.SpeechKey) {
+	if !sc.IsSpeechKeyApprovedForLanguage(req.SpeechKey, req.Language) {
 		return contracts.TTSResponse{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
-			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template key not approved for jurisdiction", Retryable: false,
+			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template key not approved for language in jurisdiction", Retryable: false,
 		})
 	}
 	if !sc.IsLanguageAllowed(req.Language) {
@@ -188,6 +188,29 @@ func (o *Orchestrator) Synthesize(ctx context.Context, req contracts.TTSRequest,
 		return contracts.TTSResponse{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
 			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template is synthetic-only", Retryable: false,
 		})
+	}
+	if tpl.TemplateVersion != 0 && tpl.TemplateVersion != sc.TemplateVersion {
+		return contracts.TTSResponse{}, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
+			Stage: StageTemplate, Code: contracts.ErrStaleVersion, Reason: fmt.Sprintf("template version %d does not match active context %d", tpl.TemplateVersion, sc.TemplateVersion), Retryable: false,
+		})
+	}
+	if tpl.SourceVersion != 0 && tpl.SourceVersion != sc.SourceVersion {
+		return contracts.TTSResponse{}, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
+			Stage: StageTemplate, Code: contracts.ErrStaleVersion, Reason: fmt.Sprintf("template source version %d does not match active context %d", tpl.SourceVersion, sc.SourceVersion), Retryable: false,
+		})
+	}
+
+	// Server-derived names/counts/IDs cannot be invented by speech_args.
+	for k, v := range req.Args.Args {
+		if s, ok := v.(string); ok && s != "" {
+			if strings.HasSuffix(k, "_id") || k == "target" || k == "place" {
+				if !sc.IsKnownID(s) {
+					return contracts.TTSResponse{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
+						Stage: StageTemplate, Code: contracts.ErrValidation, Reason: fmt.Sprintf("arg %q value %q is not known to active context", k, s), Retryable: false,
+					})
+				}
+			}
+		}
 	}
 
 	// Render with the validated args only. The TTS worker receives
@@ -333,6 +356,8 @@ func renderTemplateArgs(tpl contracts.ApprovedTemplate, args contracts.SpeechArg
 				return "", fmt.Errorf("unexpected arg: %s", k)
 			}
 		}
+	} else if len(args.Args) > 0 {
+		return "", fmt.Errorf("template does not accept args but got %d", len(args.Args))
 	}
 
 	out := tpl.Text

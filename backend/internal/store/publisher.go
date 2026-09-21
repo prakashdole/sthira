@@ -51,10 +51,30 @@ var ErrPublicationNotPermitted = errors.New("store: replay cannot restore caller
 // Missing trust configuration fails closed (no default-allow Provider is
 // constructed anywhere). Production wiring MUST provide a TrustStore; tests
 // set one explicitly.
+//
+// observer is an optional seam the trusted lifecycle path uses to
+// invalidate cached delivery across instances after a committed
+// transition. Production main wires a shared-bus + local-cache
+// observer; production callers MUST NOT silently skip invalidation.
 type Publisher struct {
-	st    *Store
-	ts    offlinepkg.TrustStore
-	nowFn func() time.Time
+	st       *Store
+	ts       offlinepkg.TrustStore
+	nowFn    func() time.Time
+	observer PublicationLifecycleObserver
+}
+
+// PublicationLifecycleObserver is the seam Publisher uses after a
+// committed publish/promote/withdraw to invalidate cached delivery
+// under an explicit consistency bound. See
+// internal/offlinedelivery/types.go for the interface. Defined here
+// as a small interface so this package does not import offlinedelivery
+// (avoiding a cycle through store.Store -> offlinedelivery).
+type PublicationLifecycleObserver interface {
+	OnManifestWithdrawn(ctx context.Context, jurisdiction string, revision int)
+	OnManifestPromoted(ctx context.Context, jurisdiction string, revision int)
+	OnSourceWithdrawn(ctx context.Context, sourceID string)
+	OnSourceQuarantined(ctx context.Context, sourceID string)
+	OnPackageSuperseded(ctx context.Context, packageID string, supersededVersions []int)
 }
 
 // NewPublisher builds the trusted publication boundary. ts must be non-nil;
@@ -68,6 +88,19 @@ func (p *Publisher) WithClock(fn func() time.Time) *Publisher {
 	p.nowFn = fn
 	return p
 }
+
+// WithObserver wires the lifecycle observer that is notified after a
+// committed publish, promote or withdraw. nil disables invalidation
+// (tests use this). Production main wires a non-nil observer.
+func (p *Publisher) WithObserver(observer PublicationLifecycleObserver) *Publisher {
+	if p != nil {
+		p.observer = observer
+	}
+	return p
+}
+
+// Observer returns the configured lifecycle observer (nil if none).
+func (p *Publisher) Observer() PublicationLifecycleObserver { return p.observer }
 
 // TrustStore exposes the configured trust store for advanced wiring/tests.
 func (p *Publisher) TrustStore() offlinepkg.TrustStore { return p.ts }
@@ -263,7 +296,23 @@ func (p *Publisher) PublishCard(ctx context.Context, c *PublishedCard) error {
 	}
 
 	return p.st.InTx(ctx, func(tx DBTX) error {
-		// 1. Package check (FOR UPDATE)
+		// 1. Source OPERATIONAL check (FOR UPDATE) FIRST to maintain global lock order (sources -> packages)
+		var state string
+		err := tx.QueryRowContext(ctx, `
+			SELECT s.state FROM sources s WHERE s.source_id = $1
+			FOR UPDATE`, c.SourceID).Scan(&state)
+		if err != nil {
+			return fmt.Errorf("%w: source lookup: %v", ErrPublicationAuthority, err)
+		}
+		switch state {
+		case "OPERATIONAL":
+		case "QUARANTINED":
+			return fmt.Errorf("%w: source is QUARANTINED", ErrPublicationAuthority)
+		default:
+			return fmt.Errorf("%w: source state=%q (must be OPERATIONAL)", ErrPublicationAuthority, state)
+		}
+
+		// 2. Package check (FOR UPDATE) SECOND
 		var (
 			pkgSource       string
 			pkgVersion      int
@@ -271,7 +320,7 @@ func (p *Publisher) PublishCard(ctx context.Context, c *PublishedCard) error {
 			superseded      bool
 			active          bool
 		)
-		err := tx.QueryRowContext(ctx, `
+		err = tx.QueryRowContext(ctx, `
 			SELECT p.source_id, p.version, p.jurisdiction, (p.superseded_by IS NOT NULL),
 			       (p.effective_at <= $2 AND p.expires_at > $2)
 			FROM packages p WHERE p.package_id = $1
@@ -293,22 +342,6 @@ func (p *Publisher) PublishCard(ctx context.Context, c *PublishedCard) error {
 		}
 		if c.Jurisdiction != "" && pkgJurisdiction != c.Jurisdiction {
 			return fmt.Errorf("%w: package jurisdiction=%q does not match card jurisdiction=%q", ErrPublicationAuthority, pkgJurisdiction, c.Jurisdiction)
-		}
-
-		// 2. Source OPERATIONAL check (FOR UPDATE)
-		var state string
-		err = tx.QueryRowContext(ctx, `
-			SELECT s.state FROM sources s WHERE s.source_id = $1
-			FOR UPDATE`, c.SourceID).Scan(&state)
-		if err != nil {
-			return fmt.Errorf("%w: source lookup: %v", ErrPublicationAuthority, err)
-		}
-		switch state {
-		case "OPERATIONAL":
-		case "QUARANTINED":
-			return fmt.Errorf("%w: source is QUARANTINED", ErrPublicationAuthority)
-		default:
-			return fmt.Errorf("%w: source state=%q (must be OPERATIONAL)", ErrPublicationAuthority, state)
 		}
 
 		// 3. Live authorization check in the card's jurisdiction

@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "asrworker",
-  "documentNamespace": "https://sthira.local/spdx/asrworker-20260921T101855Z-e313b185ee3d",
+  "documentNamespace": "https://sthira.local/spdx/asrworker-20260921T113843Z-e0d3f1c41ffc",
   "creationInfo": {
-    "created": "2026-09-21T10:18:55Z",
+    "created": "2026-09-21T11:38:43Z",
     "creators": [
       "Tool: sthira-gen-spdx"
     ]
@@ -15,7 +15,7 @@
       "name": "sthira/backend/internal/asrworker",
       "SPDXID": "SPDXRef-sthira-backend-internal-asrworker-",
       "versionInfo": "",
-      "downloadLocation": "https://proxy.golang.org/sthira/backend/internal/asrworker/@v/.zip",
+      "downloadLocation": "NOASSERTION",
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
       "copyrightText": "NOASSERTION",

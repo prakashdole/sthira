@@ -106,6 +106,10 @@ type Limits struct {
 	MaxAudioDecodedSeconds float64
 	// MaxTranscriptUTF8Bytes matches contracts.PipelineMaxTranscriptUTF8Bytes.
 	MaxTranscriptUTF8Bytes int
+	// MaxRawModelBytes is the documented ceiling for raw model
+	// proposal JSON bodies at the strict decoder. Larger payloads
+	// are rejected before any worker call.
+	MaxRawModelBytes int
 }
 
 // DefaultLimits returns the documented starting budgets. These are
@@ -130,6 +134,7 @@ func DefaultLimits() Limits {
 		MaxAudioCompressedBytes: contracts.PipelineMaxAudioCompressedBytes,
 		MaxAudioDecodedSeconds:  contracts.PipelineMaxAudioDecodedSeconds,
 		MaxTranscriptUTF8Bytes:  contracts.PipelineMaxTranscriptUTF8Bytes,
+		MaxRawModelBytes:        64 * 1024, // 64 KiB raw proposal JSON; worker responses carry the bulk.
 	}
 }
 

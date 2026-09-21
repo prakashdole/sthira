@@ -1,3 +1,28 @@
+// Package provider's HTTP client speaks the frozen P6 contract
+// shapes from backend/internal/contracts. The eval module is
+// stdlib-only and cannot import the contracts package directly,
+// so the wire types below mirror the contract fields one-for-one.
+//
+// Wire contracts (this file is the source of truth for what the
+// harness sends; backend/internal/contracts/*.go is the source
+// of truth for what the orchestrator/worker accepts):
+//
+//	POST {ASRURL}                  ASRWorkerRequest JSON
+//	                               -> ASRWorkerResponse JSON
+//
+//	POST {MiddleURL}               PipelineRequest JSON
+//	                               -> PipelineResponse JSON
+//	                               (the typed envelope, NOT a
+//	                               status/intent/actions flat
+//	                               object; the runner extracts
+//	                               from validated_proposal)
+//
+//	POST {TTSURL}                  TTSWorkerRequest JSON
+//	                               -> TTSWorkerResponse JSON
+//
+// All three MUST carry: request_id (round-trip), language
+// (where supported), and the actual jurisdiction + source_version
+// fields where the contract requires them.
 package provider
 
 import (
@@ -7,32 +32,27 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 )
 
-// HTTPConfig configures the HTTP provider. Workers expose a typed
-// envelope end-point; URLs are passed in by main, never hard-coded.
+// HTTPConfig configures the HTTP provider. URLs are passed in by
+// main, never hard-coded.
 type HTTPConfig struct {
-	ASRURL     string // POST TranscriptionRequest + audio body
+	ASRURL     string // POST ASRWorkerRequest JSON
 	MiddleURL  string // POST PipelineRequest JSON
-	TTSURL     string // POST TTSRequest JSON
+	TTSURL     string // POST TTSWorkerRequest JSON
 	AuthBearer string // optional
 	Timeout    time.Duration
 }
 
-// HTTPProvider speaks the frozen wire shapes over HTTP. It is the only
-// real-run Provider. It does not bundle adapter logic; the worker
-// processes own that.
+// HTTPProvider speaks the frozen wire shapes over HTTP. It is the
+// only real-run Provider.
 type HTTPProvider struct {
 	cfg    HTTPConfig
 	client *http.Client
 }
 
-// NewHTTP returns a Provider whose Mode is ModeHTTP. The caller is
-// responsible for keeping the URL strings in lockstep with the
-// orchestrator's published protocol — changing this is a contract
-// change, not a runner change.
+// NewHTTP returns a Provider whose Mode is ModeHTTP.
 func NewHTTP(cfg HTTPConfig) *HTTPProvider {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 5 * time.Second
@@ -42,42 +62,43 @@ func NewHTTP(cfg HTTPConfig) *HTTPProvider {
 
 func (p *HTTPProvider) Mode() Mode { return ModeHTTP }
 
-// ASR POSTs the typed audio envelope and returns the typed
-// transcription outcome. Audio bytes are sent as a raw body inside a
-// multipart-free convention: the request line carries the
-// request_id, and the JSON envelope fits in headers? — too clever.
-// Use a small typed wire:
-//
-//	POST {base}/transcribe?request_id=...
-//	Content-Type: <content_type>
-//	Body: <bounded audio bytes>
-//
-// and rely on the response JSON. This is intentionally NOT
-// re-implementing the orchestrator's full handler; it is a thin
-// enforcement seam. The URL is supplied by main (the orchestrator's
-// pipeline endpoint).
+// ASR POSTs the typed ASRWorkerRequest envelope (mirrors
+// contracts.ASRWorkerRequest) and returns the typed
+// ASRWorkerResponse. Audio bytes are sent as base64 in the
+// "audio_b64" field of the JSON body — same wire shape the
+// orchestrator uses when calling private workers.
 func (p *HTTPProvider) ASR(ctx context.Context, req ASRRequest) (ASROutcome, error) {
 	if p.cfg.ASRURL == "" {
 		return ASROutcome{}, errors.New("HTTP ASR URL not configured")
 	}
-	body, err := decodeAudioB64(req.AudioB64)
+	audioBytes, err := decodeAudioB64(req.AudioB64)
 	if err != nil {
 		return ASROutcome{}, fmt.Errorf("decode audio: %w", err)
+	}
+	wire := map[string]any{
+		"request_id":      req.RequestID,
+		"language":        req.Language,
+		"content_type":    req.ContentType,
+		"audio_b64":       req.AudioB64, // server can decode without us round-tripping
+		"byte_size":       int64(len(audioBytes)),
+		"decoded_seconds": 0.0, // server recomputes
+		"deadline_ms":     5000,
+	}
+	body, err := json.Marshal(wire)
+	if err != nil {
+		return ASROutcome{}, err
 	}
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.ASRURL, bytes.NewReader(body))
 	if err != nil {
 		return ASROutcome{}, err
 	}
-	if req.ContentType != "" {
-		hreq.Header.Set("Content-Type", req.ContentType)
-	} else {
-		hreq.Header.Set("Content-Type", "application/octet-stream")
-	}
+	hreq.Header.Set("Content-Type", "application/json")
+	hreq.Header.Set("Accept", "application/json")
 	if req.RequestID != "" {
-		hreq.Header.Set("X-Request-ID", req.RequestID)
+		hreq.Header.Set("X-Sthira-Request-ID", req.RequestID)
 	}
 	if req.Language != "" {
-		hreq.Header.Set("X-Language", req.Language)
+		hreq.Header.Set("X-Sthira-Language", req.Language)
 	}
 	if p.cfg.AuthBearer != "" {
 		hreq.Header.Set("Authorization", "Bearer "+p.cfg.AuthBearer)
@@ -90,12 +111,20 @@ func (p *HTTPProvider) ASR(ctx context.Context, req ASRRequest) (ASROutcome, err
 	if resp.StatusCode/100 != 2 {
 		return ASROutcome{}, httpStatusError(resp.StatusCode)
 	}
-	var out ASROutcomeEnvelope
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	rawBody, err := boundedRead(resp.Body, 64*1024)
+	if err != nil {
 		return ASROutcome{}, fmt.Errorf("decode ASR json: %w", err)
 	}
+	var out ASRWorkerResponseWire
+	if err := json.Unmarshal(rawBody, &out); err != nil {
+		return ASROutcome{}, fmt.Errorf("decode ASR json: %w", err)
+	}
+	if out.RequestID != "" && out.RequestID != req.RequestID {
+		return ASROutcome{}, fmt.Errorf("asr: request_id mismatch got=%q want=%q",
+			out.RequestID, req.RequestID)
+	}
 	return ASROutcome{
-		State:      out.State,
+		State:      string(out.State),
 		Text:       out.Text,
 		Language:   out.Language,
 		Confidence: out.Confidence,
@@ -103,12 +132,42 @@ func (p *HTTPProvider) ASR(ctx context.Context, req ASRRequest) (ASROutcome, err
 	}, nil
 }
 
-// Middle POSTs the typed pipeline envelope.
+// Middle POSTs the typed PipelineRequest envelope (mirrors
+// contracts.PipelineRequest) and decodes the typed
+// PipelineResponse. Jurisdiction is sourced from the case's
+// Context, NOT invented from data_version parsing.
 func (p *HTTPProvider) Middle(ctx context.Context, req MiddleRequest) (MiddleOutcome, error) {
 	if p.cfg.MiddleURL == "" {
 		return MiddleOutcome{}, errors.New("HTTP Middle URL not configured")
 	}
-	body, err := json.Marshal(PipelineEnvelopeBridge(req))
+	jurisdiction := req.Case.Context.Jurisdiction
+	if jurisdiction == "" {
+		return MiddleOutcome{}, errors.New("middle: jurisdiction required (D36)")
+	}
+	srcVer := req.Case.Context.SourceVersion
+	if srcVer <= 0 {
+		return MiddleOutcome{}, errors.New("middle: source_version required (D43)")
+	}
+	input := map[string]any{
+		"kind": "transcript",
+		"text": req.Transcript,
+	}
+	render := map[string]any{"kind": "none"}
+	wire := map[string]any{
+		"request_id":      req.RequestID,
+		"jurisdiction":    jurisdiction,
+		"language":        req.Language,
+		"input":           input,
+		"render":          render,
+		"idempotency_key": "eval-" + req.RequestID,
+		// data_version is NOT in PipelineRequest; the orchestrator
+		// resolves it from the scoped context. The harness
+		// surfaces it as a request-side hint so the server can
+		// fail-fast on stale context.
+		"data_version_hint": req.Case.Context.DataVersion,
+		"source_version":    srcVer,
+	}
+	body, err := json.Marshal(wire)
 	if err != nil {
 		return MiddleOutcome{}, err
 	}
@@ -117,8 +176,9 @@ func (p *HTTPProvider) Middle(ctx context.Context, req MiddleRequest) (MiddleOut
 		return MiddleOutcome{}, err
 	}
 	hreq.Header.Set("Content-Type", "application/json")
+	hreq.Header.Set("Accept", "application/json")
 	if req.RequestID != "" {
-		hreq.Header.Set("X-Request-ID", req.RequestID)
+		hreq.Header.Set("X-Sthira-Request-ID", req.RequestID)
 	}
 	if p.cfg.AuthBearer != "" {
 		hreq.Header.Set("Authorization", "Bearer "+p.cfg.AuthBearer)
@@ -131,27 +191,98 @@ func (p *HTTPProvider) Middle(ctx context.Context, req MiddleRequest) (MiddleOut
 	if resp.StatusCode/100 != 2 {
 		return MiddleOutcome{}, httpStatusError(resp.StatusCode)
 	}
-	var out PipelineResponseEnvelope
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return MiddleOutcome{}, fmt.Errorf("decode Middle json: %w", err)
+	rawBody, err := boundedRead(resp.Body, 256*1024)
+	if err != nil {
+		return MiddleOutcome{}, fmt.Errorf("decode middle json: %w", err)
+	}
+	var out PipelineResponseWire
+	if err := json.Unmarshal(rawBody, &out); err != nil {
+		return MiddleOutcome{}, fmt.Errorf("decode middle json: %w", err)
+	}
+	if out.RequestID != "" && out.RequestID != req.RequestID {
+		return MiddleOutcome{}, fmt.Errorf("middle: request_id mismatch got=%q want=%q",
+			out.RequestID, req.RequestID)
+	}
+	// The runner consumes status + intent + actions + speech_key.
+	// The contract returns the validated_proposal; we extract
+	// the typed fields from it.
+	status := string(out.State)
+	intent := ""
+	var actions []string
+	speechKey := ""
+	var clarifyIDs, evidenceIDs []string
+	if out.ValidatedProposal != nil {
+		intent = stringPtr(out.ValidatedProposal.Intent)
+		for _, a := range out.ValidatedProposal.Actions {
+			actions = append(actions, actionToString(a))
+		}
+		speechKey = stringPtr(out.ValidatedProposal.SpeechKey)
+		clarifyIDs = append(clarifyIDs, out.ValidatedProposal.ClarificationIDs...)
+		evidenceIDs = append(evidenceIDs, out.ValidatedProposal.EvidenceIDs...)
+	}
+	// Template speech_key overrides proposal speech_key (matches
+	// orchestrator logic).
+	if out.Template.SpeechKey != "" {
+		speechKey = out.Template.SpeechKey
 	}
 	return MiddleOutcome{
-		Status:      out.Status,
-		Intent:      out.Intent,
-		Language:    out.Language,
-		Actions:     out.Actions,
-		SpeechKey:   out.SpeechKey,
-		ClarifyIDs:  out.ClarifyIDs,
-		EvidenceIDs: out.EvidenceIDs,
+		Status:      status,
+		Intent:      intent,
+		Language:    req.Language,
+		Actions:     actions,
+		SpeechKey:   speechKey,
+		ClarifyIDs:  clarifyIDs,
+		EvidenceIDs: evidenceIDs,
 	}, nil
 }
 
-// TTS POSTs the typed TTS envelope.
+// TTS POSTs the typed TTSWorkerRequest envelope (mirrors
+// contracts.TTSWorkerRequest) and decodes the typed
+// TTSWorkerResponse. The runner is forbidden from supplying free
+// text; the speech text is sourced from a validated template via
+// the server-side /api/v3/voice/speech endpoint. The harness
+// supplies only the speech_key, jurisdiction and source_version
+// so the worker renders the approved template text itself.
 func (p *HTTPProvider) TTS(ctx context.Context, req TTSRequest) (TTSOutcome, error) {
 	if p.cfg.TTSURL == "" {
 		return TTSOutcome{}, errors.New("HTTP TTS URL not configured")
 	}
-	body, err := json.Marshal(TTSEnvelopeBridge(req))
+	jurisdiction := req.Case.Context.Jurisdiction
+	if jurisdiction == "" {
+		return TTSOutcome{}, errors.New("tts: jurisdiction required")
+	}
+	srcVer := req.SourceVersion
+	if srcVer <= 0 {
+		srcVer = req.Case.Context.SourceVersion
+	}
+	if srcVer <= 0 {
+		srcVer = 1
+	}
+	templateVersion := 1
+	if req.Case.Context.TemplateVersion > 0 {
+		templateVersion = req.Case.Context.TemplateVersion
+	}
+	// The harness does NOT send free text — the speech text is
+	// server-rendered from the approved template. The wire
+	// request sends the speech_key, language, jurisdiction,
+	// source_version, and template_version only.
+	wire := map[string]any{
+		"request_id":       req.RequestID,
+		"speech_key":       req.SpeechKey,
+		"language":         req.Language,
+		"text":             "", // server renders; client does not supply free text
+		"source_version":   srcVer,
+		"template_version": templateVersion,
+		"settings": map[string]any{
+			"sample_rate": 22050,
+			"bit_depth":   16,
+			"channels":    1,
+		},
+		"deadline_ms":     5000,
+		"jurisdiction":    jurisdiction,
+		"idempotency_key": "tts-eval-" + req.RequestID,
+	}
+	body, err := json.Marshal(wire)
 	if err != nil {
 		return TTSOutcome{}, err
 	}
@@ -160,8 +291,9 @@ func (p *HTTPProvider) TTS(ctx context.Context, req TTSRequest) (TTSOutcome, err
 		return TTSOutcome{}, err
 	}
 	hreq.Header.Set("Content-Type", "application/json")
+	hreq.Header.Set("Accept", "application/json")
 	if req.RequestID != "" {
-		hreq.Header.Set("X-Request-ID", req.RequestID)
+		hreq.Header.Set("X-Sthira-Request-ID", req.RequestID)
 	}
 	if p.cfg.AuthBearer != "" {
 		hreq.Header.Set("Authorization", "Bearer "+p.cfg.AuthBearer)
@@ -174,102 +306,119 @@ func (p *HTTPProvider) TTS(ctx context.Context, req TTSRequest) (TTSOutcome, err
 	if resp.StatusCode/100 != 2 {
 		return TTSOutcome{}, httpStatusError(resp.StatusCode)
 	}
-	var out TTSResponseEnvelope
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return TTSOutcome{}, fmt.Errorf("decode TTS json: %w", err)
+	rawBody, err := boundedRead(resp.Body, 1024*1024)
+	if err != nil {
+		return TTSOutcome{}, fmt.Errorf("decode tts json: %w", err)
+	}
+	var out TTSWorkerResponseWire
+	if err := json.Unmarshal(rawBody, &out); err != nil {
+		return TTSOutcome{}, fmt.Errorf("decode tts json: %w", err)
+	}
+	if out.RequestID != "" && out.RequestID != req.RequestID {
+		return TTSOutcome{}, fmt.Errorf("tts: request_id mismatch got=%q want=%q",
+			out.RequestID, req.RequestID)
 	}
 	return TTSOutcome{
-		State:      out.State,
+		State:      string(out.State),
 		SpeechKey:  out.SpeechKey,
-		ByteSize:   out.ByteSize,
-		DurationMS: out.DurationMS,
+		ByteSize:   int(out.ByteSize),
+		DurationMS: 0, // PipelineAudio carries duration; TTSWorkerResponse doesn't
 	}, nil
 }
 
-// --- wire shapes ---------------------------------------------------
+// --- wire shapes (mirror of contracts/*; eval module is stdlib-only) ---
 
-// ASROutcomeEnvelope mirrors the orchestrator's downstream
-// TranscriptionResponse. Field names reuse the contract vocabulary
-// without redeclaring the type so eval remains independent of the
-// orchestrator's package.
-type ASROutcomeEnvelope struct {
-	State         string   `json:"state"`
-	Text          string   `json:"text"`
-	Language      string   `json:"language"`
-	Confidence    *float64 `json:"confidence,omitempty"`
-	ModelRevision string   `json:"model_revision,omitempty"`
+// ASRWorkerResponseWire mirrors contracts.ASRWorkerResponse.
+type ASRWorkerResponseWire struct {
+	RequestID      string   `json:"request_id"`
+	Language       string   `json:"language"`
+	Text           string   `json:"text"`
+	Confidence     *float64 `json:"confidence,omitempty"`
+	State          string   `json:"state"`
+	ModelRevision  string   `json:"model_revision,omitempty"`
+	ArtifactDigest string   `json:"artifact_digest,omitempty"`
 }
 
-// PipelineEnvelopeBridge converts a MiddleRequest into a JSON value
-// shaped like the orchestrator's typed pipeline envelope — input is a
-// typed transcript, output is non-TTS render. The worker reads the
-// same wire shape; we never diverge.
-func PipelineEnvelopeBridge(req MiddleRequest) map[string]any {
-	return map[string]any{
-		"request_id": req.RequestID,
-		"language":   req.Language,
-		"input":      map[string]any{"kind": "transcript", "text": req.Transcript},
-		"render":     map[string]any{"kind": "none"},
-		"context":    req.Context,
-		"case_id":    req.Case.ID,
-	}
+// PipelineResponseWire mirrors contracts.PipelineResponse.
+type PipelineResponseWire struct {
+	RequestID         string               `json:"request_id"`
+	DataVersion       string               `json:"data_version"`
+	State             string               `json:"state"`
+	ValidatedProposal *ModelOutputWire     `json:"validated_proposal,omitempty"`
+	Template          PipelineTemplateWire `json:"template"`
+	Audio             *PipelineAudioWire   `json:"audio,omitempty"`
+	StageFailures     []string             `json:"stage_failures,omitempty"`
 }
 
-// PipelineResponseEnvelope mirrors the orchestrator's typed
-// PipelineResponse. We never parse fields the runner doesn't need.
-type PipelineResponseEnvelope struct {
-	Status      string   `json:"status"`
-	Intent      string   `json:"intent,omitempty"`
-	Language    string   `json:"language"`
-	Actions     []string `json:"actions,omitempty"`
-	SpeechKey   string   `json:"speech_key,omitempty"`
-	ClarifyIDs  []string `json:"clarification_ids,omitempty"`
-	EvidenceIDs []string `json:"evidence_ids,omitempty"`
+// ModelOutputWire mirrors contracts.ModelOutput.
+type ModelOutputWire struct {
+	SchemaVersion    string       `json:"schema_version"`
+	RequestID        string       `json:"request_id"`
+	DataVersion      string       `json:"data_version"`
+	Status           string       `json:"status"`
+	Intent           *string      `json:"intent,omitempty"`
+	Language         string       `json:"language"`
+	Actions          []ActionWire `json:"actions"`
+	SpeechKey        *string      `json:"speech_key,omitempty"`
+	ClarificationIDs []string     `json:"clarification_ids"`
+	EvidenceIDs      []string     `json:"evidence_ids"`
 }
 
-// TTSEnvelopeBridge converts a TTSRequest into the orchestrator's
-// typed envelope.
-func TTSEnvelopeBridge(req TTSRequest) map[string]any {
-	srcVer := req.SourceVersion
-	if srcVer <= 0 {
-		srcVer = req.Case.Context.SourceVersion
-	}
-	if srcVer <= 0 {
-		srcVer = 1
-	}
-	jurisdiction := "KL-WYD"
-	if req.Case.Context.DataVersion != "" {
-		parts := strings.Split(req.Case.Context.DataVersion, "-")
-		if len(parts) >= 2 {
-			jurisdiction = parts[0] + "-" + parts[1]
-		}
-	}
-	return map[string]any{
-		"request_id":     req.RequestID,
-		"jurisdiction":   jurisdiction,
-		"speech_key":     req.SpeechKey,
-		"language":       req.Language,
-		"args":           map[string]any{"args": req.Args},
-		"source_version": srcVer,
-		"settings": map[string]any{
-			"sample_rate": 16000,
-			"bit_depth":   16,
-			"channels":    1,
-		},
-	}
+// ActionWire mirrors contracts.Action (loose; the runner only
+// needs the type and target identifiers for accounting).
+type ActionWire struct {
+	Type      string   `json:"type"`
+	TargetID  string   `json:"target_id,omitempty"`
+	TargetIDs []string `json:"target_ids,omitempty"`
+	RouteID   string   `json:"route_id,omitempty"`
+	Panel     string   `json:"panel,omitempty"`
+	Direction string   `json:"direction,omitempty"`
+	Steps     int      `json:"steps,omitempty"`
+	Language  string   `json:"language,omitempty"`
 }
 
-// TTSResponseEnvelope mirrors the orchestrator's TTSResponse. We
-// carry byte size + duration to keep the runner's stage accounting
-// honest.
-type TTSResponseEnvelope struct {
-	State      string `json:"state"`
-	SpeechKey  string `json:"speech_key,omitempty"`
-	ByteSize   int    `json:"byte_size,omitempty"`
-	DurationMS int    `json:"duration_ms,omitempty"`
+// PipelineTemplateWire mirrors contracts.PipelineTemplate.
+type PipelineTemplateWire struct {
+	SpeechKey       string        `json:"speech_key"`
+	TemplateVersion int           `json:"template_version"`
+	Args            []TemplateArg `json:"args,omitempty"`
 }
 
-// --- helpers -------------------------------------------------------
+// TemplateArg mirrors contracts.PipelineTemplateArg.
+type TemplateArg struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// PipelineAudioWire mirrors contracts.PipelineAudio.
+type PipelineAudioWire struct {
+	AudioID         string `json:"audio_id"`
+	ContentType     string `json:"content_type"`
+	ByteSize        int64  `json:"byte_size"`
+	ChecksumSHA256  string `json:"checksum_sha256"`
+	CacheHit        bool   `json:"cache_hit"`
+	Language        string `json:"language"`
+	ModelRevision   string `json:"model_revision"`
+	VoiceRevision   string `json:"voice_revision"`
+	TemplateVersion int    `json:"template_version"`
+	SourceVersion   int    `json:"source_version"`
+}
+
+// TTSWorkerResponseWire mirrors contracts.TTSWorkerResponse.
+type TTSWorkerResponseWire struct {
+	RequestID      string `json:"request_id"`
+	SpeechKey      string `json:"speech_key"`
+	Language       string `json:"language"`
+	State          string `json:"state"`
+	AudioB64       string `json:"audio_b64,omitempty"`
+	ContentType    string `json:"content_type,omitempty"`
+	ChecksumSHA256 string `json:"checksum_sha256,omitempty"`
+	ModelRevision  string `json:"model_revision,omitempty"`
+	VoiceRevision  string `json:"voice_revision,omitempty"`
+	ByteSize       int64  `json:"byte_size,omitempty"`
+}
+
+// --- helpers ---------------------------------------------------------
 
 // decodeAudioB64 decodes base64 audio into raw bytes. The harness
 // stores audio outside the repo, so we always go through this.
@@ -277,22 +426,47 @@ func decodeAudioB64(b64 string) ([]byte, error) {
 	if b64 == "" {
 		return nil, errors.New("empty audio payload")
 	}
-	// Use stdlib base64 via std (see encodeBase64 companion) — keep
-	// imports lean.
 	return stdBase64Decode(b64)
 }
 
 // httpStatusError converts a status code into a typed error class
 // the runner can match against.
 func httpStatusError(code int) error {
-	if code == http.StatusRequestTimeout {
+	switch {
+	case code == http.StatusRequestTimeout:
 		return errors.New("http: timeout")
-	}
-	if code == http.StatusServiceUnavailable {
+	case code == http.StatusServiceUnavailable:
 		return errors.New("http: 503 — model unavailable")
-	}
-	if code/100 == 5 {
+	case code == http.StatusTooManyRequests:
+		return errors.New("http: 429 — queue saturated")
+	case code/100 == 5:
 		return fmt.Errorf("http: %d — server", code)
+	default:
+		return fmt.Errorf("http: %d — client", code)
 	}
-	return fmt.Errorf("http: %d — client", code)
+}
+
+// boundedRead reads up to max bytes; truncates on overflow.
+func boundedRead(r interface{ Read(p []byte) (int, error) }, max int64) ([]byte, error) {
+	// Use stdlib via io.LimitReader to avoid pulling in extra deps.
+	return ioLimitReaderRead(r, max)
+}
+
+func stringPtr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// actionToString serializes an ActionWire to a stable identifier
+// the runner's reconcile logic can match against.
+func actionToString(a ActionWire) string {
+	if a.TargetID != "" {
+		return a.Type + ":" + a.TargetID
+	}
+	if len(a.TargetIDs) > 0 {
+		return a.Type + ":[" + a.TargetIDs[0] + "]"
+	}
+	return a.Type
 }

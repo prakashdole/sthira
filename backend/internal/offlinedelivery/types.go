@@ -56,6 +56,100 @@ type PublicationSource interface {
 	GetResource(ctx context.Context, resourceID string) (*ResourceContent, error)
 }
 
+// PublicationLifecycleObserver is the seam the trusted lifecycle path
+// (operator publish/promote/withdraw/quarantine/supersede handlers)
+// uses to invalidate cached deliveries across instances under an
+// explicit consistency bound. Implementations may fan out to a
+// shared notification channel (e.g. in-process bus today; pubsub
+// later) and to the local process-local cache. Production
+// implementation MUST honor at-least-once semantics within the
+// bounded window declared in plan/parameters.md; this seam is the
+// place that bound lives, not in the handler.
+type PublicationLifecycleObserver interface {
+	// OnManifestWithdrawn invalidates cached manifests for the given
+	// jurisdiction. Called by the trusted withdraw lifecycle path
+	// after the row state is committed.
+	OnManifestWithdrawn(ctx context.Context, jurisdiction string, revision int)
+	// OnManifestPromoted invalidates any older-cached manifest for
+	// the jurisdiction so a superseded version stops serving.
+	OnManifestPromoted(ctx context.Context, jurisdiction string, revision int)
+	// OnSourceWithdrawn invalidates ALL cached manifest/card for
+	// every jurisdiction the source was authorized in, plus any
+	// active CachedSource reads in flight.
+	OnSourceWithdrawn(ctx context.Context, sourceID string)
+	// OnSourceQuarantined invalidates cached manifest/card as for
+	// withdrawal.
+	OnSourceQuarantined(ctx context.Context, sourceID string)
+	// OnPackageSuperseded invalidates every cached card for the
+	// superseded versions; the new version is left cached.
+	OnPackageSuperseded(ctx context.Context, packageID string, supersededVersions []int)
+}
+
+// MultiObserver fans a lifecycle event out to several observers. The
+// first observer is treated as authoritative for the local process;
+// later observers are best-effort within the same bounded deadline.
+// Fan-out ordering is preserved; observers MUST NOT block each
+// other past the deadline.
+type MultiObserver struct {
+	observers []PublicationLifecycleObserver
+}
+
+// NewMultiObserver constructs a multi-observer with the given fan-out
+// members. nil members are skipped.
+func NewMultiObserver(observers ...PublicationLifecycleObserver) *MultiObserver {
+	out := make([]PublicationLifecycleObserver, 0, len(observers))
+	for _, o := range observers {
+		if o != nil {
+			out = append(out, o)
+		}
+	}
+	return &MultiObserver{observers: out}
+}
+
+func (m *MultiObserver) fanout(event string, fn func(o PublicationLifecycleObserver) error) {
+	if m == nil {
+		return
+	}
+	for _, o := range m.observers {
+		_ = fn(o) // best effort within the lifecycle deadline
+	}
+}
+
+func (m *MultiObserver) OnManifestWithdrawn(ctx context.Context, jurisdiction string, revision int) {
+	m.fanout("manifest-withdrawn", func(o PublicationLifecycleObserver) error {
+		o.OnManifestWithdrawn(ctx, jurisdiction, revision)
+		return nil
+	})
+}
+
+func (m *MultiObserver) OnManifestPromoted(ctx context.Context, jurisdiction string, revision int) {
+	m.fanout("manifest-promoted", func(o PublicationLifecycleObserver) error {
+		o.OnManifestPromoted(ctx, jurisdiction, revision)
+		return nil
+	})
+}
+
+func (m *MultiObserver) OnSourceWithdrawn(ctx context.Context, sourceID string) {
+	m.fanout("source-withdrawn", func(o PublicationLifecycleObserver) error {
+		o.OnSourceWithdrawn(ctx, sourceID)
+		return nil
+	})
+}
+
+func (m *MultiObserver) OnSourceQuarantined(ctx context.Context, sourceID string) {
+	m.fanout("source-quarantined", func(o PublicationLifecycleObserver) error {
+		o.OnSourceQuarantined(ctx, sourceID)
+		return nil
+	})
+}
+
+func (m *MultiObserver) OnPackageSuperseded(ctx context.Context, packageID string, supersededVersions []int) {
+	m.fanout("package-superseded", func(o PublicationLifecycleObserver) error {
+		o.OnPackageSuperseded(ctx, packageID, supersededVersions)
+		return nil
+	})
+}
+
 // Config tunes delivery timeouts, limits, and caching behavior.
 type Config struct {
 	// MaxCardBytes bounds the maximum raw card response size (default 1 MiB).

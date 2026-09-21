@@ -100,6 +100,7 @@ type ScopedContext struct {
 	DataVersion     string         `json:"data_version"`
 	Jurisdiction    string         `json:"jurisdiction"`
 	SchemaVersion   string         `json:"schema_version"` // always "3.0"
+	SourceID        string         `json:"source_id,omitempty"`
 	SourceStatus    FreshnessState `json:"source_status"`
 	SourceVersion   int            `json:"source_version"`
 	TemplateVersion int            `json:"template_version"`
@@ -110,6 +111,9 @@ type ScopedContext struct {
 	// TemplateKeys lists the approved speech_key values. Worker 7 freezes
 	// the rendered text for each key.
 	TemplateKeys []string `json:"template_keys"`
+	// ApprovedSpeechKeys maps speech_key to the exact list of approved languages.
+	// Wildcard approval (NULL in DB) is represented as ["*"].
+	ApprovedSpeechKeys map[string][]string `json:"approved_speech_keys,omitempty"`
 
 	// KnownPlaces maps a place_id to its typed candidate. Distinct from the
 	// flat KnownIDs map; it carries kind and jurisdiction for validation.
@@ -172,6 +176,43 @@ func (sc ScopedContext) IsTemplateKeyAllowed(key string) bool {
 		if k == key {
 			return true
 		}
+	}
+	return false
+}
+
+// IsSpeechKeyApprovedForLanguage reports whether the speech_key is approved for the given language.
+func (sc ScopedContext) IsSpeechKeyApprovedForLanguage(key, language string) bool {
+	if len(sc.ApprovedSpeechKeys) > 0 {
+		langs, ok := sc.ApprovedSpeechKeys[key]
+		if !ok {
+			return false
+		}
+		for _, l := range langs {
+			if l == "*" || l == language {
+				return true
+			}
+		}
+		return false
+	}
+	return sc.IsTemplateKeyAllowed(key)
+}
+
+// IsKnownID reports whether id appears in known places, safe zones, red zones, routes or facilities.
+func (sc ScopedContext) IsKnownID(id string) bool {
+	if _, ok := sc.KnownPlaces[id]; ok {
+		return true
+	}
+	if _, ok := sc.KnownSafeZones[id]; ok {
+		return true
+	}
+	if _, ok := sc.KnownRedZones[id]; ok {
+		return true
+	}
+	if _, ok := sc.KnownRoutes[id]; ok {
+		return true
+	}
+	if _, ok := sc.KnownFacilities[id]; ok {
+		return true
 	}
 	return false
 }

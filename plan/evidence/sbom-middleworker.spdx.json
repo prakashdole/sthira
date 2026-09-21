@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "middleworker",
-  "documentNamespace": "https://sthira.local/spdx/middleworker-20260921T101855Z-3632f4a6081a",
+  "documentNamespace": "https://sthira.local/spdx/middleworker-20260921T113843Z-10841d624d2a",
   "creationInfo": {
-    "created": "2026-09-21T10:18:55Z",
+    "created": "2026-09-21T11:38:43Z",
     "creators": [
       "Tool: sthira-gen-spdx"
     ]
@@ -15,7 +15,7 @@
       "name": "sthira/backend/internal/middleworker",
       "SPDXID": "SPDXRef-sthira-backend-internal-middleworker-",
       "versionInfo": "",
-      "downloadLocation": "https://proxy.golang.org/sthira/backend/internal/middleworker/@v/.zip",
+      "downloadLocation": "NOASSERTION",
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
       "copyrightText": "NOASSERTION",

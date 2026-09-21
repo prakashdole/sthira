@@ -168,14 +168,16 @@ func TestServer_Transcribe_RejectsEmptyAudio(t *testing.T) {
 
 // TestServer_Transcribe_RejectsUnsupportedCodec: a request whose
 // content-type is not in WorkerSupportedContentTypes is rejected at
-// decode time, with state = AUDIO_UNAVAILABLE.
+// decode time, with state = AUDIO_UNAVAILABLE. audio/webm and
+// audio/ogg are transcoded via ffmpeg now, so we use a genuinely
+// unsupported codec (audio/aac) here.
 func TestServer_Transcribe_RejectsUnsupportedCodec(t *testing.T) {
 	s := makeServer(t, "")
 	wav := silenceBufferAt(100, 16_000)
 	body, status := postTranscribe(t, s, requestJSON{
 		RequestID:      "R-2",
 		Language:       "hi-IN",
-		ContentType:    "audio/webm",
+		ContentType:    "audio/aac",
 		AudioB64:       base64.StdEncoding.EncodeToString(wav),
 		ByteSize:       int64(len(wav)),
 		DeadlineMillis: 5000,

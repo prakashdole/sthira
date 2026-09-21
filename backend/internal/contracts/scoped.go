@@ -90,8 +90,8 @@ func EnforceScopedContext(out ModelOutput, sc ScopedContext) error {
 	if !sc.IsLanguageAllowed(out.Language) {
 		return &ErrScopedSemantic{Reason: fmt.Sprintf("language %q not in allowed set", out.Language)}
 	}
-	if out.SpeechKey != nil && *out.SpeechKey != "" && !sc.IsTemplateKeyAllowed(*out.SpeechKey) {
-		return &ErrScopedSemantic{Reason: fmt.Sprintf("speech_key %q not in approved set", *out.SpeechKey)}
+	if out.SpeechKey != nil && *out.SpeechKey != "" && !sc.IsSpeechKeyApprovedForLanguage(*out.SpeechKey, out.Language) {
+		return &ErrScopedSemantic{Reason: fmt.Sprintf("speech_key %q not approved for language %q", *out.SpeechKey, out.Language)}
 	}
 	for _, id := range out.ClarificationIDs {
 		if _, ok := sc.KnownPlaces[id]; !ok {

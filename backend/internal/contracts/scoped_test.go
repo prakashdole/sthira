@@ -536,3 +536,56 @@ func TestShapeAndSemantics_Integration(t *testing.T) {
 		t.Fatalf("expected *ErrScopedSemantic, got %T (%v)", semErr, semErr)
 	}
 }
+
+func TestEnforce_LanguageSpecificSpeechKeyApproval(t *testing.T) {
+	sc := mkScoped()
+	sc.AllowedLanguages = []string{"hi-IN", "ml-IN"}
+	sc.TemplateKeys = []string{"destination_options"}
+	// Approved ONLY for Hindi, even though both Hindi and Malayalam are allowed languages in context.
+	sc.ApprovedSpeechKeys = map[string][]string{
+		"destination_options": {"hi-IN"},
+	}
+
+	// 1. Model attempts Malayalam speech with Hindi-only approval -> REJECTED
+	outML := mkOKProposal(sc)
+	outML.Language = "ml-IN"
+	k := "destination_options"
+	outML.SpeechKey = &k
+	if err := EnforceScopedContext(outML, sc); err == nil {
+		t.Fatalf("expected reject for speech_key not approved for Malayalam")
+	} else if !strings.Contains(err.Error(), "not approved for language") {
+		t.Fatalf("expected 'not approved for language' error, got %v", err)
+	}
+
+	// 2. Model outputs Hindi speech with Hindi approval -> ACCEPTED
+	outHI := mkOKProposal(sc)
+	outHI.Language = "hi-IN"
+	outHI.SpeechKey = &k
+	if err := EnforceScopedContext(outHI, sc); err != nil {
+		t.Fatalf("expected accept for Hindi speech with Hindi approval, got %v", err)
+	}
+}
+
+func TestEnforce_SilentActionDoesNotRequireSpeechApproval(t *testing.T) {
+	sc := mkScoped()
+	// Zero approved templates in jurisdiction.
+	sc.TemplateKeys = nil
+	sc.ApprovedSpeechKeys = nil
+
+	// Valid silent action (RECENTER) with no speech_key
+	intent := IntentRecenter
+	out := ModelOutput{
+		SchemaVersion: "3.0",
+		RequestID:     "REQ-1",
+		DataVersion:   sc.DataVersion,
+		Status:        StatusOK,
+		Intent:        &intent,
+		Language:      "ml-IN",
+		Actions:       []Action{{Type: ActionRecenter}},
+		SpeechKey:     nil,
+	}
+
+	if err := EnforceScopedContext(out, sc); err != nil {
+		t.Fatalf("silent action must succeed even when no speech keys are approved: %v", err)
+	}
+}

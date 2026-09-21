@@ -361,7 +361,10 @@ func (s *Server) handleSourceQuarantine(w http.ResponseWriter, r *http.Request) 
 		if err != nil {
 			return err
 		}
-		if has && (op.Jurisdiction == nil || jur != *op.Jurisdiction) {
+		if !has {
+			return errNoAuthorization
+		}
+		if op.Jurisdiction == nil || jur != *op.Jurisdiction {
 			return errCrossJurisdiction
 		}
 		if rep {

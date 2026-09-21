@@ -149,6 +149,13 @@ type chatCompletionRequest struct {
 	Messages    []chatMessage `json:"messages"`
 	MaxTokens   int           `json:"max_tokens"`
 	Temperature float64       `json:"temperature"`
+	// ChatTemplate is an optional per-request template override. It
+	// is sent to vLLM only when non-empty, so the configured server
+	// startup --chat-template wins by default; the per-request
+	// override is for cases where reasoning controls (e.g. the
+	// Sarvam-30B enable_thinking=false gate) must be applied at
+	// request time rather than server-startup time.
+	ChatTemplate string `json:"chat_template,omitempty"`
 	// ResponseFormat is vLLM's guided-generation envelope. The
 	// schema name is informational; strict=true forces vLLM to
 	// reject non-conforming outputs server-side.
@@ -209,6 +216,10 @@ type ProposeInput struct {
 	RequestID    string
 	SystemPrompt string
 	UserPayload  []byte // marshalled RequestEnvelope
+	// ChatTemplate is the optional per-request template override
+	// (e.g. SarvamChatTemplate with enable_thinking=false). Empty
+	// means: rely on the server-side --chat-template.
+	ChatTemplate string
 }
 
 // ProposeOutput is what the Client returns on success.
@@ -260,8 +271,9 @@ func (c *Client) Propose(ctx context.Context, in ProposeInput) (*ProposeOutput, 
 			{Role: "system", Content: in.SystemPrompt},
 			{Role: "user", Content: string(in.UserPayload)},
 		},
-		MaxTokens:   c.limits.MaxOutputTokens,
-		Temperature: 0.0,
+		MaxTokens:    c.limits.MaxOutputTokens,
+		Temperature:  0.0,
+		ChatTemplate: in.ChatTemplate,
 		ResponseFormat: &responseFormat{
 			Type: "json_schema",
 			JSONSchema: &jsonSchema{

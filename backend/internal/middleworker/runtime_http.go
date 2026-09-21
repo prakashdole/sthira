@@ -23,6 +23,7 @@ type HTTPClientRuntime struct {
 	digestSHA  string
 	langs      []string
 	system     string
+	chatTpl    string // optional per-request template override (Sarvam enable_thinking=false)
 }
 
 // HTTPClientRuntimeConfig bundles construction. The model_id is the
@@ -30,13 +31,14 @@ type HTTPClientRuntime struct {
 // recorded for /health. system is the pinned voice-map-system-prompt
 // (see plan/voice-map-system-prompt.md).
 type HTTPClientRuntimeConfig struct {
-	Client     *Client
-	ModelID    string
-	Revision   string
-	DigestName string
-	DigestSHA  string
-	Languages  []string
-	System     string
+	Client       *Client
+	ModelID      string
+	Revision     string
+	DigestName   string
+	DigestSHA    string
+	Languages    []string
+	System       string
+	ChatTemplate string // optional per-request override (e.g. SarvamChatTemplate)
 }
 
 // NewHTTPClientRuntime validates the config and returns a runtime.
@@ -60,6 +62,7 @@ func NewHTTPClientRuntime(cfg HTTPClientRuntimeConfig) (*HTTPClientRuntime, erro
 		digestSHA:  cfg.DigestSHA,
 		langs:      append([]string(nil), cfg.Languages...),
 		system:     cfg.System,
+		chatTpl:    cfg.ChatTemplate,
 	}, nil
 }
 
@@ -84,6 +87,7 @@ func (h *HTTPClientRuntime) Propose(ctx context.Context, req RequestEnvelope) (*
 		RequestID:    req.RequestID,
 		SystemPrompt: h.system,
 		UserPayload:  payload,
+		ChatTemplate: h.chatTpl,
 	})
 }
 
