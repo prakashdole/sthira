@@ -146,6 +146,12 @@ type Context struct {
 	Facilities    []string `json:"facilities,omitempty"`
 	DataVersion   string   `json:"data_version,omitempty"`
 	SourceVersion int      `json:"source_version,omitempty"`
+	// Jurisdiction identifies the operational authority scope
+	// the case is exercising. The eval harness requires this so
+	// the HTTP provider can forward it as a real /api/v3 input
+	// field rather than parsing it out of data_version.
+	Jurisdiction    string `json:"jurisdiction,omitempty"`
+	TemplateVersion int    `json:"template_version,omitempty"`
 }
 
 // ExpectedOutcome is the locked decision the runner must reconcile
