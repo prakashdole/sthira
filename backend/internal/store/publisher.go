@@ -51,10 +51,30 @@ var ErrPublicationNotPermitted = errors.New("store: replay cannot restore caller
 // Missing trust configuration fails closed (no default-allow Provider is
 // constructed anywhere). Production wiring MUST provide a TrustStore; tests
 // set one explicitly.
+//
+// observer is an optional seam the trusted lifecycle path uses to
+// invalidate cached delivery across instances after a committed
+// transition. Production main wires a shared-bus + local-cache
+// observer; production callers MUST NOT silently skip invalidation.
 type Publisher struct {
-	st    *Store
-	ts    offlinepkg.TrustStore
-	nowFn func() time.Time
+	st       *Store
+	ts       offlinepkg.TrustStore
+	nowFn    func() time.Time
+	observer PublicationLifecycleObserver
+}
+
+// PublicationLifecycleObserver is the seam Publisher uses after a
+// committed publish/promote/withdraw to invalidate cached delivery
+// under an explicit consistency bound. See
+// internal/offlinedelivery/types.go for the interface. Defined here
+// as a small interface so this package does not import offlinedelivery
+// (avoiding a cycle through store.Store -> offlinedelivery).
+type PublicationLifecycleObserver interface {
+	OnManifestWithdrawn(ctx context.Context, jurisdiction string, revision int)
+	OnManifestPromoted(ctx context.Context, jurisdiction string, revision int)
+	OnSourceWithdrawn(ctx context.Context, sourceID string)
+	OnSourceQuarantined(ctx context.Context, sourceID string)
+	OnPackageSuperseded(ctx context.Context, packageID string, supersededVersions []int)
 }
 
 // NewPublisher builds the trusted publication boundary. ts must be non-nil;
@@ -68,6 +88,19 @@ func (p *Publisher) WithClock(fn func() time.Time) *Publisher {
 	p.nowFn = fn
 	return p
 }
+
+// WithObserver wires the lifecycle observer that is notified after a
+// committed publish, promote or withdraw. nil disables invalidation
+// (tests use this). Production main wires a non-nil observer.
+func (p *Publisher) WithObserver(observer PublicationLifecycleObserver) *Publisher {
+	if p != nil {
+		p.observer = observer
+	}
+	return p
+}
+
+// Observer returns the configured lifecycle observer (nil if none).
+func (p *Publisher) Observer() PublicationLifecycleObserver { return p.observer }
 
 // TrustStore exposes the configured trust store for advanced wiring/tests.
 func (p *Publisher) TrustStore() offlinepkg.TrustStore { return p.ts }

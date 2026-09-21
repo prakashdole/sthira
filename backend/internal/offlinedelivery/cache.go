@@ -402,3 +402,79 @@ func (s *CachedSource) GetCard(ctx context.Context, packageID string, version in
 func (s *CachedSource) GetResource(ctx context.Context, resourceID string) (*ResourceContent, error) {
 	return s.inner.GetResource(ctx, resourceID)
 }
+
+// OnManifestWithdrawn implements PublicationLifecycleObserver: drop
+// the cached manifest for the given jurisdiction. The withdrawal is
+// committed before this is called.
+func (s *CachedSource) OnManifestWithdrawn(_ context.Context, jurisdiction string, _ int) {
+	if s == nil {
+		return
+	}
+	s.cache.InvalidateManifest(jurisdiction)
+}
+
+// OnManifestPromoted implements PublicationLifecycleObserver: drop
+// any older cached manifest so a superseded version stops serving.
+func (s *CachedSource) OnManifestPromoted(_ context.Context, jurisdiction string, _ int) {
+	if s == nil {
+		return
+	}
+	s.cache.InvalidateManifest(jurisdiction)
+}
+
+// OnSourceWithdrawn implements PublicationLifecycleObserver. We do
+// not enumerate cached jurisdictions here (the cache does not index
+// by source), so a withdrawn source relies on the offlinedelivery
+// adapter returning ErrNotFound/ErrQuarantined for the next read.
+// The cache TTL also bounds how long stale records can serve.
+func (s *CachedSource) OnSourceWithdrawn(_ context.Context, _ string) {
+	// No jurisdiction index by source; the bounded TTL or a future
+	// direct index invalidation is the recovery mechanism. We
+	// additionally clear ALL cached manifests to bound any
+	// inconsistent state; this is conservative and bounded by the
+	// cache size.
+	if s == nil {
+		return
+	}
+	for _, j := range s.cache.cachedJurisdictions() {
+		s.cache.InvalidateManifest(j)
+	}
+}
+
+// OnSourceQuarantined implements PublicationLifecycleObserver. The
+// upstream adapter already returns ErrQuarantined; we additionally
+// purge the local cache to make the next read safer.
+func (s *CachedSource) OnSourceQuarantined(_ context.Context, _ string) {
+	if s == nil {
+		return
+	}
+	for _, j := range s.cache.cachedJurisdictions() {
+		s.cache.InvalidateManifest(j)
+	}
+}
+
+// OnPackageSuperseded implements PublicationLifecycleObserver.
+func (s *CachedSource) OnPackageSuperseded(_ context.Context, packageID string, supersededVersions []int) {
+	if s == nil {
+		return
+	}
+	for _, v := range supersededVersions {
+		s.cache.InvalidateCard(packageID, v)
+	}
+}
+
+// cachedJurisdictions enumerates currently-cached manifest
+// jurisdictions. Caller must not hold any other locks; the cache
+// returns a snapshot under its own mutex.
+func (c *MemoryCache) cachedJurisdictions() []string {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, 0, len(c.manifests))
+	for k := range c.manifests {
+		out = append(out, k)
+	}
+	return out
+}

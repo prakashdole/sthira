@@ -254,6 +254,47 @@ func (s *Store) PromoteManifest(ctx context.Context, jurisdiction string, revisi
 	})
 }
 
+// PromoteManifestWithObserver atomically promotes the manifest and,
+// on success, fires the observer so cached delivery is purged under
+// the documented consistency bound. Tests use this to verify that
+// promotions surface through to delivery; production wire calls
+// the underlying transaction.
+func (s *Store) PromoteManifestWithObserver(ctx context.Context, jurisdiction string, revision int, observer PublicationLifecycleObserver) error {
+	if err := s.PromoteManifest(ctx, jurisdiction, revision); err != nil {
+		return err
+	}
+	if observer != nil {
+		observer.OnManifestPromoted(ctx, jurisdiction, revision)
+	}
+	return nil
+}
+
+// WithdrawManifestAndInvalidate sets the manifest status to WITHDRAWN
+// in one transaction and notifies the observer outside the tx so
+// cached delivery stops serving immediately. The InTx is bounded;
+// failure to invalidate does NOT roll back the withdrawal.
+func (s *Store) WithdrawManifestAndInvalidate(ctx context.Context, jurisdiction string, revision int, observer PublicationLifecycleObserver) error {
+	if err := s.SetManifestStatus(ctx, jurisdiction, revision, "WITHDRAWN"); err != nil {
+		return err
+	}
+	if observer != nil {
+		observer.OnManifestWithdrawn(ctx, jurisdiction, revision)
+	}
+	return nil
+}
+
+// QuarantineManifestAndInvalidate quarantines the manifest and
+// notifies the observer. Same semantics as WithdrawManifestAndInvalidate.
+func (s *Store) QuarantineManifestAndInvalidate(ctx context.Context, jurisdiction string, revision int, observer PublicationLifecycleObserver) error {
+	if err := s.QuarantineManifest(ctx, jurisdiction, revision, true); err != nil {
+		return err
+	}
+	if observer != nil {
+		observer.OnSourceQuarantined(ctx, "manifest:"+jurisdiction)
+	}
+	return nil
+}
+
 // PublishCard stores an immutable public incident card. Boundary checks validate
 // schema, checksum, and payload length before persistence. Duplicate publish with
 // identical content and checksum is idempotent; any content mutation under an
