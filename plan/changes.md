@@ -1,5 +1,31 @@
 # Change and evidence record
 
+## 2026-09-21 — backend authority closure: Steps 1–5 completed on `codex/backend-authority-closure`
+
+Worker 1 closed shared backend authority, publication lifecycle, scoped guidance/translation authority, and full verification gates across all six Go modules:
+
+- **Baseline & C/D Evidence (commit `dfc8420`)**: Cleanly cherry-picked 12 unique commits onto CLEAN (`ed0b538`), establishing base `37ecd2b`. Selectively imported Worker C & D Markdown and Python evidence without `.txt` files.
+- **Defects D1 & D2 Repaired (commit `3aaa807`)**:
+  - D1 (`handleSourceQuarantine`): Enforces live authorization in target jurisdiction (`!has` -> 409 Conflict, foreign operator -> 403 Forbidden). Verified via `TestOperatorQuarantine_AbsentOrExpiredAuthz_Denied` on disposable DB.
+  - D2 (`reservationPayloadHash`): Canonical deterministic JSON encoding across all 9 discriminating fields. Changed party size or snapshot version returns 409 `IDEMPOTENCY_CONFLICT`; unchanged replay returns 200 OK. Verified via `TestHTTPReservationPayloadBinding_ChangedPayloadConflicts`.
+- **Publication Lifecycle & A3 Acceptance (commit `a60c6eb`)**:
+  - Global lock order aligned across `publisher.PublishCard` and `Store.Promote*` (`sources` -> `packages` -> `published_*`), verified by PID observation and concurrent probe tests.
+  - Attributed promotion strictly rejects legacy unattributed rows (`source_id` NULL/empty) with `ErrPublicationAuthority` and zero writes.
+  - Offline delivery staging isolation enforced: `GetPublishedManifest` excludes `STAGED` and prioritizes `CURRENT`. Cross-instance cache invalidation on withdrawal verified without manual test invalidation.
+  - Fixed A3 test fixtures (`source_artifacts` schema, unique manifest IDs, fail on DSN ping error).
+- **Scoped Guidance & Translation Authority (commit `1afbada`)**:
+  - Forward migration `0009_p6_template_binding.sql` adds `source_id` and `template_sha256` index.
+  - `readApprovedSpeechKeys` binds exact `source_version`, `template_version`, and `source_id`. `EnforceScopedContext` enforces exact language binding (`IsSpeechKeyApprovedForLanguage`), preventing language leakage.
+  - `SnapshotRevalidate` detects template approval revocation during slow inference.
+  - Mismatched template versions and server-derived IDs in `speech_args` rejected; silent actions without speech keys pass without requiring speech approval.
+  - `buildEligible` removes fake `PartySize=0` / 1-day queries and alphabetical sorting; strictly respects package `allocation_policy.order` and sets `CapacityKnown=false, Free=0` for browsing suitability.
+- **Verification Gates**:
+  - All 6 Go modules build, pass `go vet`, and pass test suites.
+  - All concurrency and IPC packages clean under `go test -race -count=1` (0 races).
+  - Explicit process crash tests (`TestCrossProcessLastSpace`, `TestCrashAfterCommitBeforeResponse`) pass under `-tags crashtest` and `STHIRA_RUN_PROCESS_TESTS=1` on migrated PostgreSQL.
+  - Bounded k6 smoke test (`scripts/run_k6_smoke_real.sh`) passes against live compiled binary (45,065 checks passed, 0 failures, 0 5xx, p95 5.35ms).
+  - Gate B remains **NOT_READY** pending Worker 2 commits and external government/GPU prerequisites. Phase P8 is NOT started.
+
 ## 2026-09-21 — integration repair: Stage 1 closed on `codex/p567-integration-repair`
 
 Continued the A/B integration on the existing integration worktree. Re-checked
