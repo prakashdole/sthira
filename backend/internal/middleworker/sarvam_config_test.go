@@ -61,21 +61,16 @@ func TestSarvamVLLMStartupArgs_BindsLoopback(t *testing.T) {
 	}
 }
 
-// TestSarvamVLLMStartupArgs_HasGuidedDecoding enforces structured
-// JSON output via guided decoding.
-func TestSarvamVLLMStartupArgs_HasGuidedDecoding(t *testing.T) {
-	args := SarvamVLLMStartupArgs()
-	found := false
-	for i, a := range args {
-		if a == "--guided-decoding-backend" && i+1 < len(args) {
-			if args[i+1] == "" {
-				t.Error("guided decoding backend must be set")
-			}
-			found = true
+// TestSarvamVLLMStartupArgs_NoRemovedGuidedFlag enforces that the
+// startup reference never resurrects the --guided-decoding-backend
+// flag, which vLLM >=0.12 removed (verified against the pinned
+// structured-outputs docs, fetched 2026-09-21). Structured output is
+// selected per-request via response_format instead.
+func TestSarvamVLLMStartupArgs_NoRemovedGuidedFlag(t *testing.T) {
+	for _, a := range SarvamVLLMStartupArgs() {
+		if a == "--guided-decoding-backend" {
+			t.Error("--guided-decoding-backend was removed in vLLM >=0.12; do not pass it")
 		}
-	}
-	if !found {
-		t.Error("guided decoding backend not configured")
 	}
 }
 
@@ -97,16 +92,17 @@ func TestSarvamLimits_Bounded(t *testing.T) {
 	}
 }
 
-// TestSarvamChatTemplate_DisablesThinking ensures the chat template
-// override sets enable_thinking=false so internal reasoning cannot
-// leak into the JSON action channel.
-func TestSarvamChatTemplate_DisablesThinking(t *testing.T) {
-	if SarvamChatTemplate == "" {
-		t.Fatal("SarvamChatTemplate empty")
-	}
-	if !contains(SarvamChatTemplate, "enable_thinking = false") {
-		t.Errorf("SarvamChatTemplate must disable thinking; got %q",
-			SarvamChatTemplate)
+// TestSarvamChatTemplateKwargs_DisablesThinking ensures the client
+// sends enable_thinking=false as a Jinja variable to the
+// server-loaded official Sarvam template (whose raw chat_template.
+// jinja, fetched 2026-09-21, reads exactly this variable and emits
+// the model's <|nothink|> token). The previous "template override"
+// constant set the variable in an invented template that never
+// referenced it — a dead switch, now removed.
+func TestSarvamChatTemplateKwargs_DisablesThinking(t *testing.T) {
+	kw := SarvamChatTemplateKwargs()
+	if v, ok := kw["enable_thinking"]; !ok || v != false {
+		t.Errorf("SarvamChatTemplateKwargs must set enable_thinking=false; got %v", kw)
 	}
 }
 

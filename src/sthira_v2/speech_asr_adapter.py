@@ -1,46 +1,63 @@
-"""JSONL adapter for IndicConformer ASR.
+"""JSONL adapter for IndicConformer-600M-Multi ASR.
 
-This module implements the line-delimited JSON protocol expected by
-backend/internal/asrworker/runtime_adapter.go. It is invoked as:
+Protocol (line-delimited JSON over stdin/stdout) is unchanged from
+``backend/internal/asrworker/runtime_adapter.go``:
 
-    python3 -m sthira_v2.speech_asr_adapter --adapter-mode
+    {"op":"ready"}          -> {"status":"ready"|"blocked", ...}
+    {"op":"transcribe",
+     "request_id":...}      -> {"request_id":..., "text":..., "confidence":null}
+    {"op":"shutdown"}       -> {"status":"shutdown"}
 
-The adapter reads JSONL requests from stdin and emits JSONL responses
-on stdout. Each request has an "op" field:
+Selected artifact (fixed, approved in plan/decisions.md D59 line):
+``ai4bharat/indic-conformer-600m-multilingual`` — multilingual
+Conformer hybrid CTC/RNN-T, MIT license, ONNX export layout. The
+authoritative model API is documented on the model card:
 
-    {"op":"ready"}          →  ready envelope with revision/languages/digest
-    {"op":"transcribe",     →  {"request_id":..., "text":..., "confidence":...}
-     "request_id":..., ...}
-    {"op":"shutdown"}       →  graceful exit
+    model = AutoModel.from_pretrained(repo, trust_remote_code=True)
+    text = model(wav, "hi", "ctc")        # returns str only
 
-Honest artifact gate:
+The returned transcript carries NO confidence score; this adapter
+therefore always reports ``confidence: null`` (the Go contract's
+"unknown"). It never fabricates a score and never emits a stub
+transcript.
 
-The real ONNX inference path activates only when:
+Trust model (verified 2026-09-21 against primary sources):
 
-  1. STHIRA_ASR_ARTIFACT_DIR points to a directory containing the
-     pinned AI4Bharat IndicConformer-600M-Multi artifact files
-     (config.json, model_onnx.py, preprocessor.ts, and the ONNX
-     encoders/joints). If the directory is missing or incomplete,
-     the adapter emits an honest {"status":"blocked", ...} envelope
-     with the specific reason; no transcript is ever produced.
+* The repo is gated; only the README/model card was publicly
+  retrievable, so the exact per-file inventory of the *multilingual*
+  artifact could not be downloaded and hashed here. The ONNX
+  execution layout (``assets/preprocessor.ts``, ``assets/encoder.onnx``,
+  ``assets/ctc_decoder.onnx``, ``assets/vocab.json``,
+  ``assets/language_masks.json``, ``BLANK_ID``/``SOS`` config keys,
+  session IO names) is taken from the AI4Bharat ONNX reference
+  implementation shipped in the sibling repository
+  ``ai4bharat/bhili-asr-conformer-600m-onnx`` (same export tooling,
+  MIT), retrieved 2026-09-21. Because that layout may drift from the
+  gated multilingual artifact, the loader **discovers** the actual
+  artifact: sessions are opened by path, their declared IO names are
+  read back from ``onnxruntime``, and any mismatch surfaces as a
+  specific BLOCKED reason. Nothing is assumed silently.
+* ``trust_remote_code`` model-dir Python is **never executed** by
+  this adapter. We drive the ONNX/TorchScript assets directly with
+  the pinned local packages (onnxruntime 1.20.1, torch 2.14.0 —
+  requirements-voice.txt).
+* ``snapshot_download`` is never called. The only load path is a
+  pre-populated local directory (``STHIRA_ASR_ARTIFACT_DIR``). A
+  missing/partial/unverifiable artifact keeps the worker unready.
 
-  2. The onnxruntime CPU provider is available. The pinned revision
-     runs without GPU.
+READY semantics: the adapter emits ``ready`` ONLY after successful
+session creation AND a bounded warm-up forward (tiny 16 kHz buffer
+through preprocessor -> encoder -> ctc_decoder). Import errors,
+malformed weights, IO-name drift, or a warm-up exception keep it
+BLOCKED. Advertised languages are the intersection of the
+deployment-approved list (``STHIRA_ASR_APPROVED_LANGUAGES``, default
+the two app-enabled locales "hi-IN,ml-IN" per plan/source-register.md)
+with the artifact's actual ``vocab``/``language_masks`` keys — model
+support never implies government approval, and approval without
+artifact support never advertises either.
 
-  3. The audio samples supplied via "samples_b64" are decoded as
-     little-endian float32 and resampled to the model's 16 kHz
-     expected rate; the actual decode rate is computed from the
-     envelope's "sample_rate" field.
-
-Inference produces a best-effort transcript via the AI4Bharat
-ONNX RNN-T joint network. Confidence is reported as the mean
-softmax probability over non-blank frames (calibrated for the
-model; NOT a calibrated word-level confidence).
-
-If the artifact directory is absent, the adapter refuses all
-inference calls and returns {"status":"blocked",...} envelopes
-so the orchestrator surfaces UNAVAILABLE without ever emitting
-audio.
+RNN-T decoding is NOT implemented here (the greedy CTC path is the
+verified minimal decoder); ``rnnt`` capability is not advertised.
 """
 
 from __future__ import annotations
@@ -50,13 +67,32 @@ import base64
 import hashlib
 import json
 import os
+import struct
 import sys
-from typing import Any
-
+import time
+from typing import Any, Callable
 
 INDIC_CONFORMER_MODEL = "ai4bharat/indic-conformer-600m-multilingual"
 TARGET_SAMPLE_RATE = 16000
 PROTOCOL_VERSION = "asr-adapter-1"
+DEFAULT_APPROVED_LANGUAGES = "hi-IN,ml-IN"
+
+# Minimal artifact layout derived from the AI4Bharat ONNX reference
+# implementation (see module docstring). Paths are relative to the
+# artifact directory.
+REQUIRED_ASSETS = (
+    "assets/preprocessor.ts",
+    "assets/encoder.onnx",
+    "assets/ctc_decoder.onnx",
+    "assets/vocab.json",
+    "assets/language_masks.json",
+    "config.json",
+)
+
+# Expected session IO names from the reference export. Discovery
+# compares these against the actual artifact and fails closed.
+ENCODER_IO = {"in": ("audio_signal", "length"), "out": ("outputs", "encoded_lengths")}
+CTC_IO = {"in": ("encoder_output",), "out": ("logprobs",)}
 
 
 def _detect_adapter_mode(argv: list[str]) -> bool:
@@ -64,13 +100,6 @@ def _detect_adapter_mode(argv: list[str]) -> bool:
 
 
 def _artifact_dir() -> str:
-    """Return the configured local artifact directory or empty string.
-
-    Resolution order:
-      1. STHIRA_ASR_ARTIFACT_DIR environment variable
-      2. ~/.cache/sthira/asr/indic-conformer-600m-multilingual
-      3. empty (no artifact available)
-    """
     explicit = os.environ.get("STHIRA_ASR_ARTIFACT_DIR", "").strip()
     if explicit:
         return explicit
@@ -80,78 +109,197 @@ def _artifact_dir() -> str:
     return cache if os.path.isdir(cache) else ""
 
 
-def _artifact_files_present(artifact_dir: str) -> dict[str, Any]:
-    """Probe the artifact directory for the files needed to load.
+def _approved_languages() -> list[str]:
+    raw = os.environ.get("STHIRA_ASR_APPROVED_LANGUAGES", DEFAULT_APPROVED_LANGUAGES)
+    return [tok.strip() for tok in raw.split(",") if tok.strip()]
 
-    Returns a dict with keys 'present' (bool), 'missing' (list of
-    filenames), and 'config_sha256' (digest of config.json when
-    present). The probe never auto-downloads; it reports what is
-    actually on disk so the load attempt is honest.
-    """
-    if not artifact_dir:
-        return {"present": False, "missing": [], "config_sha256": ""}
-    required = [
-        "config.json",
-        "preprocessor.ts",
-        "model_onnx.py",
-        "assets/encoder.onnx",
-    ]
-    missing: list[str] = []
-    for f in required:
-        if not os.path.isfile(os.path.join(artifact_dir, f)):
-            missing.append(f)
-    digest = ""
-    cfg = os.path.join(artifact_dir, "config.json")
-    if os.path.isfile(cfg):
-        try:
-            with open(cfg, "rb") as fp:
-                digest = hashlib.sha256(fp.read()).hexdigest()
-        except OSError:
-            digest = ""
-    return {
-        "present": len(missing) == 0,
-        "missing": missing,
-        "config_sha256": digest,
-    }
+
+def bcp47_to_iso(tag: str) -> str:
+    """hi-IN -> hi, ml-IN -> ml. Anything without a region keeps
+    its bare form; the model's language keys are ISO-639-1 codes."""
+    return tag.split("-", 1)[0].lower()
+
+
+def _sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fp:
+        for chunk in iter(lambda: fp.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _artifact_gate() -> dict[str, Any]:
-    """Honest artifact gate. Returns BLOCKED until weights are installed.
-
-    The single seam for wiring real model loading is here: replace
-    the body with the loader that materializes an AI4Bharat
-    IndicConformer-600M-Multi model from the pinned local artifact
-    directory. Until then, this is the truthful "blocked real
-    inference" state the Stage 6 review demanded.
-    """
+    """File-presence probe used ONLY to produce an honest reason
+    string. It is not readiness; readiness additionally requires a
+    successful session load + warm-up (see _try_load)."""
     art_dir = _artifact_dir()
-    probe = _artifact_files_present(art_dir)
-    if not probe["present"]:
-        missing = ", ".join(probe["missing"]) if probe["missing"] else "directory empty"
-        reason = (
-            f"artifact directory {art_dir!r} incomplete; missing: {missing}"
-            if art_dir
-            else "STHIRA_ASR_ARTIFACT_DIR not set and no local cache found (O03)"
-        )
+    if not art_dir:
         return {
-            "model_id": INDIC_CONFORMER_MODEL,
-            "revision": "",
-            "languages": [],
-            "digest_name": "",
-            "digest_sha256": "",
             "state": "BLOCKED",
-            "reason": f"real inference adapter: {reason}",
-            "missing": probe["missing"],
+            "reason": "STHIRA_ASR_ARTIFACT_DIR not set and no local cache found (O03)",
+            "dir": "",
         }
+    missing = [f for f in REQUIRED_ASSETS
+               if not os.path.isfile(os.path.join(art_dir, f))]
+    if missing:
+        return {
+            "state": "BLOCKED",
+            "reason": f"artifact directory {art_dir!r} incomplete; missing: {', '.join(missing)}",
+            "dir": art_dir,
+        }
+    return {"state": "PROBE_OK", "reason": "", "dir": art_dir}
+
+
+class _ASREngine:
+    """A fully loaded, warm-checked CTC decode path.
+
+    Constructed only from real sessions; every field provenance is
+    from the artifact itself. Never instantiated by fakes except in
+    tests that inject their own onnxruntime/torch modules.
+    """
+
+    def __init__(self, preprocessor, encoder, ctc_decoder, vocab, masks,
+                 blank_id: int, frame_duration_ms: float, approved: list[str]):
+        self.preprocessor = preprocessor
+        self.encoder = encoder
+        self.ctc_decoder = ctc_decoder
+        self.vocab = vocab
+        self.masks = masks
+        self.blank_id = blank_id
+        self.frame_duration_ms = frame_duration_ms
+        # approved ∩ artifact languages (both vocab and mask present)
+        self.iso_to_bcp47: dict[str, str] = {}
+        for tag in approved:
+            iso = bcp47_to_iso(tag)
+            if iso in self.vocab and iso in self.masks:
+                self.iso_to_bcp47[iso] = tag
+        self.languages = sorted(self.iso_to_bcp47.values())
+
+    def decode(self, samples: list[float], sample_rate: int, lang_bcp47: str) -> dict[str, Any]:
+        import numpy as np
+        iso = next((k for k, v in self.iso_to_bcp47.items() if v == lang_bcp47), None)
+        if iso is None:
+            return {"error": f"language {lang_bcp47!r} not in loaded+approved {self.languages}"}
+        if sample_rate != TARGET_SAMPLE_RATE:
+            return {"error": f"sample_rate {sample_rate} not supported; adapter requires {TARGET_SAMPLE_RATE} Hz"}
+        import torch
+        wav = torch.from_numpy(np.asarray(samples, dtype="float32")).reshape(1, -1)
+        audio_signal, length = self.preprocessor(input_signal=wav, length=torch.tensor([wav.shape[-1]]))
+        outputs, encoded_lengths = self.encoder.run(
+            list(ENCODER_IO["out"]),
+            {k: v for k, v in zip(ENCODER_IO["in"], (audio_signal.cpu().numpy(), length.cpu().numpy()))},
+        )
+        (logprobs,) = self.ctc_decoder.run(list(CTC_IO["out"]), {"encoder_output": outputs})
+        import torch as _t
+        lp = _t.from_numpy(logprobs)[:, :, self.masks[iso]]
+        lp = _t.log_softmax(lp, dim=-1)
+        indices = _t.argmax(lp[0], dim=-1)
+        collapsed = _t.unique_consecutive(indices, dim=-1)
+        table = self.vocab[iso]
+
+        def _tok(idx: int) -> str:
+            # JSON objects have string keys; the reference decoder
+            # indexes by int. Accept either layout without assuming
+            # which the (gated) artifact ships.
+            if idx in table:
+                return str(table[idx])
+            return str(table[str(idx)])
+
+        text = "".join(_tok(int(x)) for x in collapsed if int(x) != self.blank_id)
+        text = text.replace("▁", " ").strip()
+        # The model returns no score; confidence stays unknown.
+        return {"text": text, "confidence": None}
+
+
+def _discover_io(session, expected_in: tuple[str, ...], expected_out: tuple[str, ...]) -> None:
+    """Fail closed unless the session's declared IO names match the
+    reference export exactly. Raises ValueError with specifics."""
+    ins = tuple(i.name for i in session.get_inputs())
+    outs = tuple(o.name for o in session.get_outputs())
+    if ins != tuple(expected_in) or outs != tuple(expected_out):
+        raise ValueError(
+            f"unexpected session IO: got in={ins} out={outs}, "
+            f"want in={tuple(expected_in)} out={tuple(expected_out)}"
+        )
+
+
+def _try_load() -> tuple[_ASREngine | None, str]:
+    """Attempt the real load. Returns (engine, reason_if_blocked).
+
+    Steps, all bounded and fail-closed: file probe -> imports ->
+    session creation with IO discovery -> vocab/mask/config parse
+    -> warm-up forward. Any failure returns (None, reason) and the
+    worker stays unready.
+    """
+    probe = _artifact_gate()
+    if probe["state"] != "PROBE_OK":
+        return None, probe["reason"]
+    art = probe["dir"]
+    try:
+        import numpy  # noqa: F401  (provenance check: installed, pinned)
+        import torch
+        import onnxruntime as ort
+    except ImportError as exc:
+        return None, f"required pinned package unavailable: {exc}"
+
+    warmup_budget = float(os.environ.get("STHIRA_ASR_WARMUP_TIMEOUT_SECONDS", "30"))
+    started = time.monotonic()
+    try:
+        with open(os.path.join(art, "config.json"), "r", encoding="utf-8") as fp:
+            cfg = json.load(fp)
+        with open(os.path.join(art, "assets/vocab.json"), "r", encoding="utf-8") as fp:
+            vocab = json.load(fp)
+        with open(os.path.join(art, "assets/language_masks.json"), "r", encoding="utf-8") as fp:
+            masks = json.load(fp)
+        if not isinstance(vocab, dict) or not vocab:
+            raise ValueError("vocab.json is empty or malformed")
+        if not isinstance(masks, dict) or not masks:
+            raise ValueError("language_masks.json is empty or malformed")
+        blank_id = int(cfg.get("BLANK_ID", 256))
+        frame_ms = float(cfg.get("FRAME_DURATION_MS", 0.08))
+
+        preprocessor = torch.jit.load(
+            os.path.join(art, "assets/preprocessor.ts"), map_location="cpu")
+        encoder = ort.InferenceSession(
+            os.path.join(art, "assets/encoder.onnx"), providers=["CPUExecutionProvider"])
+        _discover_io(encoder, ENCODER_IO["in"], ENCODER_IO["out"])
+        ctc_decoder = ort.InferenceSession(
+            os.path.join(art, "assets/ctc_decoder.onnx"), providers=["CPUExecutionProvider"])
+        _discover_io(ctc_decoder, CTC_IO["in"], CTC_IO["out"])
+
+        engine = _ASREngine(preprocessor, encoder, ctc_decoder, vocab, masks,
+                            blank_id, frame_ms, _approved_languages())
+        if not engine.languages:
+            return None, ("no approved language is present in the artifact "
+                          f"(approved={_approved_languages()}, artifact vocab keys={sorted(vocab)[:8]}…)")
+        # Bounded warm-up: 0.16 s of zeros through the full graph.
+        import numpy as np
+        warm = np.zeros(int(TARGET_SAMPLE_RATE * 0.16), dtype="float32").tolist()
+        engine.decode(warm, TARGET_SAMPLE_RATE, engine.languages[0])
+    except Exception as exc:  # malformed weights, IO drift, torch/ONNX errors
+        return None, f"artifact load/warm-up failed: {type(exc).__name__}: {exc}"
+    elapsed = time.monotonic() - started
+    if elapsed > warmup_budget:
+        return None, f"warm-up exceeded bounded budget ({elapsed:.1f}s > {warmup_budget:.1f}s)"
+    return engine, ""
+
+
+def _ready_info(engine: _ASREngine) -> dict[str, Any]:
+    art = _artifact_dir()
+    revision = ""
+    rev_file = os.path.join(art, "revision")
+    if os.path.isfile(rev_file):
+        with open(rev_file, "r", encoding="utf-8") as fp:
+            revision = fp.read().strip()
+    if not revision:
+        revision = "local-artifact:" + os.path.basename(art)
     return {
         "model_id": INDIC_CONFORMER_MODEL,
-        "revision": "local-artifact:" + os.path.basename(art_dir),
-        "languages": ["hi-IN", "ml-IN"],  # verified subset
+        "revision": revision,
+        "languages": engine.languages,
         "digest_name": "config.json",
-        "digest_sha256": probe["config_sha256"],
-        "state": "READY",
-        "reason": "local artifact present; real inference wired (O03 resolved)",
-        "missing": [],
+        "digest_sha256": _sha256_file(os.path.join(art, "config.json")),
+        "decoding": "ctc-greedy",
     }
 
 
@@ -160,163 +308,46 @@ def _emit(obj: dict[str, Any]) -> None:
     sys.stdout.flush()
 
 
-def _load_model():
-    """Real ONNX inference path.
-
-    Returns a callable that maps (samples, sample_rate) -> result
-    dict. If the artifact is missing, returns None and the
-    protocol layer surfaces BLOCKED to the orchestrator.
-    """
-    art_dir = _artifact_dir()
-    probe = _artifact_files_present(art_dir)
-    if not probe["present"]:
-        return None
-
-    # Lazy imports so the import cost is paid only on the real
-    # inference path. The onnxruntime import is heavy; we want
-    # the BLOCKED path to start fast.
-    try:
-        import onnxruntime as ort  # type: ignore
-    except ImportError as exc:
-        print(f"asr: onnxruntime import failed: {exc}", file=sys.stderr)
-        return None
-
-    sessions = {
-        "encoder": ort.InferenceSession(
-            os.path.join(art_dir, "assets/encoder.onnx"),
-            providers=["CPUExecutionProvider"],
-        ),
-        "pre_net": ort.InferenceSession(
-            os.path.join(art_dir, "assets/joint_pre_net.onnx"),
-            providers=["CPUExecutionProvider"],
-        ),
-        "joint_pred": ort.InferenceSession(
-            os.path.join(art_dir, "assets/joint_pred.onnx"),
-            providers=["CPUExecutionProvider"],
-        ),
-        "joint_enc": ort.InferenceSession(
-            os.path.join(art_dir, "assets/joint_enc.onnx"),
-            providers=["CPUExecutionProvider"],
-        ),
-    }
-    # Per-language post-net selection. The post-net files are named
-    # joint_post_net_<lang>.onnx; we keep a single post-net session
-    # for the configured primary language to avoid lazy file IO at
-    # request time.
-    post_net_path = os.path.join(art_dir, "assets/joint_post_net_hi.onnx")
-    if os.path.isfile(post_net_path):
-        sessions["post_net_hi"] = ort.InferenceSession(
-            post_net_path,
-            providers=["CPUExecutionProvider"],
-        )
-
-    def _run(samples, sample_rate):
-        """Best-effort single-call RNN-T greedy decode.
-
-        A full RNN-T beam decoder is heavy; this implementation
-        provides an honest, deterministic fallback that emits a
-        best-guess transcript via greedy frame labelling so the
-        real adapter path is exercised end-to-end. It is NOT a
-        substitute for the AI4Bharat decoder; that decoder must
-        be plugged in once the artifact is approved (O03).
-        """
-        # Resample to 16 kHz if needed. For now accept 16 kHz only.
-        if sample_rate != TARGET_SAMPLE_RATE:
-            return {
-                "text": "",
-                "confidence": None,
-                "alternatives": [],
-                "error": (
-                    f"sample_rate {sample_rate} not supported; "
-                    f"adapter requires {TARGET_SAMPLE_RATE} Hz"
-                ),
-            }
-        n = len(samples)
-        if n == 0:
-            return {"text": "", "confidence": None, "alternatives": []}
-
-        # Compute signal energy as a coarse VAD proxy. A real
-        # adapter must run the RNN-T joint here; until the
-        # beam-search decoder is wired we report an empty
-        # transcript with a calibrated zero confidence so the
-        # caller can distinguish "silence / no model" from a
-        # fabricated string.
-        energy = sum(s * s for s in samples) / max(n, 1)
-        # The threshold mirrors the silence detector used in tests.
-        vad_active = energy > 1e-4
+def _handle_ready(engine: _ASREngine | None, reason: str) -> dict[str, Any]:
+    if engine is None:
         return {
-            "text": "" if not vad_active else "[unverified:real-inference-stub]",
-            "confidence": None,  # unknown; never 1.0
-            "alternatives": [],
-            "energy": energy,
-            "vad_active": vad_active,
-        }
-
-    return _run
-
-
-def _handle_ready() -> dict[str, Any]:
-    gate = _artifact_gate()
-    if gate["state"] == "READY":
-        return {
-            "status": "ready",
-            "revision": gate["revision"],
-            "languages": gate["languages"],
-            "digest_name": gate["digest_name"],
-            "digest_sha256": gate["digest_sha256"],
-            "model_id": gate["model_id"],
+            "status": "blocked",
+            "model_id": INDIC_CONFORMER_MODEL,
             "protocol": PROTOCOL_VERSION,
+            "reason": reason or "artifact load failed",
+            "languages": [],
         }
-    return {
-        "status": "blocked",
-        "model_id": gate["model_id"],
-        "protocol": PROTOCOL_VERSION,
-        "reason": gate["reason"],
-        "languages": [],
-    }
+    info = _ready_info(engine)
+    info["status"] = "ready"
+    info["protocol"] = PROTOCOL_VERSION
+    return info
 
 
-def _handle_transcribe(msg: dict[str, Any], run_model) -> dict[str, Any]:
+def _handle_transcribe(msg: dict[str, Any], engine: _ASREngine | None, reason: str) -> dict[str, Any]:
     rid = msg.get("request_id", "")
-    if run_model is None:
-        return {
-            "request_id": rid,
-            "error": "artifact gate blocked: real inference not wired (O03)",
-        }
-    raw_b64 = msg.get("samples_b64", "")
+    if engine is None:
+        return {"request_id": rid,
+                "error": f"real inference unavailable: {reason or 'artifact load failed'} (O03)"}
     try:
-        raw = base64.b64decode(raw_b64.encode("ascii"))
+        raw = base64.b64decode(msg.get("samples_b64", "").encode("ascii"))
     except Exception as exc:
-        return {
-            "request_id": rid,
-            "error": f"samples_b64 decode: {exc}",
-        }
-    # Decode little-endian float32 LE.
-    try:
-        import struct
-        n = len(raw) // 4
-        if n * 4 != len(raw):
-            raise ValueError("samples_b64 byte length not multiple of 4")
-        samples = list(struct.unpack("<%df" % n, raw))
-    except Exception as exc:
-        return {
-            "request_id": rid,
-            "error": f"samples decode: {exc}",
-        }
-    sample_rate = int(msg.get("sample_rate", 16000))
-    duration = float(msg.get("duration_secs", len(samples) / max(sample_rate, 1)))
-    # Enforce the bounded-input contract from the Go side.
-    if len(samples) > 320000:  # 20s @ 16 kHz
+        return {"request_id": rid, "error": f"samples_b64 decode: {exc}"}
+    if len(raw) % 4 != 0:
+        return {"request_id": rid, "error": "samples_b64 byte length not multiple of 4"}
+    n = len(raw) // 4
+    samples = list(struct.unpack("<%df" % n, raw))
+    if n > 320000:  # 20 s @ 16 kHz, the Go bounded-input ceiling
         return {"request_id": rid, "error": "decoded samples exceed limit"}
-    result = run_model(samples, sample_rate)
+    lang = msg.get("language") or ""
+    result = engine.decode(samples, int(msg.get("sample_rate", 0) or 0), lang)
     if "error" in result:
         return {"request_id": rid, "error": result["error"]}
     return {
         "request_id": rid,
-        "text": result.get("text", ""),
-        "confidence": result.get("confidence"),
-        "alternatives": result.get("alternatives", []),
-        "duration_secs": duration,
+        "text": result["text"],
+        "confidence": result["confidence"],  # always None: model emits no score
+        "alternatives": [],
+        "duration_secs": float(msg.get("duration_secs", n / TARGET_SAMPLE_RATE)),
     }
 
 
@@ -324,16 +355,7 @@ def _handle_shutdown() -> dict[str, Any]:
     return {"status": "shutdown"}
 
 
-def _decode_samples(samples_b64: str) -> bytes:
-    """Decode base64-encoded little-endian float32 samples."""
-    try:
-        return base64.b64decode(samples_b64.encode("ascii"))
-    except Exception as exc:
-        raise ValueError(f"samples_b64 decode: {exc}") from exc
-
-
 def _verify_envelope_shape(msg: dict[str, Any]) -> None:
-    """Structural check on inbound request envelopes."""
     if not isinstance(msg, dict):
         raise ValueError("request must be a JSON object")
     if "op" not in msg or not isinstance(msg["op"], str):
@@ -348,18 +370,16 @@ def _verify_envelope_shape(msg: dict[str, Any]) -> None:
 
 
 def _run_loop() -> None:
-    """Main JSONL read/eval loop. Exits when stdin closes or a
-    shutdown op is processed.
+    """Main JSONL loop.
 
-    The model load attempt happens lazily on the first
-    transcribe call so the ready envelope can report the
-    artifact gate state immediately, before the (possibly
-    heavy) import of onnxruntime / transformers. The "ready"
-    envelope reports the artifact-gate state, NOT the actual
-    load success; a real load attempt fires on transcribe.
+    Load is attempted ONCE at startup, BEFORE the first ready
+    response, so ``ready`` reports the actual loaded+warm state —
+    not a file-presence guess. A failing load keeps the adapter
+    alive to report BLOCKED per call (the Go dispatcher requires a
+    well-formed response), but nothing beyond refusing inference is
+    possible.
     """
-    run_model = None
-    loaded = False
+    engine, reason = _try_load()
     for raw in sys.stdin:
         line = raw.strip()
         if not line:
@@ -376,12 +396,9 @@ def _run_loop() -> None:
             continue
         op = msg["op"]
         if op == "ready":
-            _emit(_handle_ready())
+            _emit(_handle_ready(engine, reason))
         elif op == "transcribe":
-            if not loaded:
-                run_model = _load_model()
-                loaded = True
-            _emit(_handle_transcribe(msg, run_model))
+            _emit(_handle_transcribe(msg, engine, reason))
         elif op == "shutdown":
             _emit(_handle_shutdown())
             return
@@ -391,20 +408,12 @@ def _run_loop() -> None:
 
 def main(argv: list[str]) -> int:
     if not _detect_adapter_mode(argv):
-        # When invoked without --adapter-mode, behave as a module CLI
-        # for ad-hoc testing.
         p = _ap.ArgumentParser(prog="speech_asr_adapter")
         p.add_argument("--probe-artifact", action="store_true",
-                       help="Print the artifact gate status and exit.")
-        p.add_argument("--decode-samples", metavar="B64",
-                       help="Decode a base64 float32 LE buffer and print the SHA-256.")
+                       help="Print the file-probe gate (NOT readiness) and exit.")
         args = p.parse_args(argv)
         if args.probe_artifact:
             print(json.dumps(_artifact_gate(), indent=2))
-            return 0
-        if args.decode_samples:
-            raw = _decode_samples(args.decode_samples)
-            print(f"sha256={hashlib.sha256(raw).hexdigest()} bytes={len(raw)}")
             return 0
         p.print_help()
         return 2

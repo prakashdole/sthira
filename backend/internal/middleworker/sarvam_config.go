@@ -32,34 +32,45 @@ const SarvamModelID = "sarvamai/sarvam-30b"
 // Key parameters:
 //   - Temperature 0.0: deterministic output (no sampling variance)
 //   - max_tokens 256: bounded output per the action contract
-//   - Guided generation via json_schema: vLLM enforces the Proposal
-//     shape at decode time
-//   - enable_thinking=false: Sarvam-30B has a thinking/reasoning
-//     mode (per the source-register.md S11 model card). We
-//     explicitly disable it so internal reasoning tokens cannot
-//     leak into the JSON action channel or consume output budget.
-//     The chat template is wired into the request via
-//     ProposeInput.ChatTemplate so the runtime controls reasoning
-//     at request time rather than relying solely on server
-//     startup flags.
+//   - Structured output via response_format json_schema (the shape
+//     in the pinned vLLM structured-outputs docs, fetched 2026-09-21)
+//   - enable_thinking=false via chat_template_kwargs: the OFFICIAL
+//     Sarvam chat_template.jinja (raw file fetched from the model
+//     repo 2026-09-21) consumes the “enable_thinking“ Jinja
+//     variable and appends the model's “<|nothink|>“ token to the
+//     last user turn when it is defined and false. We therefore do
+//     NOT ship a speculative local template: the template is the
+//     one the server loads from the model repo, and our request
+//     only sets the variable that template already reads. A
+//     previous constant in this file set the variable inside an
+//     invented template that never referenced it — a dead switch.
 //
-// The SarvamChatTemplate below is a documented placeholder. The
-// exact token shape (e.g. <|start_of_turn|>...<|end_of_turn|> vs.
-// <|im_start|>...<|im_end|>) must be re-verified against the
-// Sarvam-30B pinned model card at deployment time. SarvamConfig
-// sets the template verbatim so an updated template can be
-// substituted without changing the runtime.
+// Deployment note (NOT_RUN): the exact vLLM release the serving
+// stack pins, and therefore the exact chat-template semantics,
+// must be re-verified at deployment; until then this file records
+// the request/flag contract, and the b4 test asserts the ACTUAL
+// outbound body shape (chat_template_kwargs present, no invented
+// per-request chat_template field).
 func SarvamConfig(client *Client, system string) HTTPClientRuntimeConfig {
 	return HTTPClientRuntimeConfig{
-		Client:       client,
-		ModelID:      SarvamModelID,
-		Revision:     "", // populated by /health from vLLM
-		DigestName:   "sarvamai/sarvam-30b",
-		DigestSHA:    "", // populated by artifact verification
-		Languages:    SarvamSupportedLanguages(),
-		System:       system,
-		ChatTemplate: SarvamChatTemplate,
+		Client:             client,
+		ModelID:            SarvamModelID,
+		Revision:           "", // populated by /health from vLLM
+		DigestName:         "sarvamai/sarvam-30b",
+		DigestSHA:          "", // populated by artifact verification
+		Languages:          SarvamSupportedLanguages(),
+		System:             system,
+		ChatTemplateKwargs: SarvamChatTemplateKwargs(),
 	}
+}
+
+// SarvamChatTemplateKwargs are the Jinja variables this client sends
+// with every request to the server-loaded official template.
+// enable_thinking=false suppresses internal reasoning tokens so
+// they cannot consume the bounded output budget or leak into the
+// JSON action channel.
+func SarvamChatTemplateKwargs() map[string]any {
+	return map[string]any{"enable_thinking": false}
 }
 
 // SarvamSupportedLanguages returns the language codes Sarvam-30B
@@ -100,10 +111,20 @@ func SarvamLimits() Limits {
 //   - --gpu-memory-utilization 0.90: leave headroom for KV cache
 //   - --enforce-eager: disable CUDA graphs for MoE compatibility
 //   - --enable-prefix-caching: share system prompt KV across requests
-//   - --guided-decoding-backend outlines: for json_schema enforcement
+//   - --structured-outputs-config.backend: request-level json_schema
+//     enforcement; vLLM >=0.12 removed the --guided-decoding-backend
+//     flag and the guided_* request fields (verified against the
+//     pinned structured-outputs docs, fetched 2026-09-21). Default
+//     "auto" is left in place here; pin a backend only after the
+//     deployment's vLLM version is recorded.
 //   - --host 127.0.0.1 --port 8000: private loopback only
-//   - --chat-template: use the model's built-in template with
-//     enable_thinking=false
+//
+// The official chat_template.jinja ships inside the model repo and
+// is loaded by vLLM automatically; no --chat-template override is
+// passed (and none is sent per-request — see SarvamChatTemplateKwargs
+// for how reasoning is controlled through the template's own
+// documented variable). FP8 flags target Ada/Hopper GPUs; hardware
+// compatibility is NOT_RUN evidence here.
 func SarvamVLLMStartupArgs() []string {
 	return []string{
 		"--model", SarvamModelID,
@@ -113,42 +134,16 @@ func SarvamVLLMStartupArgs() []string {
 		"--gpu-memory-utilization", "0.90",
 		"--enforce-eager",
 		"--enable-prefix-caching",
-		"--guided-decoding-backend", "outlines",
 		"--host", "127.0.0.1",
 		"--port", "8000",
 	}
 }
 
-// SarvamChatTemplate is the chat template override for Sarvam-30B
-// that explicitly disables thinking/reasoning mode. The template
-// uses Gemma-style turn tokens because Sarvam-30B is based on the
-// Gemma 2 architecture (per sarvamai/sarvam-30b model card,
-// S11). The exact token shape must be re-verified against the
-// pinned model card at deployment time; if a different model card
-// is approved, swap this constant for the matching template.
-//
-// Honesty note: the Sarvam-30B model card describes the chat
-// template tokens as Gemma-style (<|start_of_turn|> /
-// <|end_of_turn|>). We commit to that shape here and rely on
-// deployment-time verification. If the tokens are wrong, vLLM
-// will fail loudly at the first request; the worker surfaces the
-// 422 SCHEMA_UNSUPPORTED or 400 MALFORMED state.
-//
-// The template also sets enable_thinking=false at the top of the
-// Jinja prelude so Sarvam-30B's reasoning mode never emits internal
-// reasoning tokens into the JSON action channel.
-const SarvamChatTemplate = `{%- set enable_thinking = false -%}
-{%- for message in messages -%}
-{%- if message.role == 'system' -%}
-<|start_of_turn|>system
-{{ message.content }}<|end_of_turn|>
-{%- elif message.role == 'user' -%}
-<|start_of_turn|>user
-{{ message.content }}<|end_of_turn|>
-{%- elif message.role == 'assistant' -%}
-<|start_of_turn|>assistant
-{{ message.content }}<|end_of_turn|>
-{%- endif -%}
-{%- endfor -%}
-<|start_of_turn|>assistant
-`
+// SarvamWeightsResidencyBytes documents the FP8 weight footprint
+// (≈30 GB) as DISTINCT from the 2.4B active non-embedding
+// parameters per MoE token. Resident bytes are a deployment
+// property; active compute is a per-token property; neither is a
+// measurement of throughput or accuracy (NOT_RUN until designated
+// hardware). Kept as documentation so no code path can conflate
+// "30B resident" with "2.4B per token".
+const SarvamWeightsResidencyBytes = 30 * 1000 * 1000 * 1000

@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 )
@@ -83,25 +82,22 @@ func TestB4_SarvamChatTemplateWiredIntoRequestPath(t *testing.T) {
 	if err := json.Unmarshal(body, &req); err != nil {
 		t.Fatal(err)
 	}
-	if req.ChatTemplate == "" {
-		t.Fatal("chat_template not sent; Sarvam reasoning controls are not wired")
+	if v, ok := req.ChatTemplateKwargs["enable_thinking"]; !ok || v != false {
+		t.Fatalf("chat_template_kwargs.enable_thinking=false not sent; reasoning controls are not wired; got %v", req.ChatTemplateKwargs)
 	}
-	if !strings.Contains(req.ChatTemplate, "enable_thinking = false") {
-		t.Errorf("SarvamChatTemplate must disable thinking; got %q", req.ChatTemplate)
-	}
-	// Verify the template contains the documented Gemma-style turn
-	// tokens. (If the model card specifies different tokens,
-	// deployment-time verification is required; the runtime will
-	// surface 400 MALFORMED if the live server rejects them.)
-	if !strings.Contains(req.ChatTemplate, "<|start_of_turn|>") {
-		t.Errorf("SarvamChatTemplate must use Gemma-style turn tokens; got %q", req.ChatTemplate)
+	// The old invented per-request "chat_template" string field must
+	// NOT appear: vLLM has no such documented field on
+	// /v1/chat/completions; the server loads the official template
+	// from the model repo and we only set its Jinja variables.
+	if bytes.Contains(body, []byte(`"chat_template":`)) {
+		t.Errorf("outbound body must not contain an invented chat_template override; got %s", body)
 	}
 	if req.Model != SarvamModelID {
 		t.Errorf("model: got %q want %q", req.Model, SarvamModelID)
 	}
-	// Verify the chat_template field is sent only when non-empty
+	// Verify the chat_template_kwargs field is sent only when non-empty
 	// (the omitempty rule): the wire JSON omits it for runtimes
-	// that don't override.
+	// that don't set reasoning controls.
 	cli2, err := NewClient(ClientConfig{BaseURL: srv.URL})
 	if err != nil {
 		t.Fatal(err)

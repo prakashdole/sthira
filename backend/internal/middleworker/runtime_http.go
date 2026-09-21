@@ -23,7 +23,7 @@ type HTTPClientRuntime struct {
 	digestSHA  string
 	langs      []string
 	system     string
-	chatTpl    string // optional per-request template override (Sarvam enable_thinking=false)
+	chatKwargs map[string]any // Jinja vars for the server-loaded template (e.g. enable_thinking=false)
 }
 
 // HTTPClientRuntimeConfig bundles construction. The model_id is the
@@ -31,14 +31,17 @@ type HTTPClientRuntime struct {
 // recorded for /health. system is the pinned voice-map-system-prompt
 // (see plan/voice-map-system-prompt.md).
 type HTTPClientRuntimeConfig struct {
-	Client       *Client
-	ModelID      string
-	Revision     string
-	DigestName   string
-	DigestSHA    string
-	Languages    []string
-	System       string
-	ChatTemplate string // optional per-request override (e.g. SarvamChatTemplate)
+	Client     *Client
+	ModelID    string
+	Revision   string
+	DigestName string
+	DigestSHA  string
+	Languages  []string
+	System     string
+	// ChatTemplateKwargs carries Jinja variables (e.g.
+	// {"enable_thinking": false}) to the template the SERVER
+	// loaded from the model repo. It is not a template override.
+	ChatTemplateKwargs map[string]any
 }
 
 // NewHTTPClientRuntime validates the config and returns a runtime.
@@ -62,7 +65,7 @@ func NewHTTPClientRuntime(cfg HTTPClientRuntimeConfig) (*HTTPClientRuntime, erro
 		digestSHA:  cfg.DigestSHA,
 		langs:      append([]string(nil), cfg.Languages...),
 		system:     cfg.System,
-		chatTpl:    cfg.ChatTemplate,
+		chatKwargs: cfg.ChatTemplateKwargs,
 	}, nil
 }
 
@@ -83,11 +86,11 @@ func (h *HTTPClientRuntime) Propose(ctx context.Context, req RequestEnvelope) (*
 		return nil, err
 	}
 	return h.client.Propose(ctx, ProposeInput{
-		ModelID:      h.modelID,
-		RequestID:    req.RequestID,
-		SystemPrompt: h.system,
-		UserPayload:  payload,
-		ChatTemplate: h.chatTpl,
+		ModelID:            h.modelID,
+		RequestID:          req.RequestID,
+		SystemPrompt:       h.system,
+		UserPayload:        payload,
+		ChatTemplateKwargs: h.chatKwargs,
 	})
 }
 

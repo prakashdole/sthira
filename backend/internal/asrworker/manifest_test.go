@@ -35,19 +35,22 @@ func TestScanLocalInventory_NonExistentRootReportsAllPending(t *testing.T) {
 }
 
 // TestScanLocalInventory_PartialPresenceMarksOnlyPresent: if only
-// model_onnx.py exists (the gateway import of the reference
-// runtime), the other three components are still pending. The
-// reference runtime's failure path surfaces here.
+// the TorchScript preprocessor exists (the runtime component of the
+// verified ONNX layout), the other three components are still
+// pending. The adapter's failure path surfaces here.
 func TestScanLocalInventory_PartialPresenceMarksOnlyPresent(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "model_onnx.py"), []byte("print()\n"), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "assets", "preprocessor.ts"), []byte("ts\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	inv := ScanLocalInventory(dir, DefaultIndicConformer())
-	// model_onnx.py is present → it must NOT be pending.
+	// preprocessor.ts is present → runtime must NOT be pending.
 	for _, n := range inv.PendingCritical {
 		if n == CompRuntime {
-			t.Errorf("model_onnx.py is present; runtime must not be pending: %v", inv.PendingCritical)
+			t.Errorf("assets/preprocessor.ts is present; runtime must not be pending: %v", inv.PendingCritical)
 		}
 	}
 	// The other three are still pending.
@@ -61,15 +64,18 @@ func TestScanLocalInventory_PartialPresenceMarksOnlyPresent(t *testing.T) {
 // verify the recorded digest matches a fresh hash.
 func TestScanLocalInventory_HashesSmallFileProbe(t *testing.T) {
 	dir := t.TempDir()
-	want := []byte("print()\n")
-	if err := os.WriteFile(filepath.Join(dir, "model_onnx.py"), want, 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte("ts\n")
+	if err := os.WriteFile(filepath.Join(dir, "assets", "preprocessor.ts"), want, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	inv := ScanLocalInventory(dir, DefaultIndicConformer())
 	for _, hm := range inv.HashMatches {
 		if hm.Name == CompRuntime {
 			if hm.ActualSHA256 == "" {
-				t.Errorf("model_onnx.py must record a digest; got: %+v", hm)
+				t.Errorf("assets/preprocessor.ts must record a digest; got: %+v", hm)
 			}
 			if got := SHA256Hex(want); got != hm.ActualSHA256 {
 				t.Errorf("digest: got %s want %s", hm.ActualSHA256, got)

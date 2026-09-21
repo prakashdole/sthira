@@ -116,30 +116,28 @@ def test_b2_asr_transcribe_returns_error_without_artifacts():
     assert any(r.get("error") for r in responses), responses
 
 
-def test_b2_asr_envelope_shape_when_artifact_present(tmp_path):
-    """When a minimal artifact directory is present, the adapter
-    emits status=ready with languages/digest populated.
-
-    We construct a synthetic artifact directory with the required
-    filenames so the load probe succeeds; the actual model is
-    not loaded because the ONNX files would not parse.
+def test_b2_asr_dummy_artifact_never_reads_ready(tmp_path):
+    """File-presence is NOT readiness (Stage 3 rule): a directory
+    full of dummy ONNX/TorchScript files must keep the adapter
+    BLOCKED, because the real load + bounded warm-up cannot
+    succeed against them. Malformed weights must never reach
+    READY.
     """
     art = tmp_path / "indic-conformer"
     art.mkdir()
-    (art / "config.json").write_text("{}")
-    (art / "preprocessor.ts").write_text("// stub")
-    (art / "model_onnx.py").write_text("# stub")
+    (art / "config.json").write_text(json.dumps({"BLANK_ID": 4}))
     (art / "assets").mkdir()
-    (art / "assets" / "encoder.onnx").write_bytes(b"")
+    for name in ("encoder.onnx", "ctc_decoder.onnx", "preprocessor.ts",
+                 "vocab.json", "language_masks.json"):
+        (art / "assets" / name).write_text("{}" if name.endswith(".json") else "not-an-onnx")
     responses = _run_adapter(
         "sthira_v2.speech_asr_adapter",
         [{"op": "ready"}],
         env_extra={"STHIRA_ASR_ARTIFACT_DIR": str(art)},
     )
     ready = responses[0]
-    assert ready["status"] == "ready"
-    assert "hi-IN" in ready["languages"]
-    assert ready["digest_sha256"]  # non-empty sha256 of config.json
+    assert ready["status"] == "blocked"
+    assert "load" in ready["reason"].lower() or "warm" in ready["reason"].lower()
 
 
 def test_b2_asr_real_artifact_opt_in_NOT_RUN(tmp_path, monkeypatch):
@@ -179,7 +177,12 @@ def test_b2_tts_transcribe_returns_error_without_artifacts():
     assert any(r.get("error") for r in responses), responses
 
 
-def test_b2_tts_envelope_shape_when_artifact_present(tmp_path):
+def test_b2_tts_dummy_artifact_never_reads_ready(tmp_path):
+    """Dummy weight files must NOT produce READY — load/warm-up
+    fails honestly. Also proves the gate no longer fabricates a
+    "default" voice: without an approved voices file the adapter
+    blocks even if files exist.
+    """
     art = tmp_path / "indic-parler"
     art.mkdir()
     (art / "config.json").write_text("{}")
@@ -190,9 +193,10 @@ def test_b2_tts_envelope_shape_when_artifact_present(tmp_path):
         env_extra={"STHIRA_TTS_ARTIFACT_DIR": str(art)},
     )
     ready = responses[0]
-    assert ready["status"] == "ready"
-    assert "hi-IN" in ready["languages"]
-    assert len(ready["voices"]) >= 1
+    assert ready["status"] == "blocked"
+    # The gate is honest about WHY: either no voices approval or a
+    # failed real load — never a fabricated READY.
+    assert "voices" in ready["reason"].lower() or "load" in ready["reason"].lower()
 
 
 def test_b2_tts_real_artifact_opt_in_NOT_RUN(tmp_path):

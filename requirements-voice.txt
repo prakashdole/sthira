@@ -6,3 +6,7 @@ onnxruntime==1.20.1
 soundfile==0.14.0
 safetensors==0.8.0
 sentencepiece==0.2.2
+# Indic Parler-TTS adapter loads the dedicated class from the pinned
+# official package (verified installed: 0.2.2 exposes
+# ParlerTTSForConditionalGeneration; the model card requires it).
+parler_tts==0.2.2
