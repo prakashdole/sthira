@@ -1,0 +1,55 @@
+Security / static check evidence
+Date: 2026-09-21T10:19:40Z
+Modules: backend, backend/internal/asrworker, backend/internal/ttsworker,
+         backend/internal/middleworker, backend/eval, loadmodel
+
+=== backend (backend) ===
+go vet ./... PASS
+internal/offlinequeue/worker.go
+internal/offlinequeue/worker_regression_test.go
+internal/ttsworker/worker.go
+gofmt -l . FAIL (above files need formatting)
+govulncheck NOT_RUN (binary not installed)
+gosec NOT_RUN (binary not installed)
+staticcheck NOT_RUN (binary not installed)
+
+=== asrworker (backend/internal/asrworker) ===
+go vet ./... PASS
+gofmt -l . PASS
+govulncheck NOT_RUN (binary not installed)
+gosec NOT_RUN (binary not installed)
+staticcheck NOT_RUN (binary not installed)
+
+=== ttsworker (backend/internal/ttsworker) ===
+go vet ./... PASS
+worker.go
+gofmt -l . FAIL (above files need formatting)
+govulncheck NOT_RUN (binary not installed)
+gosec NOT_RUN (binary not installed)
+staticcheck NOT_RUN (binary not installed)
+
+=== middleworker (backend/internal/middleworker) ===
+go vet ./... PASS
+gofmt -l . PASS
+govulncheck NOT_RUN (binary not installed)
+gosec NOT_RUN (binary not installed)
+staticcheck NOT_RUN (binary not installed)
+
+=== eval (backend/eval) ===
+go vet ./... PASS
+gofmt -l . PASS
+govulncheck NOT_RUN (binary not installed)
+gosec NOT_RUN (binary not installed)
+staticcheck NOT_RUN (binary not installed)
+
+=== loadmodel (loadmodel) ===
+go vet ./... PASS
+gofmt -l . PASS
+govulncheck NOT_RUN (binary not installed)
+gosec NOT_RUN (binary not installed)
+staticcheck NOT_RUN (binary not installed)
+
+gitleaks NOT_RUN (binary not installed)
+trivy fs NOT_RUN (binary not installed)
+
+RESULT: FAIL (see above; exit non-zero)

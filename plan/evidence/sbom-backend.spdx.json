@@ -1,0 +1,257 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "backend",
+  "documentNamespace": "https://sthira.local/spdx/backend-20260921T101855Z-6f5e6262166a",
+  "creationInfo": {
+    "created": "2026-09-21T10:18:55Z",
+    "creators": [
+      "Tool: sthira-gen-spdx"
+    ]
+  },
+  "packages": [
+    {
+      "name": "sthira/backend",
+      "SPDXID": "SPDXRef-sthira-backend-",
+      "versionInfo": "",
+      "downloadLocation": "https://proxy.golang.org/sthira/backend/@v/.zip",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "name": "github.com/davecgh/go-spew",
+      "SPDXID": "SPDXRef-github.com-davecgh-go-spew-v1.1.1",
+      "versionInfo": "v1.1.1",
+      "downloadLocation": "https://proxy.golang.org/github.com/davecgh/go-spew/@v/v1.1.1.zip",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "name": "github.com/jackc/pgpassfile",
+      "SPDXID": "SPDXRef-github.com-jackc-pgpassfile-v1.0.0",
+      "versionInfo": "v1.0.0",
+      "downloadLocation": "https://proxy.golang.org/github.com/jackc/pgpassfile/@v/v1.0.0.zip",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "name": "github.com/jackc/pgservicefile",
+      "SPDXID": "SPDXRef-github.com-jackc-pgservicefile-v0.0.0-20240606120523-5a60cdf6a761",
+      "versionInfo": "v0.0.0-20240606120523-5a60cdf6a761",
+      "downloadLocation": "https://proxy.golang.org/github.com/jackc/pgservicefile/@v/v0.0.0-20240606120523-5a60cdf6a761.zip",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "name": "github.com/jackc/pgx/v5",
+      "SPDXID": "SPDXRef-github.com-jackc-pgx-v5-v5.11.0",
+      "versionInfo": "v5.11.0",
+      "downloadLocation": "https://proxy.golang.org/github.com/jackc/pgx/v5/@v/v5.11.0.zip",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "name": "github.com/jackc/puddle/v2",
+      "SPDXID": "SPDXRef-github.com-jackc-puddle-v2-v2.2.2",
+      "versionInfo": "v2.2.2",
+      "downloadLocation": "https://proxy.golang.org/github.com/jackc/puddle/v2/@v/v2.2.2.zip",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "name": "github.com/kr/pretty",
+      "SPDXID": "SPDXRef-github.com-kr-pretty-v0.3.0",
+      "versionInfo": "v0.3.0",
+      "downloadLocation": "https://proxy.golang.org/github.com/kr/pretty/@v/v0.3.0.zip",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "name": "github.com/pmezard/go-difflib",
+      "SPDXID": "SPDXRef-github.com-pmezard-go-difflib-v1.0.0",
+      "versionInfo": "v1.0.0",
+      "downloadLocation": "https://proxy.golang.org/github.com/pmezard/go-difflib/@v/v1.0.0.zip",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "name": "github.com/stretchr/objx",
+      "SPDXID": "SPDXRef-github.com-stretchr-objx-v0.1.0",
+      "versionInfo": "v0.1.0",
+      "downloadLocation": "https://proxy.golang.org/github.com/stretchr/objx/@v/v0.1.0.zip",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "name": "github.com/stretchr/testify",
+      "SPDXID": "SPDXRef-github.com-stretchr-testify-v1.11.1",
+      "versionInfo": "v1.11.1",
+      "downloadLocation": "https://proxy.golang.org/github.com/stretchr/testify/@v/v1.11.1.zip",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "name": "golang.org/x/mod",
+      "SPDXID": "SPDXRef-golang.org-x-mod-v0.27.0",
+      "versionInfo": "v0.27.0",
+      "downloadLocation": "https://proxy.golang.org/golang.org/x/mod/@v/v0.27.0.zip",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "name": "golang.org/x/sync",
+      "SPDXID": "SPDXRef-golang.org-x-sync-v0.17.0",
+      "versionInfo": "v0.17.0",
+      "downloadLocation": "https://proxy.golang.org/golang.org/x/sync/@v/v0.17.0.zip",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "name": "golang.org/x/text",
+      "SPDXID": "SPDXRef-golang.org-x-text-v0.29.0",
+      "versionInfo": "v0.29.0",
+      "downloadLocation": "https://proxy.golang.org/golang.org/x/text/@v/v0.29.0.zip",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "name": "golang.org/x/tools",
+      "SPDXID": "SPDXRef-golang.org-x-tools-v0.36.0",
+      "versionInfo": "v0.36.0",
+      "downloadLocation": "https://proxy.golang.org/golang.org/x/tools/@v/v0.36.0.zip",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "name": "gopkg.in/check.v1",
+      "SPDXID": "SPDXRef-gopkg.in-check.v1-v1.0.0-20201130134442-10cb98267c6c",
+      "versionInfo": "v1.0.0-20201130134442-10cb98267c6c",
+      "downloadLocation": "https://proxy.golang.org/gopkg.in/check.v1/@v/v1.0.0-20201130134442-10cb98267c6c.zip",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    },
+    {
+      "name": "gopkg.in/yaml.v3",
+      "SPDXID": "SPDXRef-gopkg.in-yaml.v3-v3.0.1",
+      "versionInfo": "v3.0.1",
+      "downloadLocation": "https://proxy.golang.org/gopkg.in/yaml.v3/@v/v3.0.1.zip",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-sthira-backend-",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github.com-davecgh-go-spew-v1.1.1",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github.com-jackc-pgpassfile-v1.0.0",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github.com-jackc-pgservicefile-v0.0.0-20240606120523-5a60cdf6a761",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github.com-jackc-pgx-v5-v5.11.0",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github.com-jackc-puddle-v2-v2.2.2",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github.com-kr-pretty-v0.3.0",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github.com-pmezard-go-difflib-v1.0.0",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github.com-stretchr-objx-v0.1.0",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github.com-stretchr-testify-v1.11.1",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-golang.org-x-mod-v0.27.0",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-golang.org-x-sync-v0.17.0",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-golang.org-x-text-v0.29.0",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-golang.org-x-tools-v0.36.0",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-gopkg.in-check.v1-v1.0.0-20201130134442-10cb98267c6c",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-gopkg.in-yaml.v3-v3.0.1",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    }
+  ]
+}
