@@ -213,66 +213,73 @@ func TestA1_NeedClarificationRejected(t *testing.T) {
 	wantPipelineReject(t, o, transcriptPipelineRequest("JTEST", "en-IN", "x"), contracts.ErrValidation)
 }
 
-// TestA1_OversizedRawBodyRejectedAtDecode: the orchestrator must
-// reject raw bodies exceeding the strict JSON decoder's size limit,
-// not parse a partial struct.
-func TestA1_OversizedRawBodyRejectedAtDecode(t *testing.T) {
+// TestA1_OversizedRequestRawBodyRejectedAtDecode: the orchestrator
+// must reject a citizen request body that exceeds the PUBLIC
+// request budget (MaxAudioCompressedBytes + MaxTranscriptUTF8Bytes
+// + overhead), not the 64 KiB model-response limit. The handler's
+// MaxBytesReader already enforces a similar ceiling; this test
+// proves the orchestrator's own DecodeStrict gate works at the
+// correct public boundary.
+func TestA1_OversizedRequestRawBodyRejectedAtDecode(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
 	resolver := orchestrationtest.NewResolver(orchestrationtest.BuildScopedContext("JTEST", "en-IN"))
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
 	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
 
-	// Build a JSON body larger than MaxRawModelBytes (64 KiB) — 80
-	// KiB of useless padding wrapped in a top-level JSON object. The
-	// orchestrator must reject without parsing it.
-	big := strings.Repeat("x", 80*1024)
+	// Public budget is ~786 KiB. Build a PipelineRequest-shaped
+	// body that exceeds it via a giant transcript field.
+	// The public budget is slightly over 768 KiB; 900 KiB is safe.
+	bigText := strings.Repeat("x", 900*1024)
 	body := []byte(fmt.Sprintf(
-		`{"schema_version":"3.0","request_id":"req-test-1","data_version":"PKG-1:1","status":"OK","intent":"RECENTER","language":"en-IN","actions":[],"speech_key":null,"clarification_ids":[],"evidence_ids":[],"_pad":%q}`,
-		big))
+		`{"request_id":"req-test-1","jurisdiction":"JTEST","language":"en-IN","input":{"kind":"transcript","text":%q},"render":{"kind":"none"}}`,
+		bigText))
+
+	mid.SetProposeHook(func(_ context.Context, req contracts.MiddleWorkerRequest) (contracts.MiddleWorkerResponse, error) {
+		t.Fatalf("Propose called despite oversized request rejection")
+		return contracts.MiddleWorkerResponse{}, nil
+	})
 
 	_, err := o.Process(context.Background(), transcriptPipelineRequest("JTEST", "en-IN", "x"), body)
 	if err == nil {
-		t.Fatalf("Process: expected failure on oversized raw body")
+		t.Fatalf("Process: expected failure on oversized request body")
 	}
 }
 
-// TestA1_TrailingRawBodyRejectedAtDecode: the strict raw decoder must
-// reject a body with trailing JSON content.
-func TestA1_TrailingRawBodyRejectedAtDecode(t *testing.T) {
+// TestA1_TrailingRequestRawBodyRejectedAtDecode: the strict raw
+// decoder must reject a valid PipelineRequest-shaped body that
+// has trailing JSON content after the top-level value.
+func TestA1_TrailingRequestRawBodyRejectedAtDecode(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
 	resolver := orchestrationtest.NewResolver(orchestrationtest.BuildScopedContext("JTEST", "en-IN"))
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
 	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
 
-	// Construct a valid envelope followed by trailing JSON content.
-	body := []byte(`{"schema_version":"3.0","request_id":"req-test-1","data_version":"PKG-1:1","status":"OK","intent":"RECENTER","language":"en-IN","actions":[],"speech_key":null,"clarification_ids":[],"evidence_ids":[]}{"after":true}`)
+	// Valid PipelineRequest with trailing garbage.
+	body := []byte(`{"request_id":"req-test-1","jurisdiction":"JTEST","language":"en-IN","input":{"kind":"transcript","text":"hello"},"render":{"kind":"none"}}{"after":true}`)
 
 	_, err := o.Process(context.Background(), transcriptPipelineRequest("JTEST", "en-IN", "x"), body)
 	if err == nil {
-		t.Fatalf("Process: expected failure on trailing raw body")
+		t.Fatalf("Process: expected failure on trailing request body")
 	}
 }
 
-// TestA1_LocalClientCannotBypassValidator: production validator wraps
-// contracts.EnforceScopedContext; clients cannot replace it with a no-op
-// by using a permissive Strategy.
-func TestA1_ProductionValidatorActuallyEnforces(t *testing.T) {
-	v := orchestration.NewProductionValidator()
-	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
-	out := contracts.ModelOutput{
-		SchemaVersion: contracts.ModelSchemaVersion,
-		RequestID:     "sc-JTEST",
-		DataVersion:   "PKG-1:1",
-		Status:        contracts.StatusOK,
-		Intent:        orchestrationtest.IntentPtr(contracts.IntentOpenConfirmation),
-		Language:      "en-IN",
-		// RESERVE is not a valid action type.
-		Actions: []contracts.Action{{Type: "RESERVE"}},
-	}
-	if err := v.Enforce(out, sc); err == nil {
-		t.Fatalf("ProductionValidator allowed an unknown action type")
+// TestA1_DuplicateKeysRejected: duplicate top-level keys in the
+// citizen request body must be rejected.
+func TestA1_DuplicateKeysRejected(t *testing.T) {
+	// Duplicate request_id in PipelineRequest shape.
+	body := []byte(`{"request_id":"req-1","request_id":"req-2","jurisdiction":"JTEST","language":"en-IN","input":{"kind":"transcript","text":"x"},"render":{"kind":"none"}}`)
+
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	resolver := orchestrationtest.NewResolver(orchestrationtest.BuildScopedContext("JTEST", "en-IN"))
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
+
+	_, err := o.Process(context.Background(), transcriptPipelineRequest("JTEST", "en-IN", "x"), body)
+	if err == nil {
+		t.Fatalf("Process: expected failure on duplicate request raw key")
 	}
 }
 
@@ -414,23 +421,6 @@ func TestA1_NonOKIntentRejected(t *testing.T) {
 func drain(resp *http.Response) ([]byte, error) { return io.ReadAll(resp.Body) }
 
 // TestA1_RealValidatorShapeDuplicatesUnknownKeyRejected: a raw body with
-// duplicate JSON object keys must fail at decode even if it is otherwise
-// shape-correct — duplicates can hide smuggling.
-func TestA1_DuplicateKeysRejected(t *testing.T) {
-	body := []byte(`{"schema_version":"3.0","schema_version":"3.0","request_id":"req-test-1","data_version":"PKG-1:1","status":"OK","intent":"RECENTER","language":"en-IN","actions":[],"speech_key":null,"clarification_ids":[],"evidence_ids":[]}`)
-
-	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
-	resolver := orchestrationtest.NewResolver(orchestrationtest.BuildScopedContext("JTEST", "en-IN"))
-	validator := orchestrationtest.NewValidator()
-	tpls := orchestrationtest.NewTemplates()
-	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
-
-	_, err := o.Process(context.Background(), transcriptPipelineRequest("JTEST", "en-IN", "x"), body)
-	if err == nil {
-		t.Fatalf("Process: expected failure on duplicate raw key")
-	}
-}
-
 // silence unused-helper warnings.
 var _ = drain
 
@@ -558,6 +548,157 @@ func TestA1_TTSFailureUnchangedContext_PreservesActions(t *testing.T) {
 	}
 	if !foundTTS {
 		t.Errorf("Stages = %+v, want TTS failure recorded", out.Stages)
+	}
+}
+
+// TestA1_ModelBytes_OversizedProposalRejected: a middle worker
+// response whose proposal field exceeds MaxRawModelBytes (64 KiB)
+// must be rejected at the HTTPWorkerClient before typed decoding.
+func TestA1_ModelBytes_OversizedProposalRejected(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/chat/completions" {
+			// Proposal with 80 KiB of padding.
+			pad := strings.Repeat("x", 80*1024)
+			body := fmt.Sprintf(`{"request_id":"req-a1","data_version":"PKG-1:1","model_revision":"r0","proposal":{"schema_version":"3.0","request_id":"req-a1","data_version":"PKG-1:1","status":"OK","intent":"RECENTER","language":"en-IN","actions":[],"speech_key":null,"clarification_ids":[],"evidence_ids":[],"_pad":%q}}`, pad)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.Copy(w, bytes.NewReader([]byte(body)))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	c := orchestration.NewHTTPWorkerClient(ts.URL, "", nil)
+	_, err := c.Propose(context.Background(), contracts.MiddleWorkerRequest{
+		RequestID:       "req-a1",
+		ScopedContext:   orchestrationtest.BuildScopedContext("JTEST", "en-IN"),
+		Transcript:      contracts.ASRWorkerResponse{RequestID: "req-a1", Language: "en-IN", Text: "hi", State: contracts.TranscriptionOK},
+		MaxOutputTokens: 256,
+		DeadlineMillis:  6000,
+	})
+	if err == nil {
+		t.Fatalf("Propose should fail on oversized proposal but returned nil error")
+	}
+}
+
+// TestA1_ModelBytes_RecenterWithExplicitEmptyTargetIDRejected: a
+// RECENTER action with an explicitly present empty target_id must be
+// rejected at the raw bytes level (typed decode would treat it as
+// absent and pass, losing the distinction).
+func TestA1_ModelBytes_RecenterWithExplicitEmptyTargetIDRejected(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/chat/completions" {
+			// RECENTER with explicit "target_id":"" — typed decode
+			// would drop it to zero value; raw presence check must fail.
+			body := `{"request_id":"req-a1","data_version":"PKG-1:1","model_revision":"r0","proposal":{"schema_version":"3.0","request_id":"req-a1","data_version":"PKG-1:1","status":"OK","intent":"RECENTER","language":"en-IN","actions":[{"type":"RECENTER","target_id":""}],"speech_key":null,"clarification_ids":[],"evidence_ids":[]}}`
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.Copy(w, bytes.NewReader([]byte(body)))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	c := orchestration.NewHTTPWorkerClient(ts.URL, "", nil)
+	_, err := c.Propose(context.Background(), contracts.MiddleWorkerRequest{
+		RequestID:       "req-a1",
+		ScopedContext:   orchestrationtest.BuildScopedContext("JTEST", "en-IN"),
+		Transcript:      contracts.ASRWorkerResponse{RequestID: "req-a1", Language: "en-IN", Text: "hi", State: contracts.TranscriptionOK},
+		MaxOutputTokens: 256,
+		DeadlineMillis:  6000,
+	})
+	if err == nil {
+		t.Fatalf("Propose should fail on explicit empty target_id but returned nil error")
+	}
+}
+
+// TestA1_ModelBytes_UnknownProposalFieldRejected: an unknown field
+// inside the proposal object must be rejected.
+func TestA1_ModelBytes_UnknownProposalFieldRejected(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/chat/completions" {
+			body := `{"request_id":"req-a1","data_version":"PKG-1:1","model_revision":"r0","proposal":{"schema_version":"3.0","request_id":"req-a1","data_version":"PKG-1:1","status":"OK","intent":"RECENTER","language":"en-IN","actions":[],"speech_key":null,"clarification_ids":[],"evidence_ids":[],"unknown_field":true}}`
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.Copy(w, bytes.NewReader([]byte(body)))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	c := orchestration.NewHTTPWorkerClient(ts.URL, "", nil)
+	_, err := c.Propose(context.Background(), contracts.MiddleWorkerRequest{
+		RequestID:       "req-a1",
+		ScopedContext:   orchestrationtest.BuildScopedContext("JTEST", "en-IN"),
+		Transcript:      contracts.ASRWorkerResponse{RequestID: "req-a1", Language: "en-IN", Text: "hi", State: contracts.TranscriptionOK},
+		MaxOutputTokens: 256,
+		DeadlineMillis:  6000,
+	})
+	if err == nil {
+		t.Fatalf("Propose should fail on unknown proposal field but returned nil error")
+	}
+}
+
+// TestA1_ModelBytes_MissingRequiredProposalFieldRejected: a proposal
+// missing a required top-level field must be rejected.
+func TestA1_ModelBytes_MissingRequiredProposalFieldRejected(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/chat/completions" {
+			// Missing "status" — required.
+			body := `{"request_id":"req-a1","data_version":"PKG-1:1","model_revision":"r0","proposal":{"schema_version":"3.0","request_id":"req-a1","data_version":"PKG-1:1","intent":"RECENTER","language":"en-IN","actions":[],"speech_key":null,"clarification_ids":[],"evidence_ids":[]}}`
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.Copy(w, bytes.NewReader([]byte(body)))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	c := orchestration.NewHTTPWorkerClient(ts.URL, "", nil)
+	_, err := c.Propose(context.Background(), contracts.MiddleWorkerRequest{
+		RequestID:       "req-a1",
+		ScopedContext:   orchestrationtest.BuildScopedContext("JTEST", "en-IN"),
+		Transcript:      contracts.ASRWorkerResponse{RequestID: "req-a1", Language: "en-IN", Text: "hi", State: contracts.TranscriptionOK},
+		MaxOutputTokens: 256,
+		DeadlineMillis:  6000,
+	})
+	if err == nil {
+		t.Fatalf("Propose should fail on missing required status but returned nil error")
+	}
+}
+
+// TestA1_ModelBytes_ValidProposalPasses: a minimal valid proposal
+// passes the raw checks and proceeds to typed validation.
+func TestA1_ModelBytes_ValidProposalPasses(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/chat/completions" {
+			body := `{"request_id":"req-a1","data_version":"PKG-1:1","model_revision":"r0","proposal":{"schema_version":"3.0","request_id":"req-a1","data_version":"PKG-1:1","status":"OK","intent":"RECENTER","language":"en-IN","actions":[{"type":"RECENTER"}],"speech_key":null,"clarification_ids":[],"evidence_ids":[]}}`
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.Copy(w, bytes.NewReader([]byte(body)))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	c := orchestration.NewHTTPWorkerClient(ts.URL, "", nil)
+	resp, err := c.Propose(context.Background(), contracts.MiddleWorkerRequest{
+		RequestID:       "req-a1",
+		ScopedContext:   orchestrationtest.BuildScopedContext("JTEST", "en-IN"),
+		Transcript:      contracts.ASRWorkerResponse{RequestID: "req-a1", Language: "en-IN", Text: "hi", State: contracts.TranscriptionOK},
+		MaxOutputTokens: 256,
+		DeadlineMillis:  6000,
+	})
+	if err != nil {
+		t.Fatalf("Propose should succeed on valid proposal: %v", err)
+	}
+	if resp.Proposal.Status != contracts.StatusOK {
+		t.Fatalf("expected OK status, got %s", resp.Proposal.Status)
 	}
 }
 

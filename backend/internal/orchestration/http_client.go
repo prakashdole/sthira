@@ -18,9 +18,10 @@ import (
 // It sends typed requests to private worker loopback endpoints with
 // bearer-token authentication.
 type HTTPWorkerClient struct {
-	baseURL    string
-	token      string
-	httpClient *http.Client
+	baseURL       string
+	token         string
+	httpClient    *http.Client
+	maxModelBytes int
 }
 
 // NewHTTPWorkerClient builds an HTTPWorkerClient for the given baseURL and bearer token.
@@ -29,9 +30,10 @@ func NewHTTPWorkerClient(baseURL, token string, client *http.Client) *HTTPWorker
 		client = &http.Client{Timeout: 10 * time.Second}
 	}
 	return &HTTPWorkerClient{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		token:      token,
-		httpClient: client,
+		baseURL:       strings.TrimRight(baseURL, "/"),
+		token:         token,
+		httpClient:    client,
+		maxModelBytes: DefaultLimits().MaxRawModelBytes,
 	}
 }
 
@@ -86,13 +88,21 @@ func (c *HTTPWorkerClient) Transcribe(ctx context.Context, req contracts.ASRWork
 }
 
 // Propose sends a middle-model request to POST /v1/chat/completions.
+// The raw response bytes are validated against the strict model
+// schema BEFORE the typed decode discards zero-vs-absent
+// distinctions: forbidden per-action fields that are explicitly
+// present with empty/zero values, missing required fields, and an
+// oversized proposal all fail closed here.
 func (c *HTTPWorkerClient) Propose(ctx context.Context, req contracts.MiddleWorkerRequest) (contracts.MiddleWorkerResponse, error) {
 	if c == nil || c.baseURL == "" {
 		return contracts.MiddleWorkerResponse{}, ErrModelUnavailable
 	}
 	var out contracts.MiddleWorkerResponse
-	err := c.postJSON(ctx, "/v1/chat/completions", req, &out, 512*1024)
+	raw, err := c.postJSONRaw(ctx, "/v1/chat/completions", req, &out, 512*1024)
 	if err != nil {
+		return contracts.MiddleWorkerResponse{}, err
+	}
+	if err := validateModelResponseRaw(raw, c.maxModelBytes); err != nil {
 		return contracts.MiddleWorkerResponse{}, err
 	}
 	if req.RequestID != "" && out.RequestID != "" && out.RequestID != req.RequestID {
@@ -118,13 +128,18 @@ func (c *HTTPWorkerClient) Synthesize(ctx context.Context, req contracts.TTSWork
 }
 
 func (c *HTTPWorkerClient) postJSON(ctx context.Context, path string, in any, out any, maxBytes int64) error {
+	_, err := c.postJSONRaw(ctx, path, in, out, maxBytes)
+	return err
+}
+
+func (c *HTTPWorkerClient) postJSONRaw(ctx context.Context, path string, in any, out any, maxBytes int64) ([]byte, error) {
 	data, err := json.Marshal(in)
 	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
+		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(data))
 	if err != nil {
-		return fmt.Errorf("new request: %w", err)
+		return nil, fmt.Errorf("new request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if c.token != "" {
@@ -133,24 +148,24 @@ func (c *HTTPWorkerClient) postJSON(ctx context.Context, path string, in any, ou
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
-			return ErrPipelineCanceled
+			return nil, ErrPipelineCanceled
 		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return ErrModelTimeout
+			return nil, ErrModelTimeout
 		}
-		return fmt.Errorf("worker request failed: %w", err)
+		return nil, fmt.Errorf("worker request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusServiceUnavailable {
-		return ErrModelUnavailable
+		return nil, ErrModelUnavailable
 	}
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return ErrQueueSaturated
+		return nil, ErrQueueSaturated
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return fmt.Errorf("worker returned HTTP %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("worker returned HTTP %d: %s", resp.StatusCode, string(body))
 	}
 	// max+1 detection: read up to (maxBytes + 1) so an exactly-at-cap
 	// response passes, but a response that exceeds the cap by even
@@ -158,23 +173,23 @@ func (c *HTTPWorkerClient) postJSON(ctx context.Context, path string, in any, ou
 	limited := io.LimitReader(resp.Body, maxBytes+1)
 	raw, err := io.ReadAll(limited)
 	if err != nil {
-		return fmt.Errorf("read worker response: %w", err)
+		return nil, fmt.Errorf("read worker response: %w", err)
 	}
 	if int64(len(raw)) > maxBytes {
 		// Try to drain the rest so the connection can be reused,
 		// but the response is rejected regardless.
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return fmt.Errorf("worker response exceeds %d bytes (oversize)", maxBytes)
+		return nil, fmt.Errorf("worker response exceeds %d bytes (oversize)", maxBytes)
 	}
 	if err := checkNoDuplicateKeys(raw); err != nil {
-		return fmt.Errorf("validate response JSON: %w", err)
+		return nil, fmt.Errorf("validate response JSON: %w", err)
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(out); err != nil {
-		return fmt.Errorf("decode worker response: %w", err)
+		return nil, fmt.Errorf("decode worker response: %w", err)
 	}
-	return nil
+	return raw, nil
 }
 
 func checkNoDuplicateKeys(data []byte) error {

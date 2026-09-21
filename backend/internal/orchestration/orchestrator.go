@@ -108,24 +108,22 @@ func (o *Orchestrator) Process(ctx context.Context, req contracts.PipelineReques
 		id = newCorrelationID()
 	}
 
-	// Validate the request shape before any worker call. We use
-	// rawBody for the strict shape check (size/depth/duplicate
-	// key/unknown field/trailing data); the typed request is
-	// already decoded by the handler. httpjson.DecodeStrict bounds
-	// the byte size and rejects duplicates/trailing data; we wrap
-	// a non-strict shape check via the validator for compatibility,
-	// but the raw decode here is what actually fails closed on
-	// duplicates, trailing JSON, or oversize.
+	// Validate the request shape before any worker call. rawBody is
+	// the PUBLIC citizen request bytes (the handler decoded them
+	// into req already); they are strictly re-checked against the
+	// PipelineRequest schema with the public request budget. The
+	// model-response limit is a different ceiling and applies only
+	// to worker bytes at HTTPWorkerClient; do not confuse them.
+	// DecodeStrict bounds the byte size and rejects duplicates,
+	// unknown fields, trailing data and oversize before the
+	// pipeline runs.
 	if len(rawBody) > 0 {
-		if err := httpjson.DecodeStrict(rawBody, &contracts.ModelOutput{}, httpjson.Limits{
-			MaxBytes: int64(o.cfg.Limits.MaxRawModelBytes),
+		publicBudget := o.cfg.Limits.MaxAudioCompressedBytes +
+			int64(o.cfg.Limits.MaxTranscriptUTF8Bytes) + 1024
+		if err := httpjson.DecodeStrict(rawBody, &contracts.PipelineRequest{}, httpjson.Limits{
+			MaxBytes: publicBudget,
 			MaxDepth: 32,
 		}); err != nil && !errors.Is(err, io.EOF) {
-			// We expect that DecodeStrict will reject for malformed,
-			// duplicate-keyed, trailing, or oversize bodies. The
-			// decoded target is `&contracts.ModelOutput{}` purely to
-			// validate shape; we discard it (the typed request is
-			// supplied by the handler).
 			var fe *httpjson.FieldError
 			if errors.As(err, &fe) {
 				return o.fail(id, "", pipelineError(contracts.PipelineUnsupported, 400, StageFailure{
@@ -136,8 +134,8 @@ func (o *Orchestrator) Process(ctx context.Context, req contracts.PipelineReques
 				Stage: StageValidator, Code: contracts.ErrValidation, Reason: "raw body shape invalid: " + err.Error(), Retryable: false,
 			}))
 		}
-		// Also pass through the validator's shape check; both
-		// checks must succeed independently.
+		// Also pass through the validator's JSON well-formedness
+		// check; both checks must succeed independently.
 		if err := o.cfg.Validator.ValidateShape(rawBody); err != nil {
 			return o.fail(id, "", pipelineError(contracts.PipelineModelUnavailable, 503, StageFailure{
 				Stage: StageValidator, Code: contracts.ErrValidation, Reason: err.Error(), Retryable: false,

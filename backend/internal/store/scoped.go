@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -187,10 +188,30 @@ func BuildScopedContext(ctx context.Context, db DBTX, jurisdiction, packageID st
 	}
 	sort.Strings(sc.AllowedLanguages)
 
-	// Template keys: empty in this derivation (templates are a P6
-	// worker concept). Worker 7's registry supplies the authoritative
-	// list at request time; the validator only checks that the model's
-	// speech_key, when set, matches the registry.
+	// Template keys: the approved speech_keys for this jurisdiction,
+	// read from the persisted translation-authority table
+	// (approved_translations). This is the authoritative approval
+	// boundary the orchestrator refuses to fake with a global registry
+	// fallback (see orchestration stageContext: empty TemplateKeys is
+	// an authoritative "nothing approved"). An empty result is therefore
+	// an honest fail-closed signal. In production the table stays empty
+	// until a government translation authority records an approval
+	// (external gate O11); seeding it from a test is an isolated
+	// fixture, not an invented approved translation.
+	//
+	// A row with a NULL language approves the speech_key for every
+	// language the jurisdiction serves; a concrete language restricts
+	// it to that reviewer's sign-off and is only surfaced when that
+	// language is in the context's allowed set.
+	allowedLangs := make(map[string]struct{}, len(sc.AllowedLanguages))
+	for _, l := range sc.AllowedLanguages {
+		allowedLangs[l] = struct{}{}
+	}
+	approved, err := readApprovedSpeechKeys(ctx, db, jurisdiction, sourceVersion, now, allowedLangs)
+	if err != nil {
+		return contracts.ScopedContext{}, fmt.Errorf("store: read approved translations: %w", err)
+	}
+	sc.TemplateKeys = approved
 
 	// Place aliases: each alias maps a normalized lookup key to a place
 	// ID; we expose them as KnownPlaces with kind guessed from where
@@ -295,6 +316,53 @@ func readAliases(ctx context.Context, db DBTX, jurisdiction string) ([]PlaceCand
 		}
 	}
 	return out, rows.Err()
+}
+
+// readApprovedSpeechKeys returns the distinct, ascending set of
+// speech_keys currently approved for the jurisdiction at or before
+// sourceVersion and active at now, backed by the persisted
+// approved_translations authority table. A row with a NULL language is
+// approved for every allowed language; a row with a concrete language is
+// surfaced only when that language is in allowed. An empty jurisdiction
+// (nothing reviewed) yields an empty set, which the orchestrator treats
+// as authoritative "no approval" and fails closed on.
+func readApprovedSpeechKeys(ctx context.Context, db DBTX, jurisdiction string, sourceVersion int, now time.Time, allowed map[string]struct{}) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT speech_key, language
+		FROM approved_translations
+		WHERE jurisdiction = $1
+		  AND revoked_at IS NULL
+		  AND approved_at <= $2
+		  AND source_version <= $3`,
+		jurisdiction, now, sourceVersion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seen := map[string]struct{}{}
+	var out []string
+	for rows.Next() {
+		var key string
+		var lang sql.NullString
+		if err := rows.Scan(&key, &lang); err != nil {
+			return nil, err
+		}
+		if lang.Valid {
+			if _, ok := allowed[lang.String]; !ok {
+				continue
+			}
+		}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func isInMap(id string, m map[string]contracts.ZoneRef) bool { _, ok := m[id]; return ok }

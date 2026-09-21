@@ -215,22 +215,35 @@ func decodeRIFFWAV(b []byte, limits AudioDecodeLimits) (samples []float32, sampl
 	var blockAlign uint16
 	var dataStart, dataLen int
 	var dataUnknown bool
+	var dataSeen bool
 	for pos+8 <= len(b) {
 		id := string(b[pos : pos+4])
 		size := binary.LittleEndian.Uint32(b[pos+4 : pos+8])
 		knownSize := size != wavUnknownChunkSize
-		if knownSize && int(size) > len(b)-pos-8 && id != "data" {
+		avail := uint64(len(b) - pos - 8)
+		if knownSize && uint64(size) > avail && id != "data" {
 			// Malformed: chunk declares more bytes than the file.
 			return nil, 0, 0, &DecodeError{Reason: "wav chunk overruns file",
 				Cause: fmt.Errorf("chunk %s size %d at offset %d", id, size, pos)}
 		}
 		switch id {
 		case "fmt ":
-			if size < 16 || (knownSize && int(size) > len(b)-pos-8) {
+			// The streaming sentinel (unknown size) is only trusted
+			// for the data chunk, where ffmpeg's non-seekable pipe
+			// forces it. No producer legitimately declares an
+			// unknown-length fmt: reject BEFORE slicing so a
+			// 0xFFFFFFFF size field cannot panic the decoder.
+			if !knownSize {
+				return nil, 0, 0, &DecodeError{Reason: "wav fmt chunk declares unknown size"}
+			}
+			if uint64(size) < 16 || uint64(size) > avail {
 				return nil, 0, 0, &DecodeError{Reason: "wav fmt chunk too short",
 					Cause: fmt.Errorf("got %d bytes", size)}
 			}
-			fmtChunk := b[pos+8 : pos+8+int(size)]
+			// Read only the fixed 16-byte canonical PCM header
+			// prefix; extensible fmt chunks (18/40 bytes) carry
+			// the same leading fields.
+			fmtChunk := b[pos+8 : pos+24]
 			audioFormat = binary.LittleEndian.Uint16(fmtChunk[0:2])
 			channels = int(binary.LittleEndian.Uint16(fmtChunk[2:4]))
 			sampleRate = int(binary.LittleEndian.Uint32(fmtChunk[4:8]))
@@ -247,22 +260,30 @@ func decodeRIFFWAV(b []byte, limits AudioDecodeLimits) (samples []float32, sampl
 				dataLen = len(b) - (pos + 8)
 				dataUnknown = true
 			}
+			dataSeen = true
 			// Don't return yet: read on in case there is junk
 			// after; but for this header we only care about the
 			// first data chunk, which is the canonical layout.
 		}
+		if dataSeen && audioFormat != 0 {
+			break
+		}
 		if knownSize {
-			pos += 8 + int(size)
-			if int(size)%2 == 1 && pos < len(b) {
+			end := uint64(pos+8) + uint64(size)
+			if end > uint64(len(b)) {
+				// A data chunk that runs past EOF is malformed or
+				// truncated; stop walking and let the checks below
+				// reject it via the declared-length comparison.
+				break
+			}
+			pos = int(end)
+			if size%2 == 1 && pos < len(b) {
 				pos++ // pad byte
 			}
 		} else if id != "data" {
 			// Unknown-size non-data chunk (very rare). Bail.
 			return nil, 0, 0, &DecodeError{Reason: "wav unknown-size non-data chunk",
 				Cause: fmt.Errorf("chunk %s at %d", id, pos)}
-		}
-		if dataStart != 0 && audioFormat != 0 {
-			break
 		}
 	}
 	if audioFormat == 0 {
@@ -287,17 +308,16 @@ func decodeRIFFWAV(b []byte, limits AudioDecodeLimits) (samples []float32, sampl
 			Cause: fmt.Errorf("block %d vs channels*bits %d", blockAlign, channels*int(bitsPerSample)/8)}
 	}
 	_ = byteRate
-	wantEnd := dataStart + dataLen
-	if !dataUnknown && wantEnd > len(b) {
+	wantEnd := uint64(dataStart) + uint64(dataLen)
+	if !dataUnknown && wantEnd > uint64(len(b)) {
 		return nil, 0, 0, &DecodeError{Reason: "wav data chunk truncated",
 			Cause: fmt.Errorf("declared %d bytes at %d, file ends at %d", dataLen, dataStart, len(b))}
 	}
-	if wantEnd > len(b) {
+	if wantEnd > uint64(len(b)) {
 		// Unknown-size chunk: bounded by EOF.
-		wantEnd = len(b)
-		dataLen = wantEnd - dataStart
+		wantEnd = uint64(len(b))
 	}
-	pcm := b[dataStart:wantEnd]
+	pcm := b[dataStart:int(wantEnd)]
 	frameSize := channels * 2
 	if len(pcm)%frameSize != 0 {
 		return nil, 0, 0, &DecodeError{Reason: "wav pcm not aligned to frame",
