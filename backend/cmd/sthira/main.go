@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"sthira/backend/internal/httpserver"
 	"sthira/backend/internal/orchestration"
@@ -91,6 +92,20 @@ func main() {
 		midClient := orchestration.NewHTTPWorkerClient(midURL, midTok, nil)
 		ttsClient := orchestration.NewHTTPWorkerClient(ttsURL, ttsTok, nil)
 		workers := orchestration.NewWorkers(asrClient, midClient, ttsClient)
+
+		// Warm and check worker health on startup via SnapshotHealth.
+		healthCtx, cancelHealth := context.WithTimeout(ctx, 5*time.Second)
+		for _, stage := range []orchestration.Stage{orchestration.StageASR, orchestration.StageMiddle, orchestration.StageTTS} {
+			h, err := workers.SnapshotHealth(healthCtx, stage)
+			if err != nil {
+				logger.Warn("initial worker health check failed", "stage", stage, "error", err)
+			} else if !h.Ready || !h.Warm {
+				logger.Warn("worker not ready or not warm", "stage", stage, "ready", h.Ready, "warm", h.Warm)
+			} else {
+				logger.Info("worker healthy and warm", "stage", stage, "languages", h.SupportedLanguages)
+			}
+		}
+		cancelHealth()
 
 		resolver := store.NewScopedContextResolver(st)
 		validator := orchestration.NewProductionValidator()

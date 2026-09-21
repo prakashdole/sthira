@@ -167,12 +167,19 @@ type QueueStats struct {
 func (w *Worker) Health() WorkerHealth {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	langs := append([]string(nil), w.runtime.Languages()...)
 	return WorkerHealth{
 		Ready:                w.ready.Load(),
 		Warm:                 w.warm.Load(),
+		SupportedLanguages:   langs,
+		Queue: QueueStats{
+			Depth:          len(w.queue),
+			MaxDepth:       cap(w.queue),
+			MaxConcurrency: w.concurrencyBound(),
+		},
 		Inventory:            w.inventory,
 		RuntimeRevision:      w.runtime.Revision(),
-		RuntimeLanguages:     append([]string(nil), w.runtime.Languages()...),
+		RuntimeLanguages:     langs,
 		RuntimeVoices:        append([]VoiceInfo(nil), w.runtime.Voices()...),
 		CurrentSourceVersion: w.clock.Current(),
 		Metrics:              w.snapshotLocked(),
@@ -184,6 +191,8 @@ func (w *Worker) Health() WorkerHealth {
 type WorkerHealth struct {
 	Ready                bool            `json:"ready"`
 	Warm                 bool            `json:"warm"`
+	SupportedLanguages   []string        `json:"supported_languages"`
+	Queue                QueueStats      `json:"queue"`
 	Inventory            Inventory       `json:"inventory"`
 	RuntimeRevision      string          `json:"runtime_revision"`
 	RuntimeLanguages     []string        `json:"runtime_languages"`

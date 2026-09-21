@@ -197,12 +197,15 @@ func TestProcess_ValidatorRejectionFailsClosed(t *testing.T) {
 		return contracts.MiddleWorkerResponse{
 			RequestID: req.RequestID,
 			Proposal: contracts.ModelOutput{
-				Status:      contracts.StatusOK,
-				Intent:      orchestrationtest.IntentPtr(contracts.IntentOpenConfirmation),
-				Language:    req.Transcript.Language,
-				Actions:     []contracts.Action{{Type: contracts.ActionOpenPanel, Panel: contracts.PanelReservationConfirm}},
-				SpeechKey:   nil,
-				EvidenceIDs: []string{"PLACE-DEMO-1"},
+				SchemaVersion: contracts.ModelSchemaVersion,
+				RequestID:     req.RequestID,
+				DataVersion:   req.ScopedContext.DataVersion,
+				Status:        contracts.StatusOK,
+				Intent:        orchestrationtest.IntentPtr(contracts.IntentOpenConfirmation),
+				Language:      req.Transcript.Language,
+				Actions:       []contracts.Action{{Type: contracts.ActionOpenPanel, Panel: contracts.PanelReservationConfirm}},
+				SpeechKey:     nil,
+				EvidenceIDs:   []string{"PLACE-DEMO-1"},
 			},
 			ModelRevision: "r0",
 		}, nil
@@ -238,12 +241,15 @@ func TestProcess_NoTTSForSilentAction(t *testing.T) {
 		return contracts.MiddleWorkerResponse{
 			RequestID: req.RequestID,
 			Proposal: contracts.ModelOutput{
-				Status:      contracts.StatusOK,
-				Intent:      orchestrationtest.IntentPtr(contracts.IntentRecenter),
-				Language:    req.Transcript.Language,
-				Actions:     []contracts.Action{{Type: contracts.ActionRecenter}},
-				SpeechKey:   nil,
-				EvidenceIDs: nil,
+				SchemaVersion: contracts.ModelSchemaVersion,
+				RequestID:     req.RequestID,
+				DataVersion:   req.ScopedContext.DataVersion,
+				Status:        contracts.StatusOK,
+				Intent:        orchestrationtest.IntentPtr(contracts.IntentRecenter),
+				Language:      req.Transcript.Language,
+				Actions:       []contracts.Action{{Type: contracts.ActionRecenter}},
+				SpeechKey:     nil,
+				EvidenceIDs:   nil,
 			},
 			ModelRevision: "r0",
 		}, nil
@@ -284,12 +290,15 @@ func TestProcess_TTSOnlyWithSpeechKeyAndRender(t *testing.T) {
 		return contracts.MiddleWorkerResponse{
 			RequestID: req.RequestID,
 			Proposal: contracts.ModelOutput{
-				Status:      contracts.StatusOK,
-				Intent:      orchestrationtest.IntentPtr(contracts.IntentListDestinations),
-				Language:    req.Transcript.Language,
-				Actions:     []contracts.Action{{Type: contracts.ActionShowChoices, TargetIDs: []string{"FAC-DEMO-1"}}},
-				SpeechKey:   &key,
-				EvidenceIDs: nil,
+				SchemaVersion: contracts.ModelSchemaVersion,
+				RequestID:     req.RequestID,
+				DataVersion:   req.ScopedContext.DataVersion,
+				Status:        contracts.StatusOK,
+				Intent:        orchestrationtest.IntentPtr(contracts.IntentListDestinations),
+				Language:      req.Transcript.Language,
+				Actions:       []contracts.Action{{Type: contracts.ActionShowChoices, TargetIDs: []string{"FAC-DEMO-1"}}},
+				SpeechKey:     &key,
+				EvidenceIDs:   nil,
 			},
 			ModelRevision: "r0",
 		}, nil
@@ -467,10 +476,13 @@ func TestProcess_WorkerNeverReceivesGovernmentCredential(t *testing.T) {
 		return contracts.MiddleWorkerResponse{
 			RequestID: req.RequestID,
 			Proposal: contracts.ModelOutput{
-				Status:   contracts.StatusOK,
-				Intent:   orchestrationtest.IntentPtr(contracts.IntentRecenter),
-				Language: req.Transcript.Language,
-				Actions:  []contracts.Action{{Type: contracts.ActionRecenter}},
+				SchemaVersion: contracts.ModelSchemaVersion,
+				RequestID:     req.RequestID,
+				DataVersion:   req.ScopedContext.DataVersion,
+				Status:        contracts.StatusOK,
+				Intent:        orchestrationtest.IntentPtr(contracts.IntentRecenter),
+				Language:      req.Transcript.Language,
+				Actions:       []contracts.Action{{Type: contracts.ActionRecenter}},
 			},
 			ModelRevision: "r0",
 		}, nil
@@ -508,10 +520,13 @@ func TestProcess_WorkerHasNoWriteCapability(t *testing.T) {
 		return contracts.MiddleWorkerResponse{
 			RequestID: req.RequestID,
 			Proposal: contracts.ModelOutput{
-				Status:   contracts.StatusOK,
-				Intent:   orchestrationtest.IntentPtr(contracts.IntentRecenter),
-				Language: req.Transcript.Language,
-				Actions:  []contracts.Action{{Type: contracts.ActionRecenter}},
+				SchemaVersion: contracts.ModelSchemaVersion,
+				RequestID:     req.RequestID,
+				DataVersion:   req.ScopedContext.DataVersion,
+				Status:        contracts.StatusOK,
+				Intent:        orchestrationtest.IntentPtr(contracts.IntentRecenter),
+				Language:      req.Transcript.Language,
+				Actions:       []contracts.Action{{Type: contracts.ActionRecenter}},
 			},
 		}, nil
 	})
@@ -544,11 +559,14 @@ func TestProcess_VoiceResultNeverBecomesReservation(t *testing.T) {
 		return contracts.MiddleWorkerResponse{
 			RequestID: req.RequestID,
 			Proposal: contracts.ModelOutput{
-				Status:      contracts.StatusOK,
-				Intent:      orchestrationtest.IntentPtr(contracts.IntentOpenConfirmation),
-				Language:    req.Transcript.Language,
-				Actions:     []contracts.Action{{Type: "RESERVE"}, {Type: "DIAL_112"}, {Type: "TRANSFER"}},
-				EvidenceIDs: nil,
+				SchemaVersion: contracts.ModelSchemaVersion,
+				RequestID:     req.RequestID,
+				DataVersion:   req.ScopedContext.DataVersion,
+				Status:        contracts.StatusOK,
+				Intent:        orchestrationtest.IntentPtr(contracts.IntentOpenConfirmation),
+				Language:      req.Transcript.Language,
+				Actions:       []contracts.Action{{Type: "RESERVE"}, {Type: "DIAL_112"}, {Type: "TRANSFER"}},
+				EvidenceIDs:   nil,
 			},
 		}, nil
 	})
@@ -628,10 +646,13 @@ func TestProcess_TranscriptNeverBecomesInstruction(t *testing.T) {
 		return contracts.MiddleWorkerResponse{
 			RequestID: req.RequestID,
 			Proposal: contracts.ModelOutput{
-				Status:   contracts.StatusOK,
-				Intent:   orchestrationtest.IntentPtr(contracts.IntentRecenter),
-				Language: req.Transcript.Language,
-				Actions:  []contracts.Action{{Type: contracts.ActionRecenter}},
+				SchemaVersion: contracts.ModelSchemaVersion,
+				RequestID:     req.RequestID,
+				DataVersion:   req.ScopedContext.DataVersion,
+				Status:        contracts.StatusOK,
+				Intent:        orchestrationtest.IntentPtr(contracts.IntentRecenter),
+				Language:      req.Transcript.Language,
+				Actions:       []contracts.Action{{Type: contracts.ActionRecenter}},
 			},
 		}, nil
 	})

@@ -78,6 +78,27 @@ var validPanels = map[Panel]bool{
 	PanelReservationConfirm: true, PanelArrivalConfirm: true, PanelEmergencyCallConfirm: true,
 }
 
+var validActionTypes = map[ActionType]bool{
+	ActionFocusFeature: true, ActionShowChoices: true, ActionShowRoute: true,
+	ActionOpenPanel: true, ActionZoom: true, ActionPan: true,
+	ActionRecenter: true, ActionSetLanguage: true,
+}
+
+// IsValidIntent reports whether i is an allowed middle-model intent.
+func IsValidIntent(i Intent) bool {
+	return validIntents[i]
+}
+
+// IsValidPanel reports whether p is an allowed confirmation/detail panel.
+func IsValidPanel(p Panel) bool {
+	return validPanels[p]
+}
+
+// IsValidActionType reports whether a is an allowed action variant.
+func IsValidActionType(a ActionType) bool {
+	return validActionTypes[a]
+}
+
 const (
 	// MaxModelActions bounds the action array.
 	MaxModelActions = 5

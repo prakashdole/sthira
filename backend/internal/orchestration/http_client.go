@@ -55,8 +55,15 @@ func (c *HTTPWorkerClient) Health(ctx context.Context) (contracts.WorkerHealth, 
 	if resp.StatusCode != http.StatusOK {
 		return contracts.WorkerHealth{}, false
 	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return contracts.WorkerHealth{}, false
+	}
+	if err := checkNoDuplicateKeys(raw); err != nil {
+		return contracts.WorkerHealth{}, false
+	}
 	var health contracts.WorkerHealth
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&health); err != nil {
+	if err := json.Unmarshal(raw, &health); err != nil {
 		return contracts.WorkerHealth{}, false
 	}
 	return health, true
@@ -72,6 +79,9 @@ func (c *HTTPWorkerClient) Transcribe(ctx context.Context, req contracts.ASRWork
 	if err != nil {
 		return contracts.ASRWorkerResponse{State: contracts.TranscriptionUnavailable}, err
 	}
+	if req.RequestID != "" && out.RequestID != "" && out.RequestID != req.RequestID {
+		return contracts.ASRWorkerResponse{State: contracts.TranscriptionUnavailable}, fmt.Errorf("worker response request_id %q does not match request %q", out.RequestID, req.RequestID)
+	}
 	return out, nil
 }
 
@@ -85,6 +95,9 @@ func (c *HTTPWorkerClient) Propose(ctx context.Context, req contracts.MiddleWork
 	if err != nil {
 		return contracts.MiddleWorkerResponse{}, err
 	}
+	if req.RequestID != "" && out.RequestID != "" && out.RequestID != req.RequestID {
+		return contracts.MiddleWorkerResponse{}, fmt.Errorf("worker response request_id %q does not match request %q", out.RequestID, req.RequestID)
+	}
 	return out, nil
 }
 
@@ -97,6 +110,9 @@ func (c *HTTPWorkerClient) Synthesize(ctx context.Context, req contracts.TTSWork
 	err := c.postJSON(ctx, "/synthesize", req, &out, 2*1024*1024)
 	if err != nil {
 		return contracts.TTSWorkerResponse{State: contracts.TTSUnavailable}, err
+	}
+	if req.RequestID != "" && out.RequestID != "" && out.RequestID != req.RequestID {
+		return contracts.TTSWorkerResponse{State: contracts.TTSUnavailable}, fmt.Errorf("worker response request_id %q does not match request %q", out.RequestID, req.RequestID)
 	}
 	return out, nil
 }
@@ -136,8 +152,93 @@ func (c *HTTPWorkerClient) postJSON(ctx context.Context, path string, in any, ou
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return fmt.Errorf("worker returned HTTP %d: %s", resp.StatusCode, string(body))
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBytes)).Decode(out); err != nil {
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+	if err != nil {
+		return fmt.Errorf("read worker response: %w", err)
+	}
+	if err := checkNoDuplicateKeys(raw); err != nil {
+		return fmt.Errorf("validate response JSON: %w", err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(out); err != nil {
 		return fmt.Errorf("decode worker response: %w", err)
+	}
+	return nil
+}
+
+func checkNoDuplicateKeys(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return errors.New("empty JSON data")
+	}
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	if err := walkJSONTokens(dec, 0, 32); err != nil {
+		return err
+	}
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); err != io.EOF {
+		return errors.New("trailing data after top-level JSON value")
+	}
+	return nil
+}
+
+func walkJSONTokens(dec *json.Decoder, depth, maxDepth int) error {
+	if maxDepth > 0 && depth > maxDepth {
+		return fmt.Errorf("depth %d exceeds maximum depth %d", depth, maxDepth)
+	}
+	tok, err := dec.Token()
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return errors.New("truncated JSON")
+		}
+		return err
+	}
+	switch delim := tok.(type) {
+	case json.Delim:
+		switch delim {
+		case '{':
+			seen := make(map[string]struct{})
+			for dec.More() {
+				keyTok, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				key, ok := keyTok.(string)
+				if !ok {
+					return fmt.Errorf("expected string key in JSON object, got %T", keyTok)
+				}
+				if _, exists := seen[key]; exists {
+					return fmt.Errorf("duplicate key in JSON object: %q", key)
+				}
+				seen[key] = struct{}{}
+				if err := walkJSONTokens(dec, depth+1, maxDepth); err != nil {
+					return err
+				}
+			}
+			closing, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			if cDelim, ok := closing.(json.Delim); !ok || cDelim != '}' {
+				return fmt.Errorf("expected '}', got %v", closing)
+			}
+		case '[':
+			for dec.More() {
+				if err := walkJSONTokens(dec, depth+1, maxDepth); err != nil {
+					return err
+				}
+			}
+			closing, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			if cDelim, ok := closing.(json.Delim); !ok || cDelim != ']' {
+				return fmt.Errorf("expected ']', got %v", closing)
+			}
+		default:
+			return fmt.Errorf("unexpected delimiter %v", delim)
+		}
 	}
 	return nil
 }

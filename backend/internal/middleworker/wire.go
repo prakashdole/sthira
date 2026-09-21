@@ -14,79 +14,71 @@ package middleworker
 
 // ScopedContext is the JSON-decoded shape of contracts.ScopedContext
 // the worker sees. Only the fields the model is allowed to consume
-// are mirrored; everything else (request_id, source registry, audit
-// fields) is orchestrator-owned and never reaches the worker.
+// are mirrored; everything else (audit fields, sensitive tokens)
+// is orchestrator-owned and never reaches the worker.
 type ScopedContext struct {
-	// SchemaVersion is the literal the worker echoes back via the
-	// proposal schema_version. The orchestrator validates it.
-	SchemaVersion string `json:"schema_version"`
-	// DataVersion is the source-snapshot identifier. The proposal
-	// must echo it verbatim.
-	DataVersion string `json:"data_version"`
-	// AllowedLanguages is the explicit allow-list (per
-	// plan/p6-contract.md). The worker rejects any language outside
-	// this set.
-	AllowedLanguages []string `json:"allowed_languages"`
-	// TemplateKeys is the explicit allow-list for speech_key.
-	TemplateKeys []string `json:"template_keys"`
-	// PlaceCandidates are the typed place references available to
-	// the model. The model can only reference IDs from this list.
-	PlaceCandidates []PlaceCandidate `json:"place_candidates"`
-	// FacilityCandidates are typed facility references. Facilities
-	// cannot appear in SHOW_CHOICES; they may appear only in
-	// OPEN_PANEL DESTINATION_PREVIEW.
-	FacilityCandidates []FacilityCandidate `json:"facility_candidates"`
-	// VerifiedRoutes are typed route references. A route must be
-	// verified, not closed, and bound to a safe zone to be usable.
-	VerifiedRoutes []RouteCandidate `json:"verified_routes"`
-	// EligibleDestinations is the single source of permitted order
-	// for SHOW_CHOICES.
-	EligibleDestinations []EligibleDestination `json:"eligible_destinations"`
-	// SourceVersion and TemplateVersion are explicit so the worker
-	// never has to re-parse the package body.
-	SourceVersion   int `json:"source_version"`
-	TemplateVersion int `json:"template_version"`
+	RequestID       string `json:"request_id,omitempty"`
+	DataVersion     string `json:"data_version"`
+	Jurisdiction    string `json:"jurisdiction,omitempty"`
+	SchemaVersion   string `json:"schema_version"`
+	SourceStatus    string `json:"source_status,omitempty"`
+	SourceVersion   int    `json:"source_version,omitempty"`
+	TemplateVersion int    `json:"template_version,omitempty"`
+
+	AllowedLanguages []string `json:"allowed_languages,omitempty"`
+	TemplateKeys     []string `json:"template_keys,omitempty"`
+
+	KnownPlaces     map[string]PlaceCandidate `json:"known_places,omitempty"`
+	KnownRedZones   map[string]ZoneRef        `json:"known_red_zones,omitempty"`
+	KnownSafeZones  map[string]ZoneRef        `json:"known_safe_zones,omitempty"`
+	KnownRoutes     map[string]RouteRef       `json:"known_routes,omitempty"`
+	KnownFacilities map[string]FacilityRef    `json:"known_facilities,omitempty"`
+
+	VerifiedRoutes       map[string][]RouteRef `json:"verified_routes,omitempty"`
+	EligibleDestinations []EligibleChoice      `json:"eligible_destinations,omitempty"`
+	IssuedAt             string                `json:"issued_at,omitempty"`
 }
 
-// PlaceCandidate mirrors contracts.PlaceCandidate (subset the worker
-// is allowed to see). Coordinates are bounded and never reach the
-// assistant output.
+// PlaceCandidate mirrors contracts.PlaceCandidate.
 type PlaceCandidate struct {
-	ID           string `json:"id"`
-	Jurisdiction string `json:"jurisdiction"`
-	Version      int    `json:"version"`
-	DisplayName  string `json:"display_name,omitempty"`
+	PlaceID      string `json:"place_id"`
+	PlaceKind    string `json:"place_kind"`
+	Name         string `json:"name,omitempty"`
+	Jurisdiction string `json:"jurisdiction,omitempty"`
 }
 
-// FacilityCandidate mirrors contracts.FacilityCandidate.
-type FacilityCandidate struct {
-	ID              string `json:"id"`
-	Jurisdiction    string `json:"jurisdiction"`
-	Version         int    `json:"version"`
-	PermittedOrder  int    `json:"permitted_order"`
-	SafeZoneID      string `json:"safe_zone_id"`
-	VerifiedRouteID string `json:"verified_route_id"`
-	OrderCapacity   int    `json:"order_capacity"`
+// ZoneRef mirrors contracts.ZoneRef.
+type ZoneRef struct {
+	ZoneID        string `json:"zone_id"`
+	ZoneRole      string `json:"zone_role"`
+	Status        string `json:"status"`
+	SourceVersion int    `json:"source_version"`
 }
 
-// RouteCandidate mirrors contracts.RouteRef.
-type RouteCandidate struct {
-	ID           string `json:"id"`
-	Jurisdiction string `json:"jurisdiction"`
-	Version      int    `json:"version"`
-	ToSafeZoneID string `json:"to_safe_zone_id"`
-	Verified     bool   `json:"verified"`
-	Closed       bool   `json:"closed"`
-	ValidNow     bool   `json:"valid_now"`
+// FacilityRef mirrors contracts.FacilityRef.
+type FacilityRef struct {
+	FacilityID    string `json:"facility_id"`
+	SafeZoneID    string `json:"safe_zone_id"`
+	Name          string `json:"name,omitempty"`
+	CapacityKnown bool   `json:"capacity_known"`
+	Free          int    `json:"free,omitempty"`
+	SourceVersion int    `json:"source_version"`
 }
 
-// EligibleDestination is a single ordered facility the model may
-// include in SHOW_CHOICES.
-type EligibleDestination struct {
-	FacilityID string `json:"facility_id"`
-	SafeZoneID string `json:"safe_zone_id"`
-	RouteID    string `json:"route_id"`
-	Order      int    `json:"order"`
+// RouteRef mirrors contracts.RouteRef.
+type RouteRef struct {
+	RouteID       string `json:"route_id"`
+	FromZoneID    string `json:"from_zone_id,omitempty"`
+	ToSafeZoneID  string `json:"to_safe_zone_id"`
+	Status        string `json:"status"`
+	Verified      bool   `json:"verified"`
+	SourceVersion int    `json:"source_version"`
+}
+
+// EligibleChoice mirrors contracts.EligibleChoice.
+type EligibleChoice struct {
+	Facility      FacilityRef `json:"facility"`
+	PermittedRank int         `json:"permitted_rank"`
 }
 
 // TranscriptInput is the ASR output (or direct transcript) the worker

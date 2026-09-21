@@ -155,6 +155,12 @@ func (o *Orchestrator) Process(ctx context.Context, req contracts.PipelineReques
 	}
 
 	// 5. STAGE: VALIDATOR (independent semantic check).
+	if err := o.validateProposal(middleResp.Proposal, scoped, string(id)); err != nil {
+		o.observeStageEnd(StageValidator, "REJECTED", o.cfg.Now())
+		return o.fail(id, scoped.DataVersion, pipelineError(contracts.PipelineModelUnavailable, 422, StageFailure{
+			Stage: StageValidator, Code: contracts.ErrValidation, Reason: "validator: " + err.Error(), Retryable: false,
+		}))
+	}
 	if err := o.cfg.Validator.Enforce(middleResp.Proposal, scoped); err != nil {
 		o.observeStageEnd(StageValidator, "REJECTED", o.cfg.Now())
 		return o.fail(id, scoped.DataVersion, pipelineError(contracts.PipelineModelUnavailable, 422, StageFailure{
@@ -720,6 +726,107 @@ func renderTemplate(tpl contracts.ApprovedTemplate, args []contracts.PipelineTem
 		out = strings.ReplaceAll(out, "{"+a.Key+"}", a.Value)
 	}
 	return out, nil
+}
+
+func (o *Orchestrator) validateProposal(out contracts.ModelOutput, sc contracts.ScopedContext, requestID string) error {
+	if out.SchemaVersion != contracts.ModelSchemaVersion {
+		return fmt.Errorf("schema_version must be %q, got %q", contracts.ModelSchemaVersion, out.SchemaVersion)
+	}
+	if out.RequestID != "" && requestID != "" && out.RequestID != requestID {
+		return fmt.Errorf("request_id %q does not match current request %q", out.RequestID, requestID)
+	}
+	if out.DataVersion == "" || (sc.DataVersion != "" && out.DataVersion != sc.DataVersion) {
+		return fmt.Errorf("data_version %q does not match current context snapshot %q", out.DataVersion, sc.DataVersion)
+	}
+
+	switch out.Status {
+	case contracts.StatusOK, contracts.StatusClarify, contracts.StatusUnsupported, contracts.StatusDataUnavailable, contracts.StatusError, "NEED_CLARIFICATION":
+		// valid status
+	default:
+		return fmt.Errorf("unknown status %q", out.Status)
+	}
+
+	if out.Status == contracts.StatusOK {
+		if out.Intent == nil {
+			return errors.New("OK status requires an intent")
+		}
+		if !contracts.IsValidIntent(*out.Intent) {
+			return fmt.Errorf("unknown intent %q", *out.Intent)
+		}
+	} else {
+		if out.Intent != nil {
+			return errors.New("non-OK status must have null intent")
+		}
+		if len(out.Actions) != 0 {
+			return errors.New("non-OK status must have no actions")
+		}
+	}
+
+	if out.Status == contracts.StatusClarify || out.Status == "NEED_CLARIFICATION" {
+		if len(out.ClarificationIDs) == 0 {
+			return errors.New("CLARIFY requires clarification_ids")
+		}
+	} else {
+		if len(out.ClarificationIDs) != 0 {
+			return errors.New("clarification_ids must be empty unless status is CLARIFY")
+		}
+	}
+
+	if len(out.ClarificationIDs) > contracts.MaxClarificationIDs {
+		return fmt.Errorf("clarification_ids exceeds max %d", contracts.MaxClarificationIDs)
+	}
+
+	if len(out.Actions) > contracts.MaxModelActions {
+		return fmt.Errorf("actions exceed max %d", contracts.MaxModelActions)
+	}
+
+	for i, a := range out.Actions {
+		if !contracts.IsValidActionType(a.Type) {
+			return fmt.Errorf("action %d: unknown action type %q", i, a.Type)
+		}
+		switch a.Type {
+		case contracts.ActionFocusFeature:
+			if a.TargetID == "" {
+				return fmt.Errorf("action %d: FOCUS_FEATURE missing target_id", i)
+			}
+		case contracts.ActionShowChoices:
+			if len(a.TargetIDs) == 0 || len(a.TargetIDs) > contracts.MaxShowChoices {
+				return fmt.Errorf("action %d: SHOW_CHOICES requires 1..%d target_ids", i, contracts.MaxShowChoices)
+			}
+		case contracts.ActionShowRoute:
+			if a.RouteID == "" {
+				return fmt.Errorf("action %d: SHOW_ROUTE missing route_id", i)
+			}
+		case contracts.ActionOpenPanel:
+			if !contracts.IsValidPanel(a.Panel) {
+				return fmt.Errorf("action %d: unknown panel %q", i, a.Panel)
+			}
+		case contracts.ActionZoom:
+			if a.Direction != "IN" && a.Direction != "OUT" {
+				return fmt.Errorf("action %d: ZOOM direction must be IN or OUT", i)
+			}
+			if a.Steps != 1 {
+				return fmt.Errorf("action %d: ZOOM steps must be exactly 1", i)
+			}
+		case contracts.ActionPan:
+			switch a.Direction {
+			case "NORTH", "SOUTH", "EAST", "WEST":
+			default:
+				return fmt.Errorf("action %d: PAN direction must be NORTH/SOUTH/EAST/WEST", i)
+			}
+			if a.Steps != 1 {
+				return fmt.Errorf("action %d: PAN steps must be exactly 1", i)
+			}
+		case contracts.ActionRecenter:
+			// no extra fields
+		case contracts.ActionSetLanguage:
+			if a.Language == "" {
+				return fmt.Errorf("action %d: SET_LANGUAGE requires language", i)
+			}
+		}
+	}
+
+	return nil
 }
 
 // Sanity: this file is big; a guard compile-time check that we use

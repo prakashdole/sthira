@@ -283,11 +283,14 @@ func TestVoiceProcess_NoTTSForSilentAction(t *testing.T) {
 		return contracts.MiddleWorkerResponse{
 			RequestID: req.RequestID,
 			Proposal: contracts.ModelOutput{
-				Status:    contracts.StatusOK,
-				Intent:    orchestrationtest.IntentPtr(contracts.IntentRecenter),
-				Language:  req.Transcript.Language,
-				Actions:   []contracts.Action{{Type: contracts.ActionRecenter}},
-				SpeechKey: nil,
+				SchemaVersion: contracts.ModelSchemaVersion,
+				RequestID:     req.RequestID,
+				DataVersion:   req.ScopedContext.DataVersion,
+				Status:        contracts.StatusOK,
+				Intent:        orchestrationtest.IntentPtr(contracts.IntentRecenter),
+				Language:      req.Transcript.Language,
+				Actions:       []contracts.Action{{Type: contracts.ActionRecenter}},
+				SpeechKey:     nil,
 			},
 		}, nil
 	})
