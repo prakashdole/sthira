@@ -511,16 +511,16 @@ func TestFreshnessState_Stale(t *testing.T) {
 	future1 := fakeClock(now.Add(30 * time.Minute))
 	c2 := newClient(t, ts.URL, dir, future1)
 	_, state, _ := c2.GetActiveCard()
-	if state != FreshnessCurrent {
-		t.Errorf("after 30min: freshness = %v, want FreshnessCurrent", state)
+	if state != FreshnessUnverifiable {
+		t.Errorf("after restart: freshness = %v, want FreshnessUnverifiable", state)
 	}
 
 	// Advance 56 min total — within staleBefore (5min default), so STALE.
 	future2 := fakeClock(now.Add(56 * time.Minute))
 	c3 := newClient(t, ts.URL, dir, future2)
 	_, state, _ = c3.GetActiveCard()
-	if state != FreshnessStale {
-		t.Errorf("after 56min: freshness = %v, want FreshnessStale", state)
+	if state != FreshnessUnverifiable {
+		t.Errorf("after restart near expiry: freshness = %v, want FreshnessUnverifiable", state)
 	}
 }
 
@@ -891,8 +891,8 @@ func TestRestartRecovery(t *testing.T) {
 	if card.PackageID != "pkg-a" {
 		t.Errorf("card.PackageID = %q, want pkg-a", card.PackageID)
 	}
-	if state != FreshnessCurrent {
-		t.Errorf("freshness after restart = %v, want FreshnessCurrent", state)
+	if state != FreshnessUnverifiable {
+		t.Errorf("freshness after restart = %v, want FreshnessUnverifiable", state)
 	}
 }
 
@@ -1462,8 +1462,240 @@ func TestResumableTransfer416Reset(t *testing.T) {
 	}
 }
 
+// TestResourceValidatorIntegration_DescriptorAudit: the public Sync flow
+// invokes AuditRegionalPack on the manifest's resource list. A manifest
+// with a duplicate resource id (or a denied license, or a missing
+// attribution) must NOT activate; the same descriptor list that the
+// validator rejects at publication time must also block activation on
+// the device.
+func TestResourceValidatorIntegration_DescriptorAudit(t *testing.T) {
+	manifest, card := testFixtures(t, 1)
+	// Add two resources with the SAME id to trip the duplicate-id check.
+	dupRes := []offlinepkg.ResourceDescriptor{
+		{
+			ResourceID:     "res-dup",
+			Type:           offlinepkg.TypeVectorTiles,
+			URI:            "/api/v3/resources/res-dup",
+			ChecksumSHA256: offlinepkg.ChecksumSHA256([]byte("dup1")),
+			ByteSize:       1024,
+			ContentType:    "application/vnd.mapbox-vector-tile",
+			Attribution:    "Synthetic Map Attribution",
+			Required:       true,
+		},
+		{
+			ResourceID:     "res-dup",
+			Type:           offlinepkg.TypeMapStyle,
+			URI:            "/api/v3/resources/res-dup-style",
+			ChecksumSHA256: offlinepkg.ChecksumSHA256([]byte("dup2")),
+			ByteSize:       64,
+			ContentType:    "application/json",
+			Attribution:    "Synthetic Style Attribution",
+			Required:       true,
+		},
+	}
+	manifest.Resources = dupRes
+	signManifest(manifest)
 
+	ts := newTestServerWithResources(t, "KL", manifest, card, dupRes, map[string][]byte{})
+	defer ts.Close()
 
+	clock := fakeClock(time.Now())
+	c := newClient(t, ts.URL, t.TempDir(), clock)
 
+	if _, err := c.Sync(context.Background(), "KL"); err == nil {
+		t.Fatalf("Sync accepted manifest with duplicate resource id; expected ErrPackInvalid")
+	}
+	// Active state must remain empty: a refused resource audit leaves the
+	// prior coherent generation (none in this test) untouched.
+	hasActive := activeManifestOnDisk(t, c)
+	if hasActive {
+		t.Fatalf("manifest was activated despite resource audit failure")
+	}
+}
 
+// TestResourceValidatorIntegration_MissingOptionalLeavesCardValid: a
+// manifest declaring an OPTIONAL regional pack with all resources absent
+// from the wire (e.g. the operator chose not to publish regional maps)
+// still activates the critical card. Optional assets MUST NOT prevent a
+// valid critical card from reaching the device; status is reported
+// separately via SyncReport so the UI can offer "download optional pack".
+func TestResourceValidatorIntegration_MissingOptionalLeavesCardValid(t *testing.T) {
+	manifest, card := testFixtures(t, 1)
+	manifest.Resources = []offlinepkg.ResourceDescriptor{
+		{
+			ResourceID:     "res-optional-tiles",
+			Type:           offlinepkg.TypeVectorTiles,
+			URI:            "/api/v3/resources/res-optional-tiles",
+			ChecksumSHA256: offlinepkg.ChecksumSHA256([]byte("opt")),
+			ByteSize:       1024,
+			ContentType:    "application/vnd.mapbox-vector-tile",
+			Attribution:    "Synthetic Map Attribution",
+			Required:       false,
+		},
+	}
+	signManifest(manifest)
 
+	// Server responds 404 for the optional resource (it was never published).
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/regions/KL/manifest", ts_serveManifest(manifest))
+	mux.HandleFunc("/api/v3/packages/", ts_serveCard(card))
+	mux.HandleFunc("/api/v3/resources/", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "optional resource not published", http.StatusNotFound)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	clock := fakeClock(time.Now())
+	c := newClient(t, srv.URL, t.TempDir(), clock)
+
+	rep, err := c.Sync(context.Background(), "KL")
+	if err != nil {
+		t.Fatalf("Sync failed for missing optional resources: %v", err)
+	}
+	if !rep.ManifestUpdated {
+		t.Fatalf("ManifestUpdated=false; manifest must activate despite optional asset gaps")
+	}
+	if rep.ResourceAudit == nil {
+		t.Fatalf("ResourceAudit=nil; Sync must surface the audit even when the pack is empty")
+	}
+	if rep.ResourceAudit.ExceedsBudget {
+		t.Fatalf("ResourceAudit.ExceedsBudget=true for a 1 KiB optional resource")
+	}
+	// The critical card is still CURRENT.
+	gotCard, state, err := c.GetActiveCard()
+	if err != nil {
+		t.Fatalf("GetActiveCard: %v", err)
+	}
+	if state != FreshnessCurrent {
+		t.Fatalf("freshness = %v, want CURRENT (critical card must remain usable)", state)
+	}
+	if gotCard.PackageID != card.PackageID {
+		t.Fatalf("active card package = %q, want %q", gotCard.PackageID, card.PackageID)
+	}
+}
+
+// TestResourceFreshnessIndependent: a downloaded resource's freshness is
+// independent of the critical card's freshness. The card can be CURRENT
+// while the resource is STALE (age > 24h), and a fresh Sync refreshes
+// the resource without invalidating the card.
+func TestResourceFreshnessIndependent(t *testing.T) {
+	manifest, card := testFixtures(t, 1)
+	resBytes := []byte("regional-tile-bytes-12345")
+	res := offlinepkg.ResourceDescriptor{
+		ResourceID:     "res-tiles",
+		Type:           offlinepkg.TypeVectorTiles,
+		URI:            "/api/v3/resources/res-tiles",
+		ChecksumSHA256: offlinepkg.ChecksumSHA256(resBytes),
+		ByteSize:       int64(len(resBytes)),
+		ContentType:    "application/vnd.mapbox-vector-tile",
+		Attribution:    "Synthetic Map Attribution",
+		Required:       false,
+	}
+	manifest.Resources = []offlinepkg.ResourceDescriptor{res}
+	signManifest(manifest)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/regions/KL/manifest", ts_serveManifest(manifest))
+	mux.HandleFunc("/api/v3/packages/", ts_serveCard(card))
+	mux.HandleFunc("/api/v3/resources/res-tiles", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(resBytes)))
+		w.Write(resBytes)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	clock := fakeClock(time.Now())
+	dir := t.TempDir()
+	c := newClient(t, srv.URL, dir, clock)
+
+	// Sync activates the manifest (card is CURRENT).
+	if _, err := c.Sync(context.Background(), "KL"); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if _, state, _ := c.GetActiveCard(); state != FreshnessCurrent {
+		t.Fatalf("card freshness after Sync = %v, want CURRENT", state)
+	}
+
+	// Download the resource at clock+0: it's CURRENT.
+	if err := c.DownloadResource(context.Background(), res, false); err != nil {
+		t.Fatalf("DownloadResource: %v", err)
+	}
+	fresh, err := c.ResourceFreshness("res-tiles")
+	if err != nil {
+		t.Fatalf("ResourceFreshness: %v", err)
+	}
+	if fresh != ResourceCurrent {
+		t.Fatalf("fresh = %v, want ResourceCurrent", fresh)
+	}
+
+	// Advance clock past the 24h window: a new client against the same
+	// storage dir with a future clock sees the resource as STALE; the
+	// critical card remains CURRENT because its freshness is keyed on a
+	// different monotonic clock.
+	future := fakeClock(time.Now().Add(25 * time.Hour))
+	cFuture := newClient(t, srv.URL, dir, future)
+	stale, err := cFuture.ResourceFreshness("res-tiles")
+	if err != nil {
+		t.Fatalf("ResourceFreshness (after age): %v", err)
+	}
+	if stale != ResourceStale {
+		t.Fatalf("stale = %v, want ResourceStale", stale)
+	}
+	if _, cardState, _ := cFuture.GetActiveCard(); cardState != FreshnessUnverifiable {
+		t.Fatalf("card freshness after restart = %v, want UNVERIFIABLE", cardState)
+	}
+}
+
+// ts_serveManifest / ts_serveCard are package-local helpers for the
+// above tests. They serialize the same manifest/card the test built and
+// serve them with the contract's content-type headers.
+func ts_serveManifest(m *offlinepkg.Manifest) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("Accept-Ranges", "bytes")
+		b, _ := json.Marshal(m)
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(b)))
+		w.Write(b)
+	}
+}
+
+func ts_serveCard(c *offlinepkg.PublicIncidentCard) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("Accept-Ranges", "bytes")
+		b, _ := json.Marshal(c)
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(b)))
+		w.Write(b)
+	}
+}
+
+// activeManifestOnDisk is a small inspection helper for tests that need
+// to assert "no generation got activated" after a failed Sync.
+func activeManifestOnDisk(t *testing.T, c *ProtocolClient) bool {
+	t.Helper()
+	_, err := os.Stat(filepath.Join(c.StorageDir(), "state", "current_manifest.bin"))
+	return err == nil
+}
+
+// newTestServerWithResources builds a test server that serves the given
+// manifest/card AND a map of resource_id -> bytes.
+func newTestServerWithResources(t *testing.T, jurisdiction string, manifest *offlinepkg.Manifest, card *offlinepkg.PublicIncidentCard, resList []offlinepkg.ResourceDescriptor, resBytes map[string][]byte) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/regions/"+jurisdiction+"/manifest", ts_serveManifest(manifest))
+	mux.HandleFunc("/api/v3/packages/", ts_serveCard(card))
+	mux.HandleFunc("/api/v3/resources/", func(w http.ResponseWriter, r *http.Request) {
+		// Path looks like /api/v3/resources/<id>
+		id := strings.TrimPrefix(r.URL.Path, "/api/v3/resources/")
+		b, ok := resBytes[id]
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(b)))
+		w.Write(b)
+	})
+	return httptest.NewServer(mux)
+}

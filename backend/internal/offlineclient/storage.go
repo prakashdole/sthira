@@ -15,8 +15,10 @@ import (
 
 // persistedState is the on-disk representation of state.json.
 type persistedState struct {
-	LastRevision        int   `json:"last_revision"`
-	LastSyncMonotonicNS int64 `json:"last_sync_monotonic_ns"`
+	LastRevision int `json:"last_revision"`
+	// LastSyncMonotonicNS is retained only to read pre-correction state files.
+	// A Unix timestamp is not monotonic and must never be used as elapsed time.
+	LastSyncMonotonicNS int64 `json:"last_sync_monotonic_ns,omitempty"`
 	LastFetchedAtUnixMS int64 `json:"last_fetched_at_unix_ms"`
 	MaxObservedUnixMS   int64 `json:"max_observed_unix_ms,omitempty"`
 	ExpiredAtUnixMS     int64 `json:"expired_at_unix_ms,omitempty"`

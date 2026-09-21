@@ -1,7 +1,7 @@
 # P5 Implementation Contract: Offline Package & Map-Delivery Protocol
 
 **Phase:** P5 — Offline package and map-delivery protocol  
-**Status:** REVIEWED CONTRACT (Common baseline for Agents 1–5)  
+**Status:** IN_PROGRESS — engineering acceptance reopened for corrections A–G
 **Date:** 2026-09-20  
 **Governing Baseline:** Sthira v2 (`plan/architecture.md`, `plan/trd.md`, `plan/parameters.md`, `plan/decisions.md`)  
 **Active Blockers Retained:** O01, O05, O06, O07, O14 (no invented government facts, licenses, or operational route approvals)  
@@ -814,7 +814,7 @@ func (w *ReplayWorker) DrainQueue(ctx context.Context) (*DrainReport, error)
 ### 8.1 Measured Resource Budgets
 All implementations must measure and assert strict resource budgets:
 1. **Critical Incident Card:** Compressed size (gzip, default compression) MUST be **$\le$ 64 KiB** ($65{,}536$ bytes).
-2. **Optional Regional Map Pack:** Cumulative uncompressed size for a declared district/hazard pack (vector tiles + style + sprites + glyphs) MUST be **$\le$ 50 MiB** ($52{,}428{,}800$ bytes).
+2. **Optional Regional Map Pack:** Cumulative uncompressed size for a declared district/hazard pack (vector tiles + style + sprites + glyphs) MUST be **$\le$ 50 MiB** ($52{,}428{,}800$ bytes). This is an illustrative protocol budget, not a measured Wayanad pack.
 3. **Emergency Audio Pack:** Compressed audio assets MUST be **$\le$ 512 KiB** per asset.
 
 ### 8.2 Network Simulation Profile
@@ -822,7 +822,7 @@ All offline download and resumption tests must be executed and verified under th
 - **Downlink bandwidth:** 400 kbit/s
 - **Uplink bandwidth:** 128 kbit/s
 - **Round-Trip Time (RTT):** 400 ms
-- **Packet Loss:** 2% random drop rate
+- **Request-drop simulation:** 2% deterministic RoundTripper error rate; this is not kernel-level packet loss. A zero-drop run does not prove interruption recovery.
 - **Complete Disconnect:** Simulating sudden network loss during active transfer.
 
 ### 8.3 Required Acceptance Test Matrix
@@ -855,4 +855,5 @@ All offline download and resumption tests must be executed and verified under th
 
 - **2026-09-20:** Initial P5 shared implementation contract created. Fixed interfaces, wire types, cryptography, and test matrix for Agents 1–5.
 - **2026-09-20 (freeze):** Status set to REVIEWED CONTRACT (common baseline for Agents 1–5) at CLEAN `91a743c`. No technical changes.
+- **2026-09-21:** Reopened as IN_PROGRESS after engineering review found reference-binding, freshness, activation, resume, publication, queue, and resource-integration gaps. The compact correction matrix and current evidence live in `plan/prompt.md`; P6 remains NOT_STARTED.
 - **2026-09-20 (amend):** Added §2.3 (stdlib-only + no shared mutable globals) and §6.5 (additive OpenAPI reconciliation) to make requirements 4, 7 and 8 explicit. No other edits.

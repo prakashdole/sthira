@@ -139,6 +139,7 @@ type streamResult struct {
 	ETag         string
 	PartPath     string
 	RangeSupport bool
+	ExpectedSize int64
 }
 
 // downloadStreaming downloads an artifact chunk-by-chunk directly into a .part file
@@ -154,7 +155,7 @@ func (c *ProtocolClient) downloadStreaming(ctx context.Context, u, partPath stri
 	if resume {
 		if b, err := os.ReadFile(partPath + ".meta"); err == nil {
 			if err := json.Unmarshal(b, &existingMeta); err == nil {
-				if fi, err := os.Stat(partPath); err == nil && fi.Size() == existingMeta.BytesWritten && existingMeta.BytesWritten > 0 {
+				if fi, err := os.Stat(partPath); err == nil && existingMeta.URL == u && fi.Size() == existingMeta.BytesWritten && existingMeta.BytesWritten > 0 {
 					hadPart = true
 				} else {
 					c.storage.clearPart(partPath)
@@ -185,7 +186,6 @@ func (c *ProtocolClient) downloadStreaming(ctx context.Context, u, partPath stri
 			return nil, err
 		}
 		if r.StatusCode == http.StatusRequestedRangeNotSatisfiable {
-			_, _ = io.Copy(io.Discard, r.Body)
 			r.Body.Close()
 			c.storage.clearPart(partPath)
 			return c.downloadStreaming(ctx, u, partPath, false, isCard, maxBytes)
@@ -193,7 +193,6 @@ func (c *ProtocolClient) downloadStreaming(ctx context.Context, u, partPath stri
 			cr := r.Header.Get("Content-Range")
 			start, _, total, perr := parseContentRange(cr)
 			if perr != nil || start != existingMeta.BytesWritten {
-				_, _ = io.Copy(io.Discard, r.Body)
 				r.Body.Close()
 				c.storage.clearPart(partPath)
 				return c.downloadStreaming(ctx, u, partPath, false, isCard, maxBytes)
@@ -201,13 +200,17 @@ func (c *ProtocolClient) downloadStreaming(ctx context.Context, u, partPath stri
 			if total > 0 {
 				existingMeta.ExpectedSize = total
 			}
+			if old, got := existingMeta.ExpectedETag, stripETagQuotes(r.Header.Get("ETag")); old != "" && got != "" && old != got {
+				r.Body.Close()
+				c.storage.clearPart(partPath)
+				return c.downloadStreaming(ctx, u, partPath, false, isCard, maxBytes)
+			}
 			resp = r
 			isResume = true
 		} else if r.StatusCode == http.StatusOK {
 			resp = r
 			isResume = false
 		} else {
-			_, _ = io.Copy(io.Discard, r.Body)
 			r.Body.Close()
 			return nil, fmt.Errorf("offlineclient: GET %s: status %d", u, r.StatusCode)
 		}
@@ -226,7 +229,6 @@ func (c *ProtocolClient) downloadStreaming(ctx context.Context, u, partPath stri
 			return nil, err
 		}
 		if r.StatusCode != http.StatusOK {
-			_, _ = io.Copy(io.Discard, r.Body)
 			r.Body.Close()
 			return nil, fmt.Errorf("offlineclient: GET %s: status %d", u, r.StatusCode)
 		}
@@ -316,6 +318,7 @@ func (c *ProtocolClient) downloadStreaming(ctx context.Context, u, partPath stri
 		ETag:         meta.ExpectedETag,
 		PartPath:     partPath,
 		RangeSupport: meta.RangeSupported,
+		ExpectedSize: meta.ExpectedSize,
 	}, nil
 }
 
@@ -328,7 +331,7 @@ func (c *ProtocolClient) downloadBytes(ctx context.Context, req manifestDownload
 		return nil, 0, "", err
 	}
 	partPath := c.partPathFor(req)
-	maxBytes := c.maxResourceBytes
+	maxBytes := int64(256 * 1024) // manifest ceiling; resources use downloadResource.
 	if req.IsCard {
 		maxBytes = 65536
 	}
@@ -337,8 +340,8 @@ func (c *ProtocolClient) downloadBytes(ctx context.Context, req manifestDownload
 		return nil, 0, "", err
 	}
 
-	if expected := expectedTotal(req, res.ETag, res.Bytes); expected > 0 && int64(len(res.Bytes)) != expected {
-		return nil, 0, "", fmt.Errorf("offlineclient: size mismatch: got %d expected %d", len(res.Bytes), expected)
+	if res.ExpectedSize > 0 && int64(len(res.Bytes)) != res.ExpectedSize {
+		return nil, 0, "", fmt.Errorf("offlineclient: size mismatch: got %d expected %d", len(res.Bytes), res.ExpectedSize)
 	}
 
 	return res.Bytes, res.BytesFromNet, res.PartPath, nil
@@ -360,18 +363,6 @@ func readAllBounded(r io.Reader, max int64) ([]byte, error) {
 		return nil, ErrTooLarge
 	}
 	return b, nil
-}
-
-// expectedTotal extracts the expected byte size from the per-artifact
-// metadata embedded in the request when available; otherwise 0 (caller
-// skips the size check).
-func expectedTotal(req manifestDownload, etag string, body []byte) int64 {
-	if req.IsCard && req.ExpectedCardDesc != nil && req.ExpectedCardDesc.UncompressedBytes > 0 {
-		if int64(len(body)) > req.ExpectedCardDesc.UncompressedBytes {
-			return req.ExpectedCardDesc.UncompressedBytes
-		}
-	}
-	return int64(len(body))
 }
 
 func stripETagQuotes(s string) string {
@@ -613,6 +604,9 @@ func (c *ProtocolClient) downloadResource(ctx context.Context, desc offlinepkg.R
 
 	if int64(len(res.Bytes)) > maxRes {
 		return ErrTooLarge
+	}
+	if desc.ByteSize > 0 && int64(len(res.Bytes)) != desc.ByteSize {
+		return fmt.Errorf("offlineclient: resource size mismatch: got %d expected %d", len(res.Bytes), desc.ByteSize)
 	}
 
 	if got := offlinepkg.ChecksumSHA256(res.Bytes); got != desc.ChecksumSHA256 {

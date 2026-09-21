@@ -148,6 +148,11 @@ func makeWayanadEmergencyCard(t *testing.T, version int) *offlinepkg.PublicIncid
 // makeWayanadManifest creates and signs a valid regional manifest covering the card and resources.
 func makeWayanadManifest(t *testing.T, card *offlinepkg.PublicIncidentCard, revision int, privKey ed25519.PrivateKey, keyID string, resources []offlinepkg.ResourceDescriptor) *offlinepkg.Manifest {
 	t.Helper()
+	cardSig, err := offlinepkg.SignCanonical(privKey, keyID, card)
+	if err != nil {
+		t.Fatalf("SignCanonical(card): %v", err)
+	}
+	card.Signature = cardSig
 	cardBytes, err := json.Marshal(card)
 	if err != nil {
 		t.Fatalf("marshal card: %v", err)
@@ -199,12 +204,6 @@ func makeWayanadManifest(t *testing.T, card *offlinepkg.PublicIncidentCard, revi
 		t.Fatalf("SignCanonical(manifest): %v", err)
 	}
 	m.Signature = sig
-
-	cardSig, err := offlinepkg.SignCanonical(privKey, keyID, card)
-	if err != nil {
-		t.Fatalf("SignCanonical(card): %v", err)
-	}
-	card.Signature = cardSig
 
 	return m
 }
@@ -610,8 +609,8 @@ func TestP5Flow2_InterruptedDownloadAndRangeResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("c2.GetActiveCard on restart: %v", err)
 	}
-	if freshness != offlineclient.FreshnessCurrent {
-		t.Errorf("freshness after restart = %v, want CURRENT", freshness)
+	if freshness != offlineclient.FreshnessUnverifiable {
+		t.Errorf("freshness after restart = %v, want UNVERIFIABLE", freshness)
 	}
 	if activeCard.PackageID != "PKG-KL-WAYANAD-01" {
 		t.Errorf("activeCard.PackageID = %s, want PKG-KL-WAYANAD-01", activeCard.PackageID)
@@ -1144,13 +1143,15 @@ func TestP5Verification_PublicPrivateSeparation(t *testing.T) {
 		PackageID: card.PackageID, Version: 1, RawJSON: cRaw, ChecksumSHA256: card.ChecksumSHA256,
 		SourceStatus: "CURRENT",
 	})
-	_ = st.PublishResource(ctx, &store.PublishedResource{
+	if err := st.PublishResource(ctx, &store.PublishedResource{
 		ResourceID:     "res-pub-sample",
 		ContentType:    "application/json",
-		ContentLength:  15,
-		ChecksumSHA256: strings.Repeat("a", 64),
+		ContentLength:  int64(len([]byte(`{"style":true}`))),
+		ChecksumSHA256: offlinepkg.ChecksumSHA256([]byte(`{"style":true}`)),
 		Content:        []byte(`{"style":true}`),
-	})
+	}); err != nil {
+		t.Fatalf("PublishResource: %v", err)
+	}
 
 	srv := httptest.NewServer(New(DefaultConfig("127.0.0.1:0"), WithStore(st)).Handler())
 	defer srv.Close()
@@ -1372,8 +1373,9 @@ func TestP5Verification_ClockRollbackDefense(t *testing.T) {
 }
 
 // TestP5Verification_ByteBudgets verifies measured sizes:
-// - Multi-zone Wayanad critical card gzip compressed bytes <= 64 KiB (65,536 bytes)
-// - Regional map pack target <= 50 MiB (52,428,800 bytes)
+//   - Multi-zone Wayanad critical card gzip compressed bytes <= 64 KiB (65,536 bytes)
+//   - Illustrative regional map descriptor budget <= 50 MiB (52,428,800 bytes);
+//     this synthetic fixture is not a measured Wayanad map pack.
 func TestP5Verification_ByteBudgets(t *testing.T) {
 	card := makeWayanadEmergencyCard(t, 1)
 	cardBytes, err := json.Marshal(card)
@@ -1470,7 +1472,7 @@ func TestP5Verification_ByteBudgets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AuditRegionalPack: %v", err)
 	}
-	t.Logf("Measured Regional Pack: Total = %d bytes (%.2f MiB), Budget = %d bytes (%.2f MiB), Exceeds = %v",
+	t.Logf("Illustrative regional descriptor budget: Total = %d bytes (%.2f MiB), Budget = %d bytes (%.2f MiB), Exceeds = %v",
 		audit.TotalBytes, float64(audit.TotalBytes)/(1024*1024),
 		audit.BudgetLimitBytes, float64(audit.BudgetLimitBytes)/(1024*1024),
 		audit.ExceedsBudget)
@@ -1567,7 +1569,9 @@ func TestP5Verification_ShieldCacheUpstreamBound(t *testing.T) {
 }
 
 // ThrottledTransport emulates the declared network profile:
-// 400 kbit/s down, 128 kbit/s up, 400 ms RTT, 2% packet loss rate.
+// 400 kbit/s down, 128 kbit/s up, 400 ms RTT, 2% request-drop simulation.
+// It does not emulate kernel-level packet loss; the real connection-drop test
+// above is the interruption-recovery evidence.
 type ThrottledTransport struct {
 	Base           http.RoundTripper
 	DownBps        int64         // 400 kbit/s = 50,000 bytes/sec

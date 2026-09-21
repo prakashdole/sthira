@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"sthira/backend/internal/offlinepkg"
+	"sthira/backend/internal/offlineresources"
 )
 
 // stateQuery returns the currently active card plus its freshness state.
@@ -56,7 +57,7 @@ func (c *ProtocolClient) stateQuery() (*offlinepkg.PublicIncidentCard, Freshness
 // elapsed time and absolute expiration boundaries. Wall-clock rollback
 // cannot extend validity or un-expire an expired card.
 func (c *ProtocolClient) computeFreshness(card *offlinepkg.PublicIncidentCard, st persistedState, now time.Time) (FreshnessState, error) {
-	if st.LastSyncMonotonicNS == 0 {
+	if st.LastFetchedAtUnixMS == 0 {
 		// First sync never completed; bytes on disk but no time anchor.
 		return FreshnessExpired, nil
 	}
@@ -92,11 +93,6 @@ func (c *ProtocolClient) computeFreshness(card *offlinepkg.PublicIncidentCard, s
 	if st.MaxObservedUnixMS > 0 && now.UnixMilli() < st.MaxObservedUnixMS {
 		return FreshnessExpired, ErrClockRolledBack
 	}
-	monoNow := now.UnixNano()
-	if monoNow < st.LastSyncMonotonicNS {
-		return FreshnessExpired, ErrClockRolledBack
-	}
-
 	// Remaining validity window bounded by acquisition time.
 	acqTime := time.UnixMilli(st.LastFetchedAtUnixMS)
 	if acqTime.IsZero() {
@@ -109,7 +105,13 @@ func (c *ProtocolClient) computeFreshness(card *offlinepkg.PublicIncidentCard, s
 		return FreshnessExpired, nil
 	}
 
-	elapsed := time.Duration(monoNow - st.LastSyncMonotonicNS)
+	// Monotonic components are process-local and cannot be serialized. A
+	// restarted client has no trustworthy elapsed-time anchor, so it reports
+	// UNVERIFIABLE rather than granting a fresh CURRENT window from wall time.
+	if c.lastSyncMono.IsZero() {
+		return FreshnessUnverifiable, nil
+	}
+	elapsed := time.Since(c.lastSyncMono)
 	if elapsed >= remainingAtAcq {
 		st.ExpiredAtUnixMS = now.UnixMilli()
 		_ = c.storage.saveState(st)
@@ -206,11 +208,44 @@ func (c *ProtocolClient) sync(ctx context.Context, jurisdiction string) (*SyncRe
 		return nil, offlinepkg.ErrVersionRollback
 	}
 
+	// Phase 1.5: validate the manifest's resource list against the
+	// descriptor/dependency/license rules the same way the public
+	// publication boundary does. Without this, the validator would only
+	// run inside tests; an ill-formed pack (duplicate id, denied
+	// license, over budget, missing attribution) could reach the device
+	// and stay there until someone manually re-ran AuditRegionalPack.
+	// The audit also surfaces license-pending and attribution-missing
+	// lists on SyncReport so a UI layer can present "regional pack
+	// needs review" copy without re-running the validator.
+	//
+	// Style-level cross-validation (ValidateMapStyle) is intentionally
+	// deferred to DownloadResource: the style bytes are not in the
+	// manifest and Sync does not have the download machinery to fetch
+	// arbitrary sub-resources. The descriptor audit alone already
+	// rejects duplicate IDs, conflicting URIs and denied licenses,
+	// which are the failure modes that break a real device.
+	report := &SyncReport{}
+	if len(manifestMeta.Resources) > 0 {
+		descList := make([]offlineresources.ResourceDescriptor, len(manifestMeta.Resources))
+		for i, r := range manifestMeta.Resources {
+			descList[i] = offlineresources.ResourceDescriptor{ResourceDescriptor: r}
+		}
+		audit, err := c.resourceValidator.AuditRegionalPack(descList)
+		if err != nil {
+			// AuditRegionalPack returns ErrPackInvalid on a hard
+			// failure (over budget, duplicate id, denied license,
+			// missing attribution on a required resource). Do NOT
+			// activate the manifest.
+			return nil, fmt.Errorf("offlineclient: resource audit: %w", err)
+		}
+		report.ResourceAudit = audit
+		report.ResourcesValidated = len(descList)
+	}
+
 	// Phase 2: apply revocations to tombstones BEFORE activation so a
 	// crash mid-activation does not leave tombstone state inconsistent
 	// with the active manifest.
 	tombs := c.storage.tombstones()
-	report := &SyncReport{}
 	for _, pkg := range manifestMeta.Revocations.RevokedPackages {
 		added, err := tombs.add("packages.json", pkg)
 		if err != nil {
@@ -301,12 +336,12 @@ func (c *ProtocolClient) sync(ctx context.Context, jurisdiction string) (*SyncRe
 	now := c.now()
 	newState := persistedState{
 		LastRevision:        manifestMeta.Revision,
-		LastSyncMonotonicNS: now.UnixNano(),
 		LastFetchedAtUnixMS: now.UnixMilli(),
 	}
 	if err := c.storage.saveState(newState); err != nil {
 		return nil, fmt.Errorf("offlineclient: persist state: %w", err)
 	}
+	c.lastSyncMono = time.Now()
 	return report, nil
 }
 
