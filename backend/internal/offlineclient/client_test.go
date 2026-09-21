@@ -933,6 +933,22 @@ func TestCardReferenceBindingMismatch(t *testing.T) {
 	}
 }
 
+// TestSync_StorageJurisdictionBound prevents revision counters and tombstones
+// from one jurisdiction being compared with another in the same directory.
+func TestSync_StorageJurisdictionBound(t *testing.T) {
+	ts := newTestServer(t, "KL")
+	defer ts.Server.Close()
+	ts.manifest, ts.card = testFixtures(t, 1)
+
+	c := newClient(t, ts.URL, t.TempDir(), fakeClock(time.Now()))
+	if _, err := c.Sync(context.Background(), "KL"); err != nil {
+		t.Fatalf("initial KL Sync: %v", err)
+	}
+	if _, err := c.Sync(context.Background(), "TN"); err == nil || !strings.Contains(err.Error(), "bound to jurisdiction") {
+		t.Fatalf("Sync(TN) error = %v, want storage jurisdiction binding failure", err)
+	}
+}
+
 // TestCardDeclaredSizeExceeded verifies that a card exceeding the manifest's
 // declared uncompressed byte size limit is rejected.
 func TestCardDeclaredSizeExceeded(t *testing.T) {

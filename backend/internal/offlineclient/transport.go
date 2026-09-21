@@ -44,14 +44,14 @@ func (c *ProtocolClient) downloadAndVerifyManifest(ctx context.Context, req mani
 	if err != nil {
 		return nil, nil, 0, "", err
 	}
-	var m offlinepkg.Manifest
-	if err := json.Unmarshal(bytes, &m); err != nil {
+	m, err := offlinepkg.ParseManifest(bytes, offlinepkg.Limits{MaxBytes: 256 * 1024, MaxDepth: 32})
+	if err != nil {
 		return nil, nil, 0, "", fmt.Errorf("offlineclient: parse manifest: %w", err)
 	}
-	if err := c.verifyManifest(&m, bytes); err != nil {
+	if err := c.verifyManifest(m, bytes); err != nil {
 		return nil, nil, 0, "", err
 	}
-	return bytes, &m, n, partPath, nil
+	return bytes, m, n, partPath, nil
 }
 
 func (c *ProtocolClient) downloadAndVerifyCard(ctx context.Context, req manifestDownload) ([]byte, *offlinepkg.PublicIncidentCard, int64, string, error) {
@@ -59,11 +59,11 @@ func (c *ProtocolClient) downloadAndVerifyCard(ctx context.Context, req manifest
 	if err != nil {
 		return nil, nil, 0, "", err
 	}
-	var card offlinepkg.PublicIncidentCard
-	if err := json.Unmarshal(bytes, &card); err != nil {
+	card, err := offlinepkg.ParseCard(bytes, offlinepkg.Limits{MaxBytes: 64 * 1024, MaxDepth: 32})
+	if err != nil {
 		return nil, nil, 0, "", fmt.Errorf("offlineclient: parse card: %w", err)
 	}
-	if err := c.verifyCard(&card, bytes); err != nil {
+	if err := c.verifyCard(card, bytes); err != nil {
 		return nil, nil, 0, "", err
 	}
 	if req.ExpectedCardDesc != nil {
@@ -87,7 +87,7 @@ func (c *ProtocolClient) downloadAndVerifyCard(ctx context.Context, req manifest
 			return nil, nil, 0, "", fmt.Errorf("offlineclient: card byte size %d exceeds 64 KiB ceiling", len(bytes))
 		}
 	}
-	return bytes, &card, n, partPath, nil
+	return bytes, card, n, partPath, nil
 }
 
 // parseContentRange parses "bytes <start>-<end>/<total>" or "bytes <start>-<end>/*".

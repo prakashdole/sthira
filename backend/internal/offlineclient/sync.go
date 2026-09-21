@@ -19,12 +19,25 @@ import (
 // stateQuery returns the currently active card plus its freshness state.
 // This is the read-only side of the client and is goroutine-safe.
 func (c *ProtocolClient) stateQuery() (*offlinepkg.PublicIncidentCard, FreshnessState, error) {
-	_, card, err := c.storage.readActiveCard()
+	cardBytes, card, err := c.storage.readActiveCard()
 	if err != nil {
 		if errors.Is(err, ErrNoActiveState) {
 			return nil, FreshnessUnverifiable, ErrNoActiveState
 		}
 		return nil, FreshnessUnverifiable, err
+	}
+	manifestBytes, manifest, err := c.storage.readActiveManifest()
+	if err != nil {
+		return nil, FreshnessUnverifiable, err
+	}
+	if err := c.verifyManifest(&manifest.Manifest, manifestBytes); err != nil {
+		return nil, FreshnessUnverifiable, err
+	}
+	if err := c.verifyCard(card, cardBytes); err != nil {
+		return nil, FreshnessUnverifiable, err
+	}
+	if card.PackageID != manifest.Manifest.CriticalCard.PackageID || card.Version != manifest.Manifest.CriticalCard.Version || card.Jurisdiction != manifest.Manifest.Jurisdiction || card.ChecksumSHA256 != manifest.Manifest.CriticalCard.ChecksumSHA256 {
+		return nil, FreshnessUnverifiable, errors.New("offlineclient: active card does not match active manifest reference")
 	}
 	st, err := c.storage.loadState()
 	if err != nil {
@@ -195,6 +208,9 @@ func (c *ProtocolClient) sync(ctx context.Context, jurisdiction string) (*SyncRe
 	if err != nil {
 		return nil, err
 	}
+	if stBefore.Jurisdiction != "" && stBefore.Jurisdiction != jurisdiction {
+		return nil, fmt.Errorf("offlineclient: storage is bound to jurisdiction %q", stBefore.Jurisdiction)
+	}
 
 	// Phase 1: download + verify manifest.
 	manifestBytes, manifestMeta, _, manifestPart, err := c.downloadAndVerifyArtifact(ctx, manifestDownload{
@@ -203,6 +219,9 @@ func (c *ProtocolClient) sync(ctx context.Context, jurisdiction string) (*SyncRe
 	})
 	if err != nil {
 		return nil, err
+	}
+	if manifestMeta.Jurisdiction != jurisdiction {
+		return nil, fmt.Errorf("offlineclient: manifest jurisdiction mismatch: got %q expected %q", manifestMeta.Jurisdiction, jurisdiction)
 	}
 	if manifestMeta.Revision < stBefore.LastRevision {
 		return nil, offlinepkg.ErrVersionRollback
@@ -336,6 +355,7 @@ func (c *ProtocolClient) sync(ctx context.Context, jurisdiction string) (*SyncRe
 	now := c.now()
 	newState := persistedState{
 		LastRevision:        manifestMeta.Revision,
+		Jurisdiction:        jurisdiction,
 		LastFetchedAtUnixMS: now.UnixMilli(),
 	}
 	if err := c.storage.saveState(newState); err != nil {
