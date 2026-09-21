@@ -107,6 +107,41 @@ func main() {
 		}
 		cancelHealth()
 
+		// Bounded refresh loop: re-probe each worker on a steady
+		// interval until shutdown, so a worker that recovers
+		// later can serve the next pipeline call. Each iteration
+		// shares the same SnapshotHealth bookkeeping (no parallel
+		// monitor or independent read of the worker URL).
+		refreshInterval := 10 * time.Second
+		if d := os.Getenv("STHIRA_WORKER_HEALTH_REFRESH"); d != "" {
+			if v, err := time.ParseDuration(d); err == nil && v > 0 {
+				refreshInterval = v
+			}
+		}
+		go func() {
+			ticker := time.NewTicker(refreshInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					rctx, rcancel := context.WithTimeout(ctx, 3*time.Second)
+					for _, stage := range []orchestration.Stage{orchestration.StageASR, orchestration.StageMiddle, orchestration.StageTTS} {
+						h, err := workers.SnapshotHealth(rctx, stage)
+						if err != nil {
+							logger.Debug("worker health refresh failed", "stage", stage, "error", err)
+							continue
+						}
+						if !h.Ready || !h.Warm {
+							logger.Warn("worker not ready during refresh", "stage", stage, "ready", h.Ready, "warm", h.Warm)
+						}
+					}
+					rcancel()
+				}
+			}
+		}()
+
 		resolver := store.NewScopedContextResolver(st)
 		validator := orchestration.NewProductionValidator()
 		templates := orchestration.DefaultTemplateRegistry()
