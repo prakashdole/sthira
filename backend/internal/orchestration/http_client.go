@@ -152,9 +152,19 @@ func (c *HTTPWorkerClient) postJSON(ctx context.Context, path string, in any, ou
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return fmt.Errorf("worker returned HTTP %d: %s", resp.StatusCode, string(body))
 	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+	// max+1 detection: read up to (maxBytes + 1) so an exactly-at-cap
+	// response passes, but a response that exceeds the cap by even
+	// one byte is detected BEFORE the truncated envelope is decoded.
+	limited := io.LimitReader(resp.Body, maxBytes+1)
+	raw, err := io.ReadAll(limited)
 	if err != nil {
 		return fmt.Errorf("read worker response: %w", err)
+	}
+	if int64(len(raw)) > maxBytes {
+		// Try to drain the rest so the connection can be reused,
+		// but the response is rejected regardless.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return fmt.Errorf("worker response exceeds %d bytes (oversize)", maxBytes)
 	}
 	if err := checkNoDuplicateKeys(raw); err != nil {
 		return fmt.Errorf("validate response JSON: %w", err)

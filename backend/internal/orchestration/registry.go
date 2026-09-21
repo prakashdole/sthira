@@ -82,106 +82,113 @@ func (r *MapTemplateRegistry) Keys() []string {
 	return keys
 }
 
-// DefaultTemplateRegistry returns a TemplateRegistry preloaded with approved templates
-// for the supported languages (en-IN, hi-IN, ml-IN).
+// DefaultTemplateRegistry returns a TemplateRegistry preloaded with
+// synthetic-only translations for the supported languages
+// (en-IN, hi-IN, ml-IN). Real approval must be loaded from recorded
+// evidence (e.g. offline translations loaded into a MapTemplateRegistry
+// at startup) — the built-in default MUST NOT silently serve as
+// operational approval. TemplateVersion/SourceVersion are intentionally
+// 0 here to flag "not approved"; the production wired registry must
+// override these with recorded source/version evidence before a
+// jurisdiction can return speech_key text.
 func DefaultTemplateRegistry() *MapTemplateRegistry {
 	r := NewMapTemplateRegistry()
 	templates := []contracts.ApprovedTemplate{
 		{
 			SpeechKey:       "destination_options",
 			Language:        "en-IN",
-			TemplateVersion: 1,
-			SourceVersion:   1,
+			TemplateVersion: 0,
+			SourceVersion:   0,
 			Text:            "Destination choices are displayed on screen.",
-			SyntheticOnly:   false,
+			SyntheticOnly:   true,
 		},
 		{
 			SpeechKey:       "destination_options",
 			Language:        "hi-IN",
-			TemplateVersion: 1,
-			SourceVersion:   1,
+			TemplateVersion: 0,
+			SourceVersion:   0,
 			Text:            "गंतव्य विकल्प स्क्रीन पर प्रदर्शित हैं।",
-			SyntheticOnly:   false,
+			SyntheticOnly:   true,
 		},
 		{
 			SpeechKey:       "destination_options",
 			Language:        "ml-IN",
-			TemplateVersion: 1,
-			SourceVersion:   1,
+			TemplateVersion: 0,
+			SourceVersion:   0,
 			Text:            "ലക്ഷ്യസ്ഥാന ഓപ്ഷനുകൾ സ്ക്രീനിൽ കാണിച്ചിരിക്കുന്നു.",
-			SyntheticOnly:   false,
+			SyntheticOnly:   true,
 		},
 		{
 			SpeechKey:       "clarify_place",
 			Language:        "en-IN",
-			TemplateVersion: 1,
-			SourceVersion:   1,
+			TemplateVersion: 0,
+			SourceVersion:   0,
 			Text:            "Please clarify the location.",
-			SyntheticOnly:   false,
+			SyntheticOnly:   true,
 		},
 		{
 			SpeechKey:       "clarify_place",
 			Language:        "hi-IN",
-			TemplateVersion: 1,
-			SourceVersion:   1,
+			TemplateVersion: 0,
+			SourceVersion:   0,
 			Text:            "कृपया स्थान स्पष्ट करें।",
-			SyntheticOnly:   false,
+			SyntheticOnly:   true,
 		},
 		{
 			SpeechKey:       "clarify_place",
 			Language:        "ml-IN",
-			TemplateVersion: 1,
-			SourceVersion:   1,
+			TemplateVersion: 0,
+			SourceVersion:   0,
 			Text:            "ദയവായി സ്ഥലം വ്യക്തമാക്കുക.",
-			SyntheticOnly:   false,
+			SyntheticOnly:   true,
 		},
 		{
 			SpeechKey:       "verified_route_unavailable",
 			Language:        "en-IN",
-			TemplateVersion: 1,
-			SourceVersion:   1,
+			TemplateVersion: 0,
+			SourceVersion:   0,
 			Text:            "Verified route is currently unavailable.",
-			SyntheticOnly:   false,
+			SyntheticOnly:   true,
 		},
 		{
 			SpeechKey:       "verified_route_unavailable",
 			Language:        "hi-IN",
-			TemplateVersion: 1,
-			SourceVersion:   1,
+			TemplateVersion: 0,
+			SourceVersion:   0,
 			Text:            "सत्यापित मार्ग वर्तमान में अनुपलब्ध है।",
-			SyntheticOnly:   false,
+			SyntheticOnly:   true,
 		},
 		{
 			SpeechKey:       "verified_route_unavailable",
 			Language:        "ml-IN",
-			TemplateVersion: 1,
-			SourceVersion:   1,
+			TemplateVersion: 0,
+			SourceVersion:   0,
 			Text:            "സ്ഥിരീകരിച്ച റൂട്ട് നിലവിൽ ലഭ്യമല്ല.",
-			SyntheticOnly:   false,
+			SyntheticOnly:   true,
 		},
 		{
 			SpeechKey:       "welcome",
 			Language:        "en-IN",
-			TemplateVersion: 1,
-			SourceVersion:   1,
+			TemplateVersion: 0,
+			SourceVersion:   0,
 			Text:            "Welcome to Sthira emergency guidance.",
-			SyntheticOnly:   false,
+			SyntheticOnly:   true,
 		},
 		{
 			SpeechKey:       "welcome",
 			Language:        "hi-IN",
-			TemplateVersion: 1,
-			SourceVersion:   1,
+			TemplateVersion: 0,
+			SourceVersion:   0,
 			Text:            "स्थिरा आपातकालीन मार्गदर्शन में आपका स्वागत है।",
-			SyntheticOnly:   false,
+			SyntheticOnly:   true,
 		},
 		{
 			SpeechKey:       "welcome",
 			Language:        "ml-IN",
-			TemplateVersion: 1,
-			SourceVersion:   1,
+			TemplateVersion: 0,
+			SourceVersion:   0,
 			Text:            "സ്ഥിര അടിയന്തര മാർഗ്ഗനിർദ്ദേശത്തിലേക്ക് സ്വാഗതം.",
-			SyntheticOnly:   false,
+			SyntheticOnly:   true,
 		},
 	}
 	for _, t := range templates {

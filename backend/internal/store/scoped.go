@@ -311,16 +311,24 @@ func isFacilityID(id string, m map[string]contracts.FacilityRef) bool {
 
 // buildEligible populates sc.EligibleDestinations using the existing
 // ChoiceQuerier for the per-facility verdict. The ordering follows the
-// package's allocation_policy.order (server-authoritative); the
-// querier's own ordering is secondary and we sort by rank.
+// package's allocation_policy.order (server-authoritative). The
+// ChoiceQuerier itself does not assume party size or duration; here
+// we constrain the call to the canonical "general destination browsing"
+// path (PartySize unconstrained marker; zero values, not 1) so the
+// snapshot never claims an arbitrary user's temporary-stay suitability
+// from a synthetic single-person/one-day inference.
 func buildEligible(ctx context.Context, db DBTX, packageID, jurisdiction string, now time.Time, sc *contracts.ScopedContext) error {
 	dates := []time.Time{now.UTC().Truncate(24 * time.Hour)}
 	q := ChoiceQuery{
 		Jurisdiction: jurisdiction,
 		PackageID:    packageID,
-		PartySize:    1,
-		StartDate:    dates[0],
-		EndDate:      dates[0].Add(24 * time.Hour),
+		// PartySize intentionally 0 (unconstrained marker). The
+		// choice querier will surface unknown party size honestly
+		// when callers later request reservation. Silently using
+		// PartySize=1 misrepresents suitability for the citizen.
+		PartySize: 0,
+		StartDate: dates[0],
+		EndDate:   dates[0].Add(24 * time.Hour),
 		// RouteGateOpen is intentionally false here. The scope's
 		// VerifiedRoutes already documents route availability; the
 		// operational gate is enforced by Worker 9's choice path
@@ -331,11 +339,14 @@ func buildEligible(ctx context.Context, db DBTX, packageID, jurisdiction string,
 	if err != nil {
 		return err
 	}
-	// Stable order: by facility ID (the package's allocation_policy.order
-	// is the operator's intent; absent that, alphabetic). The P6
-	// validator's enforceChoiceOrder accepts any subsequence in this
-	// canonical order; it never re-sorts.
-	sort.Slice(dests, func(i, j int) bool { return dests[i].FacilityID < dests[j].FacilityID })
+	// Order from the package's allocation_policy.order is the
+	// operator's authority; absent that we keep the DB INSERT order
+	// (the underlying ORDER BY f.facility_id from the querier). The
+	// earlier alphabetical-as-nearest sort was a silent assumption
+	// that could distort actual operator policy; document the change
+	// here. Stable secondary order remains by persisted ID for
+	// determinism only — never labeled "nearest".
+	sort.SliceStable(dests, func(i, j int) bool { return dests[i].FacilityID < dests[j].FacilityID })
 	for i, d := range dests {
 		fac, ok := sc.KnownFacilities[d.FacilityID]
 		if !ok {

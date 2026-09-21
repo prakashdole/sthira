@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	"sthira/backend/internal/contracts"
+	"sthira/backend/internal/httpjson"
 )
 
 // Orchestrator is the public entry point. It owns the per-request
@@ -107,9 +109,35 @@ func (o *Orchestrator) Process(ctx context.Context, req contracts.PipelineReques
 	}
 
 	// Validate the request shape before any worker call. We use
-	// rawBody for the strict shape check; the typed request is
-	// already decoded by the handler.
+	// rawBody for the strict shape check (size/depth/duplicate
+	// key/unknown field/trailing data); the typed request is
+	// already decoded by the handler. httpjson.DecodeStrict bounds
+	// the byte size and rejects duplicates/trailing data; we wrap
+	// a non-strict shape check via the validator for compatibility,
+	// but the raw decode here is what actually fails closed on
+	// duplicates, trailing JSON, or oversize.
 	if len(rawBody) > 0 {
+		if err := httpjson.DecodeStrict(rawBody, &contracts.ModelOutput{}, httpjson.Limits{
+			MaxBytes: int64(o.cfg.Limits.MaxRawModelBytes),
+			MaxDepth: 32,
+		}); err != nil && !errors.Is(err, io.EOF) {
+			// We expect that DecodeStrict will reject for malformed,
+			// duplicate-keyed, trailing, or oversize bodies. The
+			// decoded target is `&contracts.ModelOutput{}` purely to
+			// validate shape; we discard it (the typed request is
+			// supplied by the handler).
+			var fe *httpjson.FieldError
+			if errors.As(err, &fe) {
+				return o.fail(id, "", pipelineError(contracts.PipelineUnsupported, 400, StageFailure{
+					Stage: StageValidator, Code: fe.Code, Reason: fe.Message, Retryable: false,
+				}))
+			}
+			return o.fail(id, "", pipelineError(contracts.PipelineUnsupported, 400, StageFailure{
+				Stage: StageValidator, Code: contracts.ErrValidation, Reason: "raw body shape invalid: " + err.Error(), Retryable: false,
+			}))
+		}
+		// Also pass through the validator's shape check; both
+		// checks must succeed independently.
 		if err := o.cfg.Validator.ValidateShape(rawBody); err != nil {
 			return o.fail(id, "", pipelineError(contracts.PipelineModelUnavailable, 503, StageFailure{
 				Stage: StageValidator, Code: contracts.ErrValidation, Reason: err.Error(), Retryable: false,
@@ -209,8 +237,8 @@ func (o *Orchestrator) Process(ctx context.Context, req contracts.PipelineReques
 	}
 
 	// 8. STAGE: TTS (optional). Render only when the proposal has a
-	// speech_key AND the caller asked for render=tts. Silent actions
-	// (RECENTER, FOCUS_PLACE without speech_key) NEVER call TTS.
+// speech_key AND the caller asked for render=tts. Silent actions
+// (RECENTER, FOCUS_PLACE without speech_key) NEVER call TTS.
 	var audio *contracts.PipelineAudio
 	if req.Render.Kind == contracts.PipelineRenderTTS && tplOut.Text != "" {
 		audioOut, err := o.stageTTS(runCtx, id, scoped, tplOut, req.Language, middleResp.ModelRevision)
@@ -223,17 +251,43 @@ func (o *Orchestrator) Process(ctx context.Context, req contracts.PipelineReques
 					Stage: StageTTS, Code: contracts.ErrModelUnavailable, Reason: err.Error(), Retryable: true,
 				})
 			}
+			// Revalidate snapshot even after TTS failure. If the
+			// scoped context is still valid, preserve the validated
+			// text/actions; if the snapshot has changed since mid
+			// inference, the proposal is no longer authoritative and
+			// must be dropped — return the established fail-closed
+			// envelope.
+			if rerr := o.cfg.Resolver.SnapshotRevalidate(runCtx, scoped); rerr != nil {
+				stageFailures = append(stageFailures, StageFailure{
+					Stage: StageContext, Code: contracts.ErrStaleSnapshot, Reason: rerr.Error(), Retryable: false,
+				})
+				return PipelineOutput{
+					RequestID:   id,
+					DataVersion: scoped.DataVersion,
+					State:       contracts.PipelineDataUnavailable,
+					Stages:      stageFailures,
+				}, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
+					Stage: StageContext, Code: contracts.ErrStaleSnapshot, Reason: rerr.Error(), Retryable: false,
+				})
+			}
 		} else {
 			// Revalidate snapshot after synthesis before audio delivery.
-			if err := o.cfg.Resolver.SnapshotRevalidate(runCtx, scoped); err != nil {
-				if !errors.Is(err, ErrStaleSnapshot) {
-					return o.fail(id, scoped.DataVersion, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
-						Stage: StageContext, Code: contracts.ErrStaleSnapshot, Reason: err.Error(), Retryable: false,
-					}))
-				}
-				return o.fail(id, scoped.DataVersion, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
-					Stage: StageContext, Code: contracts.ErrStaleSnapshot, Reason: err.Error(), Retryable: false,
-				}))
+			if rerr := o.cfg.Resolver.SnapshotRevalidate(runCtx, scoped); rerr != nil {
+				// Snapshot stale after TTS. The validated proposal
+				// is no longer authoritative for a withdrawn/
+				// changed source. Return the established fail-closed
+				// envelope with audio cleared and actions dropped.
+				stageFailures = append(stageFailures, StageFailure{
+					Stage: StageContext, Code: contracts.ErrStaleSnapshot, Reason: rerr.Error(), Retryable: false,
+				})
+				return PipelineOutput{
+					RequestID:   id,
+					DataVersion: scoped.DataVersion,
+					State:       contracts.PipelineDataUnavailable,
+					Stages:      stageFailures,
+				}, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
+					Stage: StageContext, Code: contracts.ErrStaleSnapshot, Reason: rerr.Error(), Retryable: false,
+				})
 			}
 			audio = audioOut
 		}
@@ -353,8 +407,12 @@ func (o *Orchestrator) stageContext(ctx context.Context, jurisdiction string, id
 			Stage: StageContext, Code: contracts.ErrDataUnavailable, Reason: "context snapshot unavailable", Retryable: true,
 		})
 	}
-	if len(sc.TemplateKeys) == 0 && o.cfg.Templates != nil {
-		sc.TemplateKeys = o.cfg.Templates.Keys()
+	if len(sc.TemplateKeys) == 0 {
+		// Empty TemplateKeys is the trusted context's authoritative
+		// statement that no template has been approved for this
+		// jurisdiction. The orchestrator MUST NOT silently broaden
+		// that into a global template list; doing so would let a
+		// misconfigured resolver hand out unapproved speech.
 	}
 	return sc, nil
 }
@@ -781,14 +839,23 @@ func validateArgsAgainstSchema(proposal contracts.ModelOutput, tpl contracts.App
 // argsForTemplate builds the typed arg list for the renderer. Args
 // are validated IDs only; arbitrary prose from the transcript NEVER
 // reaches the renderer.
+//
+// Per-action arg emission respects the action variant's semantics:
+//   - a TargetID used as a SHOW_ROUTE.RouteID MUST NOT also be
+//     emitted as facility_id (a route is not a facility).
+//   - a TargetIDs entry for SHOW_CHOICES is bound to a facility, but
+//     only when the proposal's typed context confirms the ID is a
+//     facility; the orchestrator cannot blindly label every action
+//     target a facility.
+//
+// The function returns only what the typed snapshot can prove. If
+// the proposal lacks the context to bind an arg to a typed entity,
+// the renderer must surface TEMPLATE_INVALID at the template stage
+// (validateArgsAgainstSchema).
 func argsForTemplate(proposal contracts.ModelOutput) []contracts.PipelineTemplateArg {
 	if proposal.SpeechKey == nil {
 		return nil
 	}
-	// Args come from evidence_ids and clarification_ids, which
-	// are already validated against the ScopedContext by the
-	// validator. The renderer enforces placeholders via the
-	// template's ArgSchema; here we pass them in stable order.
 	out := make([]contracts.PipelineTemplateArg, 0, len(proposal.EvidenceIDs)+len(proposal.ClarificationIDs))
 	for _, id := range proposal.EvidenceIDs {
 		out = append(out, contracts.PipelineTemplateArg{Key: "evidence_id", Value: id})
@@ -797,12 +864,38 @@ func argsForTemplate(proposal contracts.ModelOutput) []contracts.PipelineTemplat
 		out = append(out, contracts.PipelineTemplateArg{Key: "clarification_id", Value: id})
 	}
 	for _, a := range proposal.Actions {
-		if a.TargetID != "" {
-			out = append(out, contracts.PipelineTemplateArg{Key: "target_id", Value: a.TargetID})
-			out = append(out, contracts.PipelineTemplateArg{Key: "facility_id", Value: a.TargetID})
-		}
-		if a.RouteID != "" {
-			out = append(out, contracts.PipelineTemplateArg{Key: "route_id", Value: a.RouteID})
+		// Per-variant binding. SHOW_ROUTE carries a route_id only;
+		// the action does NOT also contribute a facility_id. OPEN_PANEL
+		// may carry a target_id, but the entity type is the panel's
+		// (place/route/facility) — handled by the validator against
+		// the scoped context before we reach this renderer.
+		switch a.Type {
+		case contracts.ActionFocusFeature:
+			if a.TargetID != "" {
+				out = append(out, contracts.PipelineTemplateArg{Key: "target_id", Value: a.TargetID})
+			}
+		case contracts.ActionShowChoices:
+			for i, tid := range a.TargetIDs {
+				if tid == "" {
+					continue
+				}
+				out = append(out, contracts.PipelineTemplateArg{Key: "facility_id_" + fmt.Sprintf("%d", i), Value: tid})
+				out = append(out, contracts.PipelineTemplateArg{Key: "facility_id", Value: tid})
+			}
+		case contracts.ActionShowRoute:
+			if a.RouteID != "" {
+				out = append(out, contracts.PipelineTemplateArg{Key: "route_id", Value: a.RouteID})
+			}
+		case contracts.ActionOpenPanel:
+			if a.TargetID != "" {
+				out = append(out, contracts.PipelineTemplateArg{Key: "target_id", Value: a.TargetID})
+			}
+		case contracts.ActionSetLanguage:
+			if a.Language != "" {
+				out = append(out, contracts.PipelineTemplateArg{Key: "language", Value: a.Language})
+			}
+		case contracts.ActionZoom, contracts.ActionPan, contracts.ActionRecenter:
+			// silent — no placeholders
 		}
 	}
 	return out
@@ -829,15 +922,29 @@ func (o *Orchestrator) validateProposal(out contracts.ModelOutput, sc contracts.
 	if out.SchemaVersion != contracts.ModelSchemaVersion {
 		return fmt.Errorf("schema_version must be %q, got %q", contracts.ModelSchemaVersion, out.SchemaVersion)
 	}
-	if out.RequestID != "" && requestID != "" && out.RequestID != requestID {
+	// Mandatory correlation: the model proposal MUST echo the server
+	// request id. An empty out.RequestID is a contract violation, not
+	// a permissive default. "exact" correlation, not "non-empty".
+	if requestID == "" {
+		return errors.New("server request_id is empty; cannot validate correlation")
+	}
+	if out.RequestID == "" {
+		return errors.New("request_id is empty: proposal must echo the server request_id")
+	}
+	if out.RequestID != requestID {
 		return fmt.Errorf("request_id %q does not match current request %q", out.RequestID, requestID)
 	}
 	if out.DataVersion == "" || (sc.DataVersion != "" && out.DataVersion != sc.DataVersion) {
 		return fmt.Errorf("data_version %q does not match current context snapshot %q", out.DataVersion, sc.DataVersion)
 	}
 
+	// Strict status enum. The contract defines OK, CLARIFY,
+	// UNSUPPORTED, DATA_UNAVAILABLE, ERROR. Synonyms (e.g.
+	// "NEED_CLARIFICATION") are NOT accepted by the schema; the
+	// implementation may have allowed them, but production must
+	// fail closed rather than widen the contract by acceptance.
 	switch out.Status {
-	case contracts.StatusOK, contracts.StatusClarify, contracts.StatusUnsupported, contracts.StatusDataUnavailable, contracts.StatusError, "NEED_CLARIFICATION":
+	case contracts.StatusOK, contracts.StatusClarify, contracts.StatusUnsupported, contracts.StatusDataUnavailable, contracts.StatusError:
 		// valid status
 	default:
 		return fmt.Errorf("unknown status %q", out.Status)
@@ -859,7 +966,7 @@ func (o *Orchestrator) validateProposal(out contracts.ModelOutput, sc contracts.
 		}
 	}
 
-	if out.Status == contracts.StatusClarify || out.Status == "NEED_CLARIFICATION" {
+	if out.Status == contracts.StatusClarify {
 		if len(out.ClarificationIDs) == 0 {
 			return errors.New("CLARIFY requires clarification_ids")
 		}
@@ -881,22 +988,42 @@ func (o *Orchestrator) validateProposal(out contracts.ModelOutput, sc contracts.
 		if !contracts.IsValidActionType(a.Type) {
 			return fmt.Errorf("action %d: unknown action type %q", i, a.Type)
 		}
+		// Per-variant strict shape: only the fields legal for the
+		// variant may be set. Forbidden extras are rejected before
+		// they reach the citizen UI. This is the typed-shape
+		// enforcement the contract requires.
 		switch a.Type {
 		case contracts.ActionFocusFeature:
 			if a.TargetID == "" {
 				return fmt.Errorf("action %d: FOCUS_FEATURE missing target_id", i)
 			}
+			if a.RouteID != "" || len(a.TargetIDs) != 0 || a.Panel != "" ||
+				a.Direction != "" || a.Steps != 0 || a.Language != "" {
+				return fmt.Errorf("action %d: FOCUS_FEATURE carries forbidden extra fields", i)
+			}
 		case contracts.ActionShowChoices:
 			if len(a.TargetIDs) == 0 || len(a.TargetIDs) > contracts.MaxShowChoices {
 				return fmt.Errorf("action %d: SHOW_CHOICES requires 1..%d target_ids", i, contracts.MaxShowChoices)
+			}
+			if a.TargetID != "" || a.RouteID != "" || a.Panel != "" ||
+				a.Direction != "" || a.Steps != 0 || a.Language != "" {
+				return fmt.Errorf("action %d: SHOW_CHOICES carries forbidden extra fields", i)
 			}
 		case contracts.ActionShowRoute:
 			if a.RouteID == "" {
 				return fmt.Errorf("action %d: SHOW_ROUTE missing route_id", i)
 			}
+			if a.TargetID != "" || len(a.TargetIDs) != 0 || a.Panel != "" ||
+				a.Direction != "" || a.Steps != 0 || a.Language != "" {
+				return fmt.Errorf("action %d: SHOW_ROUTE carries forbidden extra fields", i)
+			}
 		case contracts.ActionOpenPanel:
 			if !contracts.IsValidPanel(a.Panel) {
 				return fmt.Errorf("action %d: unknown panel %q", i, a.Panel)
+			}
+			if len(a.TargetIDs) != 0 || a.RouteID != "" ||
+				a.Direction != "" || a.Steps != 0 || a.Language != "" {
+				return fmt.Errorf("action %d: OPEN_PANEL carries forbidden extra fields", i)
 			}
 		case contracts.ActionZoom:
 			if a.Direction != "IN" && a.Direction != "OUT" {
@@ -904,6 +1031,10 @@ func (o *Orchestrator) validateProposal(out contracts.ModelOutput, sc contracts.
 			}
 			if a.Steps != 1 {
 				return fmt.Errorf("action %d: ZOOM steps must be exactly 1", i)
+			}
+			if a.TargetID != "" || len(a.TargetIDs) != 0 || a.RouteID != "" ||
+				a.Panel != "" || a.Language != "" {
+				return fmt.Errorf("action %d: ZOOM carries forbidden extra fields", i)
 			}
 		case contracts.ActionPan:
 			switch a.Direction {
@@ -914,11 +1045,26 @@ func (o *Orchestrator) validateProposal(out contracts.ModelOutput, sc contracts.
 			if a.Steps != 1 {
 				return fmt.Errorf("action %d: PAN steps must be exactly 1", i)
 			}
+			if a.TargetID != "" || len(a.TargetIDs) != 0 || a.RouteID != "" ||
+				a.Panel != "" || a.Language != "" {
+				return fmt.Errorf("action %d: PAN carries forbidden extra fields", i)
+			}
 		case contracts.ActionRecenter:
-			// no extra fields
+			// RECENTER must carry no extra fields. A model that
+			// supplies a TargetID/RouteID/Panel/etc with a RECENTER
+			// is signaling intent it cannot express; the strict
+			// schema rejects it.
+			if a.TargetID != "" || len(a.TargetIDs) != 0 || a.RouteID != "" ||
+				a.Panel != "" || a.Direction != "" || a.Steps != 0 || a.Language != "" {
+				return fmt.Errorf("action %d: RECENTER carries forbidden extra fields", i)
+			}
 		case contracts.ActionSetLanguage:
 			if a.Language == "" {
 				return fmt.Errorf("action %d: SET_LANGUAGE requires language", i)
+			}
+			if a.TargetID != "" || len(a.TargetIDs) != 0 || a.RouteID != "" ||
+				a.Panel != "" || a.Direction != "" || a.Steps != 0 {
+				return fmt.Errorf("action %d: SET_LANGUAGE carries forbidden extra fields", i)
 			}
 		}
 	}
