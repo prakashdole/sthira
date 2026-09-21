@@ -75,27 +75,49 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Wait for everything to bind.
-sleep 0.5
-for p in $ASR_PORT $MID_PORT $TTS_PORT $FIX_PORT; do
-  for i in 1 2 3 4 5 6 7 8 9 10; do
-    if curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${p}/health" 2>/dev/null | grep -qE '^(200|404)$'; then
-      break
+# Wait for everything to bind and check process liveness.
+wait_for_service() {
+  local name="$1"
+  local pid="$2"
+  local url="$3"
+  for i in $(seq 1 20); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "ERROR: $name (pid $pid) died during startup" >&2
+      return 1
+    fi
+    local code
+    code=$(curl -s -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || true)
+    if [ "$code" = "200" ]; then
+      return 0
     fi
     sleep 0.2
   done
-done
+  echo "ERROR: $name (pid $pid) failed readiness check at $url" >&2
+  return 1
+}
 
-# Run the k6 scenario. Capture summary JSON.
+wait_for_service "asr" "$ASR_PID" "http://127.0.0.1:${ASR_PORT}/health"
+wait_for_service "middle" "$MID_PID" "http://127.0.0.1:${MID_PORT}/health"
+wait_for_service "tts" "$TTS_PID" "http://127.0.0.1:${TTS_PORT}/health"
+wait_for_service "loadtestd" "$FIX_PID" "http://127.0.0.1:${FIX_PORT}/health/ready"
+
+# Run the k6 scenario. Summary JSON is default; raw time-series metrics require explicit opt-in.
+K6_EXTRA_ARGS=()
+if [ "${STHIRA_LOAD_RAW_METRICS:-0}" = "1" ]; then
+  K6_EXTRA_ARGS=(--out "json=$REPORT_DIR/raw_metrics.json")
+fi
+
+set +e
 BASE_URL="http://127.0.0.1:${FIX_PORT}" \
 ASR_BASE_URL="http://127.0.0.1:${ASR_PORT}" \
 MID_BASE_URL="http://127.0.0.1:${MID_PORT}" \
 TTS_BASE_URL="http://127.0.0.1:${TTS_PORT}" \
   k6 run --summary-export "$REPORT_DIR/summary.json" \
-         --out json="$REPORT_DIR/metrics.json" \
+         ${K6_EXTRA_ARGS+"${K6_EXTRA_ARGS[@]}"} \
          "$ROOT/${K6FILE}" \
-    2>"$REPORT_DIR/k6.stderr.log" \
-    || true
+    2>"$REPORT_DIR/k6.stderr.log"
+K6_STATUS=$?
+set -e
 
 # Snapshot the fixture's internal counters.
 curl -fsS "http://127.0.0.1:${FIX_PORT}/metrics" >"$REPORT_DIR/loadtestd-stats.json" 2>/dev/null || true
@@ -110,3 +132,8 @@ done
 
 echo "  -> $REPORT_DIR/summary.json"
 echo "  -> $REPORT_DIR/loadtestd-stats.json"
+
+if [ $K6_STATUS -ne 0 ]; then
+  echo "ERROR: k6 run failed with exit status $K6_STATUS" >&2
+  exit $K6_STATUS
+fi

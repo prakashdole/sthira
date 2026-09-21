@@ -64,4 +64,8 @@ data/cache/
 .reticle/
 .pytest_cache/
 output/
+loadmodel/bin/
+loadmodel/reports/*/metrics.json
+loadmodel/reports/*/raw_metrics*.json
+loadmodel/reports/*/*.raw.json
 claude.txt
