@@ -8,6 +8,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // bytesReadSeekCloser wraps a bytes.Reader with a no-op Close.
@@ -45,6 +46,12 @@ type mockPublicationSource struct {
 
 	manifestErr error
 	cardErr     error
+
+	// delayGetManifest / delayGetCard simulate slow upstream fetches so
+	// cancellation tests can race against the leader. Only honored once
+	// (so tests that cancel waiters and then poll again don't re-delay).
+	delayGetManifest time.Duration
+	delayGetCard     time.Duration
 }
 
 func newMockPublicationSource() *mockPublicationSource {
@@ -221,6 +228,14 @@ func (m *mockPublicationSource) setResource(resourceID string, data []byte, mime
 
 func (m *mockPublicationSource) GetManifest(ctx context.Context, jurisdiction string) (*ManifestRecord, error) {
 	m.manifestCalls.Add(1)
+	delay := m.delayGetManifest
+	if delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.manifestErr != nil {
@@ -235,6 +250,14 @@ func (m *mockPublicationSource) GetManifest(ctx context.Context, jurisdiction st
 
 func (m *mockPublicationSource) GetCard(ctx context.Context, packageID string, version int) (*CardRecord, error) {
 	m.cardCalls.Add(1)
+	delay := m.delayGetCard
+	if delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.cardErr != nil {

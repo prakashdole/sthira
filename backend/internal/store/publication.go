@@ -18,6 +18,7 @@ type PublishedManifest struct {
 	Jurisdiction   string
 	Revision       int
 	PackageID      string
+	SourceID       string // trusted publish path: binds record to its source
 	RawJSON        []byte
 	ChecksumSHA256 string
 	SourceStatus   string
@@ -29,6 +30,8 @@ type PublishedManifest struct {
 type PublishedCard struct {
 	PackageID      string
 	Version        int
+	Jurisdiction   string // populated by trusted publish; lower-level callers may leave blank
+	SourceID       string // trusted publish path: binds record to its source
 	RawJSON        []byte
 	ChecksumSHA256 string
 	SourceStatus   string

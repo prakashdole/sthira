@@ -8,7 +8,7 @@ import (
 
 func TestMemoryCache_Invalidation(t *testing.T) {
 	now := time.Now()
-	mc := NewMemoryCache(func() time.Time { return now })
+	mc := NewMemoryCache(func() time.Time { return now }, 0, 0) // unbounded for this test
 
 	// Manifest caching & invalidation
 	mRec := &ManifestRecord{
