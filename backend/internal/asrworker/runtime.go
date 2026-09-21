@@ -1,13 +1,9 @@
 package asrworker
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -234,115 +230,16 @@ func DefaultSubprocessRuntimeConfig() SubprocessRuntimeConfig {
 }
 
 // SubprocessRuntime is the seam where a real Python adapter
-// attaches. The current implementation is a STRUCTURAL stub that
-// refuses every call: we deliberately do NOT spawn a subprocess
-// until both (a) authorized model artifacts exist and (b) the
-// subprocess harness has been audited end-to-end with real
-// recordings. The worker reports Ready=false while this is the
-// active runtime. The orchestrator sees /health=UNAVAILABLE and
-// returns a typed UNAVAILABLE to the client.
+// attaches. See runtime_adapter.go for the LoadModel / Transcribe
+// implementation that uses the shared ipcDispatcher.
 //
-// When the real artifact is available (post O-* approval), the
-// only changes needed are:
-//   - implement Transcribe by exec-ing the Python adapter with
-//     bounded stdin/stdout, a kill-after-deadline timer, and a
-//     strict success envelope.
-//   - record the loaded artifact digest (via a one-shot hash on the
-//     model_onnx.py directory).
-//   - keep SupportedLanguages bound to the Python adapter's
-//     language map, NEVER to the artifact name.
-//
-// Until then this type is the truthful "blocked real-inference"
-// check; the worker will not silently fall back to a canned
-// transcript.
-type SubprocessRuntime struct {
-	cfg        SubprocessRuntimeConfig
-	closed     bool
-	mu         sync.Mutex
-	revision   string
-	digest     string
-	digestName string
-	languages  []string
-	// Subprocess state — nil until LoadModel succeeds.
-	proc    *exec.Cmd
-	stdin   io.WriteCloser
-	scanner *bufio.Scanner
-}
+// The struct fields live in runtime_adapter.go so the IPC layer
+// and the worker-facing API share the same definition.
 
-// NewSubprocessRuntime returns the structural stub. Constructing it
-// does NOT spawn anything; the subprocess spawns on LoadModel().
-// Until then, Transcribe returns ErrRuntimeUnavailable so the worker
-// surfaces UNAVAILABLE to the caller without ever invoking real
-// inference.
-func NewSubprocessRuntime(cfg SubprocessRuntimeConfig) *SubprocessRuntime {
-	return &SubprocessRuntime{
-		cfg:      cfg,
-		revision: "",
-		digest:   "",
-	}
-}
+// NewSubprocessRuntime is implemented in runtime_adapter.go.
 
-// Transcribe implements Runtime. Dispatches to the loaded Python
-// adapter when available; returns ErrRuntimeUnavailable otherwise.
-func (s *SubprocessRuntime) Transcribe(ctx context.Context, req TranscribeRequest) (TranscribeResult, error) {
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return TranscribeResult{}, ErrRuntimeClosed
-	}
-	loaded := s.proc != nil
-	s.mu.Unlock()
-
-	if loaded {
-		return s.transcribeViaAdapter(ctx, req)
-	}
-	return TranscribeResult{}, fmt.Errorf("%w: subprocess runtime not loaded; call LoadModel first", ErrRuntimeUnavailable)
-}
-
-// SupportedLanguages implements Runtime. Returns the languages
-// reported by the Python adapter after LoadModel, or nil if not
-// loaded.
-func (s *SubprocessRuntime) SupportedLanguages() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]string(nil), s.languages...)
-}
-
-// Revision implements Runtime. Empty until LoadModel populates it.
-func (s *SubprocessRuntime) Revision() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.revision
-}
-
-// Digest implements Runtime. Empty until LoadModel populates it.
-func (s *SubprocessRuntime) Digest() (string, string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.digestName, s.digest
-}
-
-// Close implements Runtime. Sends shutdown to the subprocess if
-// loaded, then kills the process.
-func (s *SubprocessRuntime) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.closed = true
-	if s.stdin != nil {
-		// Best-effort shutdown command.
-		shutReq, _ := json.Marshal(adapterRequest{Op: "shutdown"})
-		shutReq = append(shutReq, '\n')
-		_, _ = s.stdin.Write(shutReq)
-		_ = s.stdin.Close()
-		s.stdin = nil
-	}
-	if s.proc != nil && s.proc.Process != nil {
-		_ = s.proc.Process.Kill()
-		_ = s.proc.Wait()
-		s.proc = nil
-	}
-	return nil
-}
+// Transcribe delegates to runtime_adapter.go which owns the IPC
+// dispatcher; see (*SubprocessRuntime).Transcribe there.
 
 // FormatLanguages produces the stable sorted-and-quoted form of
 // the supported languages list for log output. Kept here so the

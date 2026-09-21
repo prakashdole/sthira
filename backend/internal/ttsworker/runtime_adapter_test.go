@@ -59,6 +59,7 @@ for raw in sys.stdin:
         sys.stdout.flush()
     elif op == "synthesize":
         sys.stdout.write(json.dumps({
+            "request_id": msg.get("request_id", ""),
             "audio_b64": base64.b64encode(WAV).decode("ascii"),
             "duration_secs": 0.05,
         }) + "\n")

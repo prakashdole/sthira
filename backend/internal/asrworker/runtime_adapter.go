@@ -1,35 +1,17 @@
-package asrworker
-
-import (
-	"bufio"
-	"context"
-	"encoding/base64"
-	"encoding/binary"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"math"
-	"os"
-	"os/exec"
-	"strings"
-	"sync"
-	"time"
-)
-
-// runtime_adapter.go implements the real SubprocessRuntime backed by
-// the IndicConformer-600M-Multi Python adapter.
+// runtime_adapter.go implements the real SubprocessRuntime backed
+// by the IndicConformer-600M-Multi Python adapter.
 //
-// Architecture:
-//   - On LoadModel(), the runtime spawns a long-lived Python subprocess
-//     running the adapter module.
+// Architecture (B3-corrected):
+//
+//   - On LoadModel(), the runtime spawns a long-lived Python
+//     subprocess running the adapter module.
 //   - Communication is line-delimited JSON over stdin/stdout (JSONL).
-//   - Each Transcribe call sends a request and reads a response.
-//   - A mutex serializes subprocess I/O; request concurrency is the
-//     Worker's job.
-//   - The subprocess is killed on Close() or on unrecoverable error.
-//   - The runtime never retries a failed subprocess; the Worker surfaces
-//     UNAVAILABLE and the orchestrator must restart.
+//   - One goroutine owns the subprocess stdout and routes each
+//     response to the matching pending request via request_id.
+//   - The whole exchange (write + register + await) is bounded by
+//     a per-call deadline and a caller-supplied context.
+//   - The subprocess is killed on Close() or on unrecoverable
+//     protocol error.
 //
 // Adapter protocol (stdin→subprocess, subprocess→stdout):
 //
@@ -45,6 +27,24 @@ import (
 //
 //   Shutdown: {"op":"shutdown"}
 //   Ack:      {"status":"shutdown"}
+package asrworker
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"sync"
+	"time"
+)
+
+const (
+	adapterStartupTimeout = 30 * time.Second
+	adapterPerCallTimeout = 15 * time.Second
+)
 
 // adapterRequest is the wire shape sent to the Python adapter.
 type adapterRequest struct {
@@ -77,113 +77,58 @@ type adapterAlternative struct {
 	Confidence *float64 `json:"confidence"`
 }
 
-const adapterStartupTimeout = 30 * time.Second
-const adapterPerCallTimeout = 15 * time.Second
+// SubprocessRuntime is the typed subprocess-backed Runtime. The
+// worker constructs it via NewSubprocessRuntime and calls
+// LoadModel once before exposing the worker to traffic.
+type SubprocessRuntime struct {
+	cfg    SubprocessRuntimeConfig
+	mu     sync.Mutex
+	closed bool
+
+	// demux is the shared IPC dispatcher. Nil until LoadModel
+	// succeeds.
+	demux *ipcDispatcher
+
+	revision   string
+	digest     string
+	digestName string
+	languages  []string
+}
 
 // LoadModel spawns the Python subprocess and waits for the "ready"
 // response. Populates revision, digest, and supported languages.
+// On any failure the subprocess is reaped and the runtime stays
+// in the not-loaded state.
 func (s *SubprocessRuntime) LoadModel() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if s.closed {
+		s.mu.Unlock()
 		return ErrRuntimeClosed
 	}
-	if s.proc != nil {
+	if s.demux != nil {
+		s.mu.Unlock()
 		return errors.New("model already loaded")
 	}
+	s.mu.Unlock()
 
-	pyCmd := s.cfg.Cmd
-	if pyCmd == "" {
-		pyCmd = "python3"
-	}
-	if _, err := exec.LookPath(pyCmd); err != nil {
-		return fmt.Errorf("%w: %s not found: %v", ErrRuntimeUnavailable, pyCmd, err)
-	}
-
-	args := []string{"-u", "-m", s.cfg.Module, "--adapter-mode"}
-	cmd := exec.Command(pyCmd, args...)
-	if s.cfg.Workdir != "" {
-		cmd.Dir = s.cfg.Workdir
-	}
-	cmd.Env = append(os.Environ(), s.cfg.ExtraEnv...)
-
-	stdin, err := cmd.StdinPipe()
+	probe := adapterRequest{Op: "ready"}
+	disp, info, err := loadIPCRuntime(s.cfg, probe)
 	if err != nil {
-		return fmt.Errorf("stdin pipe: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		stdin.Close()
-		return fmt.Errorf("stdout pipe: %w", err)
-	}
-	var stderrBuf adapterStderrBuf
-	cmd.Stderr = &stderrBuf
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("%w: start: %v", ErrRuntimeUnavailable, err)
+		return err
 	}
 
-	// Send startup probe.
-	readyReq, _ := json.Marshal(adapterRequest{Op: "ready"})
-	readyReq = append(readyReq, '\n')
-	if _, err := stdin.Write(readyReq); err != nil {
-		_ = cmd.Process.Kill()
-		return fmt.Errorf("%w: write ready: %v", ErrRuntimeUnavailable, err)
-	}
-
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024)
-
-	readyCh := make(chan adapterResponse, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		if scanner.Scan() {
-			var resp adapterResponse
-			if err := json.Unmarshal(scanner.Bytes(), &resp); err != nil {
-				errCh <- fmt.Errorf("decode startup: %w", err)
-				return
-			}
-			readyCh <- resp
-		} else {
-			if err := scanner.Err(); err != nil {
-				errCh <- fmt.Errorf("read startup: %w", err)
-			} else {
-				errCh <- fmt.Errorf("subprocess closed stdout; stderr: %s", stderrBuf.String())
-			}
-		}
-	}()
-
-	select {
-	case resp := <-readyCh:
-		if resp.Status != "ready" {
-			_ = cmd.Process.Kill()
-			return fmt.Errorf("%w: status %q error: %s",
-				ErrRuntimeUnavailable, resp.Status, resp.Error)
-		}
-		s.revision = resp.Revision
-		s.digest = resp.DigestSHA256
-		s.digestName = resp.DigestName
-		s.languages = append([]string(nil), resp.Languages...)
-		s.proc = cmd
-		s.stdin = stdin
-		s.scanner = scanner
-		return nil
-
-	case err := <-errCh:
-		_ = cmd.Process.Kill()
-		return fmt.Errorf("%w: %v", ErrRuntimeUnavailable, err)
-
-	case <-time.After(adapterStartupTimeout):
-		_ = cmd.Process.Kill()
-		return fmt.Errorf("%w: startup timeout; stderr: %s",
-			ErrRuntimeUnavailable, stderrBuf.String())
-	}
+	s.mu.Lock()
+	s.demux = disp
+	s.revision = info.Revision
+	s.digest = info.DigestSHA256
+	s.digestName = info.DigestName
+	s.languages = append([]string(nil), info.Languages...)
+	s.mu.Unlock()
+	return nil
 }
 
 // transcribeViaAdapter sends a transcribe request to the loaded
-// Python subprocess. Called from the overridden Transcribe method
-// when proc != nil.
+// Python subprocess.
 func (s *SubprocessRuntime) transcribeViaAdapter(ctx context.Context, req TranscribeRequest) (TranscribeResult, error) {
 	if !hasLanguage(s, req.Language) {
 		return TranscribeResult{}, fmt.Errorf("%w: %s", ErrLanguageUnsupported, req.Language)
@@ -197,11 +142,6 @@ func (s *SubprocessRuntime) transcribeViaAdapter(ctx context.Context, req Transc
 		SampleRate:   req.SampleRate,
 		DurationSecs: req.DurationSecs,
 	}
-	reqBytes, err := json.Marshal(adReq)
-	if err != nil {
-		return TranscribeResult{}, fmt.Errorf("marshal: %w", err)
-	}
-	reqBytes = append(reqBytes, '\n')
 
 	deadline := adapterPerCallTimeout
 	if !req.Deadline.IsZero() {
@@ -214,71 +154,24 @@ func (s *SubprocessRuntime) transcribeViaAdapter(ctx context.Context, req Transc
 		}
 	}
 
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return TranscribeResult{}, ErrRuntimeClosed
+	resp, err := s.demux.SendRequest(adReq, req.RequestID, deadline, ctx)
+	if err != nil {
+		return TranscribeResult{}, err
 	}
-	if s.stdin == nil {
-		s.mu.Unlock()
-		return TranscribeResult{}, fmt.Errorf("%w: not loaded", ErrRuntimeUnavailable)
+	if resp.Error != "" {
+		return TranscribeResult{}, fmt.Errorf("%w: %s", ErrRuntimeUnavailable, resp.Error)
 	}
-
-	if _, err := s.stdin.Write(reqBytes); err != nil {
-		s.mu.Unlock()
-		return TranscribeResult{}, fmt.Errorf("%w: write: %v", ErrRuntimeUnavailable, err)
+	result := TranscribeResult{
+		Text:       resp.Text,
+		Confidence: resp.Confidence,
 	}
-
-	respCh := make(chan adapterResponse, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		if s.scanner.Scan() {
-			var resp adapterResponse
-			if err := json.Unmarshal(s.scanner.Bytes(), &resp); err != nil {
-				errCh <- fmt.Errorf("decode: %w", err)
-				return
-			}
-			respCh <- resp
-		} else {
-			if err := s.scanner.Err(); err != nil {
-				errCh <- fmt.Errorf("read: %w", err)
-			} else {
-				errCh <- errors.New("subprocess closed")
-			}
-		}
-	}()
-	s.mu.Unlock()
-
-	select {
-	case resp := <-respCh:
-		if resp.Error != "" {
-			return TranscribeResult{}, fmt.Errorf("%w: %s", ErrRuntimeUnavailable, resp.Error)
-		}
-		if resp.RequestID != req.RequestID {
-			return TranscribeResult{}, fmt.Errorf("%w: id mismatch %q!=%q",
-				ErrRuntimeUnavailable, resp.RequestID, req.RequestID)
-		}
-		result := TranscribeResult{
-			Text:       resp.Text,
-			Confidence: resp.Confidence,
-		}
-		for _, alt := range resp.Alternatives {
-			result.Alternatives = append(result.Alternatives, TranscriptAlternative{
-				Text:       alt.Text,
-				Confidence: alt.Confidence,
-			})
-		}
-		return result, nil
-
-	case err := <-errCh:
-		return TranscribeResult{}, fmt.Errorf("%w: %v", ErrRuntimeUnavailable, err)
-
-	case <-ctx.Done():
-		return TranscribeResult{}, fmt.Errorf("%w: %v", ErrRuntimeUnavailable, ctx.Err())
-
-	case <-time.After(deadline):
-		return TranscribeResult{}, fmt.Errorf("%w: per-call deadline", ErrRuntimeUnavailable)
+	for _, alt := range resp.Alternatives {
+		result.Alternatives = append(result.Alternatives, TranscriptAlternative{
+			Text:       alt.Text,
+			Confidence: alt.Confidence,
+		})
 	}
+	return result, nil
 }
 
 // encodeFloat32B64 encodes float32 samples as base64-encoded
@@ -290,6 +183,77 @@ func encodeFloat32B64(samples []float32) string {
 		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(s))
 	}
 	return base64.StdEncoding.EncodeToString(buf)
+}
+
+// Transcribe implements Runtime. Dispatches to the loaded Python
+// adapter when available; returns ErrRuntimeUnavailable otherwise.
+func (s *SubprocessRuntime) Transcribe(ctx context.Context, req TranscribeRequest) (TranscribeResult, error) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return TranscribeResult{}, ErrRuntimeClosed
+	}
+	loaded := s.demux != nil
+	s.mu.Unlock()
+
+	if loaded {
+		return s.transcribeViaAdapter(ctx, req)
+	}
+	return TranscribeResult{}, fmt.Errorf("%w: subprocess runtime not loaded; call LoadModel first", ErrRuntimeUnavailable)
+}
+
+// SupportedLanguages implements Runtime. Returns the languages
+// reported by the Python adapter after LoadModel, or nil if not
+// loaded.
+func (s *SubprocessRuntime) SupportedLanguages() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.languages...)
+}
+
+// Revision implements Runtime. Empty until LoadModel populates it.
+func (s *SubprocessRuntime) Revision() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.revision
+}
+
+// Digest implements Runtime. Empty until LoadModel populates it.
+func (s *SubprocessRuntime) Digest() (string, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.digestName, s.digest
+}
+
+// Close implements Runtime. Sends shutdown to the subprocess if
+// loaded, then kills the process. Idempotent.
+func (s *SubprocessRuntime) Close() error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.closed = true
+	demux := s.demux
+	s.demux = nil
+	s.mu.Unlock()
+	if demux != nil {
+		return demux.Close()
+	}
+	return nil
+}
+
+// NewSubprocessRuntime returns the structural stub. Constructing it
+// does NOT spawn anything; the subprocess spawns on LoadModel().
+// Until then, Transcribe returns ErrRuntimeUnavailable so the worker
+// surfaces UNAVAILABLE to the caller without ever invoking real
+// inference.
+func NewSubprocessRuntime(cfg SubprocessRuntimeConfig) *SubprocessRuntime {
+	return &SubprocessRuntime{
+		cfg:      cfg,
+		revision: "",
+		digest:   "",
+	}
 }
 
 // adapterStderrBuf is a bounded buffer for subprocess stderr.
@@ -316,8 +280,9 @@ func (b *adapterStderrBuf) Write(p []byte) (int, error) {
 func (b *adapterStderrBuf) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return strings.TrimSpace(string(b.data))
+	return string(b.data)
 }
 
-// Ensure the SubprocessRuntime interface is compatible.
-var _ io.Closer = (*SubprocessRuntime)(nil)
+// Unused import guard for encoding/json (kept available for
+// future envelope changes).
+var _ = json.Marshal
