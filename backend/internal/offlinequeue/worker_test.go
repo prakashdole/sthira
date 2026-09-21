@@ -53,7 +53,10 @@ func (r *recordingDispatcher) PostJSON(ctx context.Context, method, path, token 
 	if respond == nil {
 		return 0, nil, errors.New("recordingDispatcher: no respond set")
 	}
-	return respond(idx, 201, `{"reservation_id":"RES-X","stay_id":"STAY-X"}`, nil)
+	// Default response is a valid /api/v3 success envelope for reservation.create
+	// (request_id + data.reservation_id + data.stay_id). Tests that exercise
+	// error paths or malformed envelopes override this via SetRespond.
+	return respond(idx, 201, `{"request_id":"r1","schema_version":"3.0","generated_at":"2026-09-21T00:00:00Z","data_version":"PKG:1","source_status":"CURRENT","data":{"reservation_id":"RES-X","stay_id":"STAY-X"}}`, nil)
 }
 
 func (r *recordingDispatcher) callsSnapshot() []recordedCall {
@@ -240,9 +243,13 @@ func TestSubmitCapacityConflict(t *testing.T) {
 	}
 }
 
-// TestSubmitTransientRetriesThenPerm: a 503 response is transient; the
-// worker retries until MaxAttempts, then FAILED_PERM. No silent success.
-func TestSubmitTransientRetriesThenPerm(t *testing.T) {
+// TestSubmitTransientRetriesThenReconciles: a 503 response is transient;
+// the worker retries within budget, and on retry exhaustion the entry stays in
+// PENDING_RECONCILIATION — NOT FAILED_PERM — because the server may have
+// committed before going unhealthy. The next drain keeps trying with the
+// same idempotency key; the server's idempotency store resolves the
+// duplication. No silent success and no false definitive failure.
+func TestSubmitTransientRetriesThenReconciles(t *testing.T) {
 	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
 	d := newRecordingDispatcher(t)
 	d.respond = func(call int, status int, body string, err error) (int, []byte, error) {
@@ -257,15 +264,15 @@ func TestSubmitTransientRetriesThenPerm(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	outcome, _ := w.Submit(context.Background(), op)
-	if outcome != outcomePerm {
-		t.Fatalf("outcome: got %v, want outcomePerm after exhausted retries", outcome)
+	if outcome != outcomePendingReconciliation {
+		t.Fatalf("outcome: got %v, want outcomePendingReconciliation after exhausted retries (5xx is uncertain, not perm)", outcome)
 	}
 	if got := len(d.callsSnapshot()); got != 3 {
 		t.Fatalf("attempts: got %d, want 3 (MaxAttempts)", got)
 	}
 	after, _ := s.Get(context.Background(), op.ID)
-	if after.State != StateFailedPerm {
-		t.Fatalf("state: got %s, want FAILED_PERM", after.State)
+	if after.State != StatePendingReconciliation {
+		t.Fatalf("state: got %s, want PENDING_RECONCILIATION", after.State)
 	}
 	if after.RetryCount != 3 {
 		t.Fatalf("retry count: got %d, want 3", after.RetryCount)
@@ -340,7 +347,9 @@ func TestDrainQueueProcessesAll(t *testing.T) {
 		want outcome
 		resp func(call int) (int, []byte, error)
 	}{
-		{"committed", func(call int) (int, []byte, error) { return 201, []byte(`{"reservation_id":"R"}`), nil }},
+		{"committed", func(call int) (int, []byte, error) {
+			return 201, []byte(`{"request_id":"r1","data":{"reservation_id":"R","stay_id":"S"}}`), nil
+		}},
 		{"stale", func(call int) (int, []byte, error) {
 			return 409, []byte(`{"errors":[{"code":"STALE_VERSION"}]}`), nil
 		}},
@@ -354,6 +363,7 @@ func TestDrainQueueProcessesAll(t *testing.T) {
 		idx := int(counter.Add(1) - 1)
 		return cases[idx%len(cases)].resp(idx / len(cases))
 	}
+
 	tokens := NewMemoryTokenStore()
 	tokens.Put("session-A", "tok-A")
 	w, s := newTestWorker(t, d, tokens, fixedClock(now))
@@ -536,9 +546,10 @@ func TestUncertainOutcome_ReconciliationReplay(t *testing.T) {
 	// 2. Advance clock by 1 hour (past SelectionExpiry of 15 min)
 	clock = enqueueAt.Add(1 * time.Hour)
 
-	// Server is now reachable and confirms the reservation (200 OK)
+	// Server is now reachable and confirms the reservation (200 OK with a
+	// valid /api/v3 success envelope so the worker can validate and commit).
 	d.respond = func(call int, status int, body string, err error) (int, []byte, error) {
-		return 200, []byte(`{"reservation_id":"RES-RECONCILED","stay_id":"STAY-RECONCILED"}`), nil
+		return 200, []byte(`{"request_id":"r1","data":{"reservation_id":"RES-RECONCILED","stay_id":"STAY-RECONCILED"}}`), nil
 	}
 
 	outcome, err := w.Submit(context.Background(), afterDrop)

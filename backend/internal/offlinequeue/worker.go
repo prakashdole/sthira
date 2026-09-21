@@ -2,9 +2,11 @@ package offlinequeue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -54,12 +56,38 @@ func (c ReplayConfig) withDefaults() ReplayConfig {
 //
 //	PENDING -> IN_FLIGHT
 //	IN_FLIGHT ->
-//	  COMMITTED           on 2xx (incl. idempotent 2xx replay)
-//	  FAILED_STALE        on STALE_VERSION/EXPIRED/4xx-selection codes
-//	  FAILED_PERM         on IDEMPOTENCY_CONFLICT/ROUTE_UNVERIFIED/
-//	                      CAPACITY_CONFLICT/FORBIDDEN/NOT_FOUND/other 4xx
-//	  PENDING (retry)     on 5xx, network/timeout (within MaxAttempts)
-//	  FAILED_PERM         on retry budget exhausted
+//	  COMMITTED           on a 2xx response whose body is a valid /api/v3
+//	                      success envelope AND whose operation-specific
+//	                      identifiers (e.g. reservation_id + stay_id) are
+//	                      present in the data field. Anything else — empty,
+//	                      malformed, error-envelope, or missing required
+//	                      fields — is treated as PENDING_RECONCILIATION:
+//	                      we cannot prove the server committed without a
+//	                      trustworthy envelope.
+//	  FAILED_STALE        on STALE_VERSION or EXPIRED. VALIDATION_FAILED is
+//	                      NOT stale — it is a generic client-side validation
+//	                      failure and routes to FAILED_PERM.
+//	  FAILED_PERM         on IDEMPOTENCY_CONFLICT / ROUTE_UNVERIFIED /
+//	                      CAPACITY_CONFLICT / NOT_FOUND / etc. — codes that
+//	                      mean "the request itself is wrong; retrying with
+//	                      the same key/payload will keep failing". User
+//	                      must inspect and confirm a new operation.
+//	  PENDING_RECONCILIATION on transport failure (network/timeout), on a 2xx
+//	                      with an invalid envelope, on auth failure (401/403),
+//	                      on rate-limit responses (429) within budget that
+//	                      ALSO count toward the retry budget, and on
+//	                      5xx/proxy responses whose retry budget is exhausted.
+//	                      The next drain replays with the same idempotency
+//	                      key; the server's idempotency store resolves the
+//	                      duplication.
+//	  PENDING (retry)     on 5xx (within MaxAttempts). The retry budget is
+//	                      per-Submit; exhaustion moves to PENDING_RECONCILIATION.
+//
+// Auth failures (401/403) DO NOT mark FAILED_PERM: the server may have
+// committed before the client's session expired, and the original key is the
+// only safe way to ask the server whether the prior attempt succeeded.
+// Telling the user to "submit a duplicate under a new key" would create a
+// second reservation.
 //
 // The worker NEVER mutates the operation's idempotency key, payload,
 // endpoint, method, token ref, snapshot version or selection expiry.
@@ -284,13 +312,18 @@ func (w *ReplayWorker) Submit(ctx context.Context, op PendingOperation) (SubmitO
 		// re-mark IN_FLIGHT (the on-disk state stays IN_FLIGHT until the loop
 		// either reaches a terminal outcome or rewrites it via BumpRetry). This
 		// avoids the SetInFlight("cannot move to IN_FLIGHT from IN_FLIGHT")
-		// self-conflict when current is reloaded from disk between attempts.
+		// self-conflict when current is reloaded from disk between attempts, OR
+		// when ResetStuckInFlight has already moved the entry to
+		// PENDING_RECONCILIATION and we are re-marking it IN_FLIGHT on a fresh
+		// dispatch.
 		if attempt == 0 {
-			if err := current.SetInFlight(); err != nil {
-				return outcomeSkipped, err
-			}
-			if err := w.store.UpdateState(ctx, current); err != nil {
-				return outcomePerm, err
+			if current.State != StateInFlight {
+				if err := current.SetInFlight(); err != nil {
+					return outcomeSkipped, err
+				}
+				if err := w.store.UpdateState(ctx, current); err != nil {
+					return outcomePerm, err
+				}
 			}
 		}
 
@@ -301,8 +334,6 @@ func (w *ReplayWorker) Submit(ctx context.Context, op PendingOperation) (SubmitO
 		switch {
 		case callErr != nil:
 			// Transport/timeout: outcome is unknowable. Preserve uncertainty.
-			// BumpRetry records the attempt; SetPendingReconciliation writes
-			// the PENDING_RECONCILIATION state so the next drain replays.
 			// We do NOT loop within this Submit to "try again" — the queue's
 			// drain cadence owns retry timing, and retrying a dropped request
 			// against a server that may have already committed is exactly
@@ -316,6 +347,28 @@ func (w *ReplayWorker) Submit(ctx context.Context, op PendingOperation) (SubmitO
 			}
 			return outcomePendingReconciliation, nil
 		case status >= 200 && status < 300:
+			// A 2xx status is not, by itself, proof of commitment. Validate
+			// the bounded /api/v3 success envelope and the
+			// operation-specific identifiers before marking COMMITTED. Any
+			// defect here means we cannot prove the server committed, and
+			// we must NOT tell the user "your reservation succeeded" without
+			// evidence — the cost of a false-positive here is a duplicate
+			// reservation on the next replay, which is the worst outcome
+			// for a citizen during an emergency.
+			if ok, code, reason := validateSuccessEnvelope(current.Method, current.Endpoint, status, body); !ok {
+				msg := fmt.Sprintf("2xx envelope rejected: %s", reason)
+				if code != "" {
+					msg = fmt.Sprintf("2xx envelope rejected: %s (code=%s)", reason, code)
+				}
+				current.BumpRetry(status, msg)
+				if err := current.SetPendingReconciliation(w.now(), status, msg); err != nil {
+					return outcomePerm, err
+				}
+				if err := w.store.UpdateState(ctx, current); err != nil {
+					return outcomePerm, err
+				}
+				return outcomePendingReconciliation, nil
+			}
 			_ = current.SetCommitted(w.now(), status, body)
 			if err := w.store.UpdateState(ctx, current); err != nil {
 				return outcomePerm, err
@@ -323,19 +376,56 @@ func (w *ReplayWorker) Submit(ctx context.Context, op PendingOperation) (SubmitO
 			return outcomeCommitted, nil
 		default:
 			code := extractServerErrorCode(body)
-			if isStaleCode(code) || isCapacityExpiredCode(code) {
+			if isAuthFailure(status) {
+				// 401/403 (or auth-coded 4xx): losing auth access does NOT
+				// prove the operation failed. The server may have committed
+				// before the session expired, and the original key is the
+				// only safe way to ask. Preserve PENDING_RECONCILIATION; the
+				// UI must surface "please re-authenticate" without
+				// inventing a new key.
+				msg := fmt.Sprintf("auth failure: %s", serverErrorMessage(status, code, body))
+				current.BumpRetry(status, msg)
+				if err := current.SetPendingReconciliation(w.now(), status, msg); err != nil {
+					return outcomePerm, err
+				}
+				if err := w.store.UpdateState(ctx, current); err != nil {
+					return outcomePerm, err
+				}
+				return outcomePendingReconciliation, nil
+			}
+			if isStaleCode(code) {
 				_ = current.SetFailedStale(w.now(), status, serverErrorMessage(status, code, body))
 				if err := w.store.UpdateState(ctx, current); err != nil {
 					return outcomePerm, err
 				}
 				return outcomeStale, nil
 			}
-			if isPermanentCode(code) || (status >= 400 && status < 500) {
+			if isPermanentCode(code) {
 				_ = current.SetFailedPerm(w.now(), status, serverErrorMessage(status, code, body))
 				if err := w.store.UpdateState(ctx, current); err != nil {
 					return outcomePerm, err
 				}
 				return outcomePerm, nil
+			}
+			if isTransientClientCode(status, code) {
+				// 429 and other "ask again later" codes: retry within budget.
+				current.BumpRetry(status, serverErrorMessage(status, code, body))
+				if err := w.store.UpdateState(ctx, current); err != nil {
+					return outcomePerm, err
+				}
+				if attempt+1 == w.cfg.MaxAttempts {
+					// Retry budget exhausted: preserve uncertainty, do NOT
+					// mark FAILED_PERM. The next drain keeps trying.
+					_ = current.SetPendingReconciliation(w.now(), status, "retry budget exhausted on transient client code")
+					if err := w.store.UpdateState(ctx, current); err != nil {
+						return outcomePerm, err
+					}
+					return outcomePendingReconciliation, nil
+				}
+				if err := w.sleep(ctx, w.backoff(attempt)); err != nil {
+					return outcomePerm, err
+				}
+				continue
 			}
 			// 5xx and unknown codes: server answered but is unhealthy.
 			// Retry within budget (the server is reachable, just unhappy).
@@ -344,11 +434,17 @@ func (w *ReplayWorker) Submit(ctx context.Context, op PendingOperation) (SubmitO
 				return outcomePerm, err
 			}
 			if attempt+1 == w.cfg.MaxAttempts {
-				_ = current.SetFailedPerm(w.now(), status, "max attempts reached")
+				// Retry exhaustion on 5xx is NOT a definitive failure: the
+				// server may have committed before going unhealthy. The
+				// queue keeps the entry in PENDING_RECONCILIATION so the
+				// next drain (or a manual reconcile) replays with the same
+				// key and the server's idempotency store resolves the
+				// duplication. We do NOT mark FAILED_PERM here.
+				_ = current.SetPendingReconciliation(w.now(), status, "retry budget exhausted on 5xx")
 				if err := w.store.UpdateState(ctx, current); err != nil {
 					return outcomePerm, err
 				}
-				return outcomePerm, nil
+				return outcomePendingReconciliation, nil
 			}
 			if err := w.sleep(ctx, w.backoff(attempt)); err != nil {
 				return outcomePerm, err
@@ -356,7 +452,8 @@ func (w *ReplayWorker) Submit(ctx context.Context, op PendingOperation) (SubmitO
 			continue
 		}
 	}
-	// Unreachable: loop returns or falls through to MaxAttempts branch above.
+	// Unreachable: the loop above either returns or falls through to the
+	// MaxAttempts branch.
 	return outcomePerm, nil
 }
 
@@ -377,39 +474,57 @@ func (w *ReplayWorker) backoff(attempt int) time.Duration {
 }
 
 // isStaleCode classifies the response codes the worker treats as stale
-// (snapshot drift or selection expiry). The names come from the /api/v3
-// envelope code set in backend/internal/contracts/errors.go and the
-// reservation handler mapping.
+// (snapshot drift or local selection expiry). Only these are stale-by-
+// construction — VALIDATION_FAILED is a generic client-side validation
+// failure and routes to FAILED_PERM, not FAILED_STALE.
 func isStaleCode(code string) bool {
 	switch code {
-	case "STALE_VERSION", "VALIDATION_FAILED", "EXPIRED":
+	case "STALE_VERSION", "EXPIRED":
 		return true
 	default:
 		return false
 	}
 }
 
-// isCapacityExpiredCode treats an out-of-policy denial (e.g. stay dates
-// outside the authoritative temporary-stay bounds) as a STALE outcome: the
-// user's offline selection is no longer valid against current policy.
-func isCapacityExpiredCode(code string) bool {
-	return code == "VALIDATION_FAILED" || code == "STALE_VERSION" || code == "EXPIRED"
+// isAuthFailure reports whether the response status indicates an auth-
+// scoped failure (401/403). Auth failures preserve the original
+// idempotency key in PENDING_RECONCILIATION so the user can re-authenticate
+// and replay; the server's idempotency store resolves the duplicate. The
+// worker never tells the user to submit under a new key on auth failure —
+// that would create a second reservation.
+func isAuthFailure(status int) bool {
+	return status == 401 || status == 403
 }
 
-// isPermanentCode classifies codes that mean the request itself is wrong and
-// retrying with the same key/payload will keep failing. Capacity conflicts
-// are NOT permanent here: the user can re-confirm a different facility with a
-// new key after seeing the conflict. IDEMPOTENCY_CONFLICT is permanent with
-// the current key/payload; the worker marks FAILED_PERM and the user
-// investigates.
+// isTransientClientCode reports whether the response is a "ask again later"
+// code that should retry within budget. 429 is transient: rate limits
+// typically clear in seconds, and the operation itself is correct.
+func isTransientClientCode(status int, code string) bool {
+	if status == 429 {
+		return true
+	}
+	switch code {
+	case "RATE_LIMITED":
+		return true
+	default:
+		return false
+	}
+}
+
+// isPermanentCode classifies codes that mean the request itself is wrong
+// and retrying with the same key/payload will keep failing. IDEMPOTENCY_CONFLICT
+// is permanent with the current key/payload; the worker marks FAILED_PERM and
+// the user investigates. Capacity conflicts are permanent: the user must
+// inspect and re-confirm with a new selection (new key) — auto-retrying the
+// same payload against the same committed hold cannot succeed.
 func isPermanentCode(code string) bool {
 	switch code {
-	case "IDEMPOTENCY_CONFLICT",
-		"FORBIDDEN", "NOT_FOUND",
+	case "IDEMPOTENCY_CONFLICT", "CAPACITY_CONFLICT",
+		"NOT_FOUND",
 		"ROUTE_UNVERIFIED", "ROUTE_UNAVAILABLE",
 		"AMBIGUOUS_PLACE", "DATA_UNAVAILABLE",
 		"MODEL_UNAVAILABLE", "LANGUAGE_UNSUPPORTED",
-		"RATE_LIMITED", "MALFORMED_JSON",
+		"MALFORMED_JSON", "VALIDATION_FAILED",
 		"DUPLICATE_KEY", "TRAILING_DATA",
 		"BODY_TOO_LARGE", "DEPTH_EXCEEDED",
 		"UNKNOWN_FIELD", "INVALID_VALUE",
@@ -417,6 +532,81 @@ func isPermanentCode(code string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// validateSuccessEnvelope decodes a 2xx response body and confirms it is a
+// valid /api/v3 success envelope with operation-specific identifiers. It
+// returns ok=true when the body is a real success response; ok=false (with a
+// short reason) otherwise. The worker treats ok=false as PENDING_RECONCILIATION:
+// we cannot prove the server committed without a trustworthy envelope, and a
+// false-positive "committed" here would produce a duplicate reservation
+// when the next drain replays.
+//
+// Validation rules:
+//   - body must be valid JSON (any non-2xx-ish proxy output is rejected);
+//   - body must NOT contain an errors[].code field (a 2xx that carries an
+//     error envelope is not a success);
+//   - body must contain a `data` field that is a non-null JSON object;
+//   - POST /api/v3/reservations: data must include reservation_id AND stay_id;
+//   - POST /api/v3/reservations/{id}/events: data must include stay_id AND a
+//     recognized type (ARRIVE|CANCEL|DEPART|EXTEND|TRANSFER).
+func validateSuccessEnvelope(method, path string, status int, body []byte) (ok bool, code, reason string) {
+	if len(body) == 0 {
+		return false, "", "empty body"
+	}
+	var env struct {
+		RequestID string          `json:"request_id"`
+		Data      json.RawMessage `json:"data"`
+		Errors    []struct {
+			Code string `json:"code"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return false, "", fmt.Sprintf("malformed JSON: %v", err)
+	}
+	if len(env.Errors) > 0 && env.Errors[0].Code != "" {
+		return false, env.Errors[0].Code, "2xx response contains errors[].code"
+	}
+	if len(env.Data) == 0 || string(env.Data) == "null" {
+		return false, "", "missing or null data field"
+	}
+	var data map[string]any
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		return false, "", fmt.Sprintf("data not a JSON object: %v", err)
+	}
+	if strings.ToUpper(method) != "POST" {
+		// Defensive: the queue only enqueues POST. Anything else would be a
+		// config bug; reject the envelope so a misconfigured client does
+		// not mark a phantom success.
+		return false, "", fmt.Sprintf("unsupported method %q", method)
+	}
+	switch {
+	case path == "/api/v3/reservations":
+		rid, _ := data["reservation_id"].(string)
+		sid, _ := data["stay_id"].(string)
+		if rid == "" || sid == "" {
+			return false, "", "missing reservation_id or stay_id"
+		}
+		return true, "", ""
+	case strings.HasPrefix(path, "/api/v3/reservations/") && strings.HasSuffix(path, "/events"):
+		sid, _ := data["stay_id"].(string)
+		typ, _ := data["type"].(string)
+		if sid == "" {
+			return false, "", "missing stay_id"
+		}
+		switch strings.ToUpper(typ) {
+		case "ARRIVE", "CANCEL", "DEPART", "EXTEND", "TRANSFER":
+			return true, "", ""
+		default:
+			return false, "", fmt.Sprintf("unknown stay event type %q", typ)
+		}
+	default:
+		// Other /api/v3 endpoints: accept the envelope if it has data; the
+		// queue currently only carries reservation.create and stay.* but
+		// a future endpoint (e.g. /api/v3/sessions) gets the same
+		// envelope check without an endpoint-specific identifier rule.
+		return true, "", ""
 	}
 }
 
