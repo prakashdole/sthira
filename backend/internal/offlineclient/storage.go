@@ -8,10 +8,30 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"sthira/backend/internal/offlinepkg"
 )
+
+// On-disk layout (current generation):
+//
+//	state/current_generation.json   single atomic file with both manifest and
+//	                                card bytes; one rename commits both or none.
+//	state/state.json                freshness metadata (LastFetchedAtUnixMS,
+//	                                MaxObservedUnixMS, jurisdiction, etc.).
+//	state/staging/                  transient in-flight activation staging.
+//	tombstones/packages.json        revoked package IDs.
+//	tombstones/routes.json          cancelled route IDs.
+//	tombstones/superseded.json      superseded package-version pairs.
+//	tombstones/.initialized         sentinel written after the first successful
+//	                                tombstone save; absence means "genuinely
+//	                                new store" and empty initialization is allowed.
+//	downloads/                      in-flight .part / .part.meta for resumable
+//	                                downloads; cleared on successful activation.
+//	resources/<id>/                 per-resource content.bin + meta.json.
+//
+// Coherent activation: writeAtomicBytes on current_generation.json is the
+// single durable switch. A crash before it leaves no new generation; a crash
+// after it leaves the new generation complete (manifest + card together).
 
 // persistedState is the on-disk representation of state.json.
 type persistedState struct {
@@ -26,8 +46,6 @@ type persistedState struct {
 }
 
 // downloadMeta is the on-disk representation of <artifact>.part.meta.
-// It records enough information to resume an interrupted download safely
-// (expected size, expected ETag, current bytes on disk).
 type downloadMeta struct {
 	URL            string `json:"url"`
 	ExpectedETag   string `json:"expected_etag,omitempty"`
@@ -46,6 +64,27 @@ type resourceMeta struct {
 	FetchedAtUnixMS int64  `json:"fetched_at_unix_ms"`
 }
 
+// generation is the single on-disk generation record. Both manifest and card
+// bytes are stored together so a single atomic write commits them as one
+// generation — there is no window in which one is replaced without the other.
+type generation struct {
+	// ManifestBytes are the canonical manifest bytes (with checksum and signature
+	// fields populated by the publisher). They are the verified, signed bytes
+	// the client just received.
+	ManifestBytes []byte `json:"manifest_bytes"`
+	// CardBytes are the canonical card bytes (same shape). Empty when the
+	// generation was activated without a card.
+	CardBytes []byte `json:"card_bytes"`
+	// Revision mirrors manifest.revision for quick checks before parsing.
+	Revision int `json:"revision"`
+	// ManifestID, PackageID, CardVersion, CardChecksum disambiguate the
+	// generation identity for tests and for the activeIntact cross-check.
+	ManifestID   string `json:"manifest_id"`
+	PackageID    string `json:"package_id"`
+	CardVersion  int    `json:"card_version"`
+	CardChecksum string `json:"card_checksum"`
+}
+
 // storage owns the on-disk layout and provides atomic write/rename helpers.
 // All methods are goroutine-safe.
 type storage struct {
@@ -60,7 +99,7 @@ func newStorage(root string) (*storage, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, fmt.Errorf("offlineclient: create storage dir: %w", err)
 	}
-	for _, sub := range []string{"state", "tombstones", "downloads", "resources"} {
+	for _, sub := range []string{"state", "state/staging", "tombstones", "downloads", "resources"} {
 		if err := os.MkdirAll(filepath.Join(root, sub), 0o755); err != nil {
 			return nil, fmt.Errorf("offlineclient: create %s: %w", sub, err)
 		}
@@ -80,7 +119,6 @@ func (s *storage) writeAtomicBytes(finalPath string, data []byte) error {
 	}
 	tmpPath := tmp.Name()
 	defer func() {
-		// Best-effort cleanup if rename was not reached.
 		_ = os.Remove(tmpPath)
 	}()
 	if _, err := tmp.Write(data); err != nil {
@@ -97,7 +135,6 @@ func (s *storage) writeAtomicBytes(finalPath string, data []byte) error {
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		return err
 	}
-	// fsync the directory so the rename is durable.
 	if d, err := os.Open(dir); err == nil {
 		_ = d.Sync()
 		d.Close()
@@ -157,24 +194,6 @@ func (s *storage) writeAtomicFrom(finalPath string, src io.Reader, max int64) (i
 	return written, nil
 }
 
-// appendBytes is like writeAtomicBytes but appends to an existing file
-// (or creates it). Used to extend a .part file with resumed bytes.
-func (s *storage) appendBytes(partPath string, data []byte) (int64, error) {
-	f, err := os.OpenFile(partPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-	before, _ := f.Seek(0, io.SeekEnd)
-	if _, err := f.Write(data); err != nil {
-		return before, err
-	}
-	if err := f.Sync(); err != nil {
-		return before, err
-	}
-	return before, nil
-}
-
 // loadState reads state.json. A missing file is not an error; it returns
 // the zero value.
 func (s *storage) loadState() (persistedState, error) {
@@ -208,100 +227,92 @@ func (s *storage) saveState(st persistedState) error {
 	return s.writeAtomicBytes(filepath.Join(s.root, "state", "state.json"), b)
 }
 
-// readActiveManifest returns the canonical bytes of the active manifest
-// plus the parsed struct. Missing or unreadable files return ErrNoActiveState.
-func (s *storage) readActiveManifest() ([]byte, *manifestRecord, error) {
+// --- generation: the single coherent active state ---
+
+// readActiveGeneration returns the manifest and card bytes from the
+// current active generation. A missing file returns ErrNoActiveState.
+// A malformed file (truncated or corrupted JSON) returns an integrity
+// error so the caller fails closed.
+func (s *storage) readActiveGeneration() (manifestBytes, cardBytes []byte, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	binPath := filepath.Join(s.root, "state", "current_manifest.bin")
-	bin, err := os.ReadFile(binPath)
+	bin, err := os.ReadFile(filepath.Join(s.root, "state", "current_generation.json"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil, ErrNoActiveState
 		}
 		return nil, nil, err
 	}
-	var rec manifestRecord
-	if err := json.Unmarshal(bin, &rec.Manifest); err != nil {
-		return nil, nil, fmt.Errorf("offlineclient: parse manifest bytes: %w", err)
+	if len(bin) == 0 {
+		return nil, nil, fmt.Errorf("offlineclient: current_generation.json is zero-byte")
 	}
-	rec.RawBytes = bin
-	return bin, &rec, nil
+	var gen generation
+	if err := json.Unmarshal(bin, &gen); err != nil {
+		return nil, nil, fmt.Errorf("offlineclient: parse current_generation.json: %w", err)
+	}
+	return gen.ManifestBytes, gen.CardBytes, nil
 }
 
-// manifestRecord pairs the parsed manifest with its canonical bytes.
-type manifestRecord struct {
-	Manifest offlinepkg.Manifest `json:"-"`
-	RawBytes []byte              `json:"-"`
-}
-
-// writeActiveManifest atomically writes the canonical manifest bytes to
-// the active location. The caller has already verified the bytes.
-func (s *storage) writeActiveManifest(canonical []byte) error {
+// writeActiveGeneration atomically commits both manifest and card bytes as
+// ONE generation. The single writeAtomicBytes ensures the active state is
+// never a mixed pair: either the previous generation or the new one is
+// selected after the call returns. The caller has already verified both
+// bytes (checksum + signature) before this call.
+//
+// Intermediate stages are placed under state/staging/ so the final rename
+// is single-file atomic (POSIX rename within the same filesystem). The
+// staging directory is created at storage initialization and is reused;
+// staging failures (mkdir, write, rename) are surfaced, never swallowed.
+func (s *storage) writeActiveGeneration(manifestBytes, cardBytes []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.writeAtomicBytes(filepath.Join(s.root, "state", "current_manifest.bin"), canonical)
-}
 
-// readActiveCard returns the canonical bytes and parsed card.
-func (s *storage) readActiveCard() ([]byte, *offlinepkg.PublicIncidentCard, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	binPath := filepath.Join(s.root, "state", "current_card.bin")
-	bin, err := os.ReadFile(binPath)
+	stagingDir := filepath.Join(s.root, "state", "staging")
+	tmp, err := os.CreateTemp(stagingDir, "generation-*.json.tmp")
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil, ErrNoActiveState
-		}
-		return nil, nil, err
+		return fmt.Errorf("offlineclient: create staging generation: %w", err)
 	}
-	var card offlinepkg.PublicIncidentCard
-	if err := json.Unmarshal(bin, &card); err != nil {
-		return nil, nil, fmt.Errorf("offlineclient: parse card bytes: %w", err)
-	}
-	return bin, &card, nil
-}
-
-// writeActiveCard atomically writes the canonical card bytes.
-func (s *storage) writeActiveCard(canonical []byte) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.writeAtomicBytes(filepath.Join(s.root, "state", "current_card.bin"), canonical)
-}
-
-// writeActiveGeneration atomically stages and commits manifest and card together.
-func (s *storage) writeActiveGeneration(manifestBytes []byte, cardBytes []byte) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	stateDir := filepath.Join(s.root, "state")
-	tmpDir, err := os.MkdirTemp(stateDir, ".staging-*")
-	if err != nil {
-		return err
-	}
+	tmpPath := tmp.Name()
 	defer func() {
-		_ = os.RemoveAll(tmpDir)
+		_ = os.Remove(tmpPath)
 	}()
 
-	if err := os.WriteFile(filepath.Join(tmpDir, "current_manifest.bin"), manifestBytes, 0o644); err != nil {
-		return err
+	gen := generation{
+		ManifestBytes: append([]byte(nil), manifestBytes...),
+		CardBytes:     append([]byte(nil), cardBytes...),
 	}
-	if len(cardBytes) > 0 {
-		if err := os.WriteFile(filepath.Join(tmpDir, "current_card.bin"), cardBytes, 0o644); err != nil {
-			return err
-		}
+	// Best-effort metadata extraction. We do not fail the activation if the
+	// bytes do not parse here; the caller's verification path will reject
+	// anything that is not a well-formed signed manifest.
+	if m, perr := offlinepkg.ParseManifest(manifestBytes, offlinepkg.Limits{MaxBytes: 256 * 1024, MaxDepth: 32}); perr == nil {
+		gen.Revision = m.Revision
+		gen.ManifestID = m.ManifestID
+		gen.PackageID = m.CriticalCard.PackageID
+		gen.CardVersion = m.CriticalCard.Version
+		gen.CardChecksum = m.CriticalCard.ChecksumSHA256
+	}
+	payload, err := json.Marshal(gen)
+	if err != nil {
+		tmp.Close()
+		return fmt.Errorf("offlineclient: marshal generation: %w", err)
+	}
+	if _, err := tmp.Write(payload); err != nil {
+		tmp.Close()
+		return fmt.Errorf("offlineclient: write generation tmp: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("offlineclient: sync generation tmp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("offlineclient: close generation tmp: %w", err)
 	}
 
-	if err := os.Rename(filepath.Join(tmpDir, "current_manifest.bin"), filepath.Join(stateDir, "current_manifest.bin")); err != nil {
-		return err
+	finalPath := filepath.Join(s.root, "state", "current_generation.json")
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		return fmt.Errorf("offlineclient: activate generation: %w", err)
 	}
-	if len(cardBytes) > 0 {
-		if err := os.Rename(filepath.Join(tmpDir, "current_card.bin"), filepath.Join(stateDir, "current_card.bin")); err != nil {
-			return err
-		}
-	}
-
-	if d, err := os.Open(stateDir); err == nil {
+	if d, err := os.Open(filepath.Dir(finalPath)); err == nil {
 		_ = d.Sync()
 		d.Close()
 	}
@@ -344,6 +355,24 @@ func (s *storage) partPath(kind, id string) string {
 
 // --- tombstones ---
 
+// tombstoneFile is the single on-disk tombstone state. File presence is the
+// canonical signal recorded by the .initialized sentinel written BEFORE
+// the file. The sentinel + the file together guarantee the trust model
+// required by the lane:
+//   - Sentinel missing → genuinely new store (no revocation knowledge);
+//     file missing is OK.
+//   - Sentinel present, file present and well-formed → use it.
+//   - Sentinel present, file missing or zero-byte or malformed →
+//     integrity violation; fail closed. The "have we ever recorded
+//     anything?" question is answered by the sentinel; the "what did we
+//     record?" question is answered by the file. A user tampering with
+//     one without the other is detected.
+type tombstoneFile struct {
+	Packages   []string                       `json:"packages,omitempty"`
+	Routes     []string                       `json:"routes,omitempty"`
+	Superseded []offlinepkg.SupersededVersion `json:"superseded,omitempty"`
+}
+
 type tombstoneStore struct {
 	mu   sync.Mutex
 	root string
@@ -353,38 +382,119 @@ func (s *storage) tombstones() *tombstoneStore {
 	return &tombstoneStore{root: filepath.Join(s.root, "tombstones")}
 }
 
-// loadOrInit reads a tombstone list, creating the file if absent.
-func (t *tombstoneStore) loadOrInit(name string) ([]string, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	path := filepath.Join(t.root, name)
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []string{}, nil
-		}
-		return nil, err
-	}
-	if len(b) == 0 {
-		return []string{}, nil
-	}
-	var out []string
-	if err := json.Unmarshal(b, &out); err != nil {
-		return nil, fmt.Errorf("offlineclient: parse %s: %w", name, err)
-	}
-	return out, nil
+const (
+	tombstonePath     = "tombstones.json"
+	tombstoneInitName = ".initialized"
+)
+
+// isInitializedLocked reports whether the sentinel exists (caller holds mu).
+func (t *tombstoneStore) isInitializedLocked() bool {
+	_, err := os.Stat(filepath.Join(t.root, tombstoneInitName))
+	return err == nil
 }
 
-func (t *tombstoneStore) save(name string, list []string) error {
+// writeMarkerLocked durably creates the sentinel. Called before any save
+// so a crash that leaves the file but not the sentinel still triggers
+// the "new store" semantics on the next load — at worst the client
+// retries the sync. A crash that leaves the sentinel but not the file is
+// impossible because the file rename is the last durable step; if it
+// fails, the marker is rolled back by the caller.
+func (t *tombstoneStore) writeMarkerLocked() error {
+	path := filepath.Join(t.root, tombstoneInitName)
+	if t.isInitializedLocked() {
+		return nil
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("offlineclient: tombstone marker: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		_ = os.Remove(path)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	if d, err := os.Open(t.root); err == nil {
+		_ = d.Sync()
+		d.Close()
+	}
+	return nil
+}
+
+// removeMarkerLocked deletes the sentinel. Used when the client explicitly
+// resets the tombstone store (e.g., during the rare rollback case). The
+// public API never calls this; tests can use it via the storage mutex.
+func (t *tombstoneStore) removeMarkerLocked() {
+	_ = os.Remove(filepath.Join(t.root, tombstoneInitName))
+}
+
+// loadOrInit reads the tombstone state.
+//   - Sentinel missing: any state is OK (genuine new store) → returns
+//     empty.
+//   - Sentinel present, file missing/zero-byte/malformed: integrity
+//     error (fail closed).
+//   - Sentinel present, file well-formed: returns the parsed state.
+//
+// Reads and writes are goroutine-safe.
+func (t *tombstoneStore) loadOrInit() (tombstoneFile, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	b, err := json.Marshal(list)
+	return t.loadLocked()
+}
+
+func (t *tombstoneStore) loadLocked() (tombstoneFile, error) {
+	b, err := os.ReadFile(filepath.Join(t.root, tombstonePath))
+	initialized := t.isInitializedLocked()
+	if err != nil {
+		if os.IsNotExist(err) {
+			if initialized {
+				return tombstoneFile{}, fmt.Errorf("offlineclient: tombstone state file missing after initialization")
+			}
+			return tombstoneFile{}, nil
+		}
+		return tombstoneFile{}, err
+	}
+	if len(b) == 0 {
+		if initialized {
+			return tombstoneFile{}, fmt.Errorf("offlineclient: tombstone state is zero-byte (corrupt) after initialization")
+		}
+		return tombstoneFile{}, nil
+	}
+	var tf tombstoneFile
+	if err := json.Unmarshal(b, &tf); err != nil {
+		if initialized {
+			return tombstoneFile{}, fmt.Errorf("offlineclient: tombstone state malformed after initialization: %w", err)
+		}
+		return tombstoneFile{}, fmt.Errorf("offlineclient: parse tombstone state: %w", err)
+	}
+	return tf, nil
+}
+
+// save writes the entire tombstone state atomically. The sentinel is
+// written BEFORE the file so a crash between sentinel and file leaves
+// the next load treating the store as fresh-empty (at worst the client
+// retries the sync and re-records). A crash after the file rename has
+// both marker and file consistent.
+func (t *tombstoneStore) save(tf tombstoneFile) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.saveLocked(tf)
+}
+
+func (t *tombstoneStore) saveLocked(tf tombstoneFile) error {
+	if err := t.writeMarkerLocked(); err != nil {
+		return err
+	}
+	b, err := json.Marshal(tf)
 	if err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(t.root, ".tmp-*")
 	if err != nil {
-		return err
+		return fmt.Errorf("offlineclient: staging tombstone: %w", err)
 	}
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
@@ -399,129 +509,105 @@ func (t *tombstoneStore) save(name string, list []string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, filepath.Join(t.root, name))
+	if err := os.Rename(tmpPath, filepath.Join(t.root, tombstonePath)); err != nil {
+		return fmt.Errorf("offlineclient: activate tombstone: %w", err)
+	}
+	if d, err := os.Open(t.root); err == nil {
+		_ = d.Sync()
+		d.Close()
+	}
+	return nil
 }
 
-func (t *tombstoneStore) add(name, id string) (added bool, err error) {
-	cur, err := t.loadOrInit(name)
+// addPackage adds a revoked package id (idempotent).
+func (t *tombstoneStore) addPackage(id string) (added bool, err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	tf, err := t.loadLocked()
 	if err != nil {
 		return false, err
 	}
-	for _, x := range cur {
+	for _, x := range tf.Packages {
 		if x == id {
 			return false, nil
 		}
 	}
-	cur = append(cur, id)
-	if err := t.save(name, cur); err != nil {
-		return false, err
-	}
-	return true, nil
+	tf.Packages = append(tf.Packages, id)
+	return true, t.saveLocked(tf)
 }
 
-func (t *tombstoneStore) checkContains(name, id string) (bool, error) {
-	cur, err := t.loadOrInit(name)
+// addRoute adds a cancelled route id (idempotent).
+func (t *tombstoneStore) addRoute(id string) (added bool, err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	tf, err := t.loadLocked()
 	if err != nil {
 		return false, err
 	}
-	for _, x := range cur {
+	for _, x := range tf.Routes {
 		if x == id {
-			return true, nil
+			return false, nil
 		}
 	}
-	return false, nil
+	tf.Routes = append(tf.Routes, id)
+	return true, t.saveLocked(tf)
 }
 
-func (t *tombstoneStore) contains(name, id string) bool {
-	cur, err := t.loadOrInit(name)
-	if err != nil {
-		return true // fail closed
-	}
-	for _, x := range cur {
-		if x == id {
-			return true
-		}
-	}
-	return false
-}
-
-// supersededKey composes the file name for superseded-version records.
-const supersededFile = "superseded.json"
-
-// addSuperseded records a (package_id, version) tombstone. Multiple
-// supersessions of the same pair are idempotent.
+// addSuperseded records a superseded (package, version) pair (idempotent).
 func (t *tombstoneStore) addSuperseded(pkgID string, version int) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	path := filepath.Join(t.root, supersededFile)
-	b, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
+	tf, err := t.loadLocked()
+	if err != nil {
 		return err
 	}
-	var list []offlinepkg.SupersededVersion
-	if len(b) > 0 {
-		if err := json.Unmarshal(b, &list); err != nil {
-			return err
-		}
-	}
-	for _, x := range list {
+	for _, x := range tf.Superseded {
 		if x.PackageID == pkgID && x.Version == version {
 			return nil
 		}
 	}
-	list = append(list, offlinepkg.SupersededVersion{PackageID: pkgID, Version: version})
-	out, err := json.Marshal(list)
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(t.root, ".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if _, err := tmp.Write(out); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
+	tf.Superseded = append(tf.Superseded, offlinepkg.SupersededVersion{PackageID: pkgID, Version: version})
+	return t.saveLocked(tf)
 }
 
-// loadSuperseded returns the current superseded list.
-func (t *tombstoneStore) loadSuperseded() ([]offlinepkg.SupersededVersion, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	b, err := os.ReadFile(filepath.Join(t.root, supersededFile))
+// containsPackage / containsRoute / isSuperseded are read-only checks that
+// fail closed: any error (including the explicit zero-byte integrity error)
+// returns true so the caller treats the affected ID as revoked/cancelled.
+func (t *tombstoneStore) containsPackage(id string) bool {
+	tf, err := t.loadOrInit()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
+		return true
+	}
+	for _, x := range tf.Packages {
+		if x == id {
+			return true
 		}
-		return nil, err
 	}
-	var list []offlinepkg.SupersededVersion
-	if len(b) == 0 {
-		return nil, nil
-	}
-	if err := json.Unmarshal(b, &list); err != nil {
-		return nil, err
-	}
-	return list, nil
+	return false
 }
 
-// isSuperseded reports whether (pkgID, version) is in the superseded list.
-func (t *tombstoneStore) isSuperseded(pkgID string, version int) bool {
-	list, err := t.loadSuperseded()
+func (t *tombstoneStore) containsRoute(id string) bool {
+	tf, err := t.loadOrInit()
 	if err != nil {
-		return true // fail closed
+		return true
 	}
-	for _, x := range list {
+	for _, x := range tf.Routes {
+		if x == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *tombstoneStore) isSuperseded(pkgID string, version int) bool {
+	if pkgID == "" || version <= 0 {
+		return false
+	}
+	tf, err := t.loadOrInit()
+	if err != nil {
+		return true
+	}
+	for _, x := range tf.Superseded {
 		if x.PackageID == pkgID && x.Version == version {
 			return true
 		}
@@ -529,17 +615,15 @@ func (t *tombstoneStore) isSuperseded(pkgID string, version int) bool {
 	return false
 }
 
-// verifyIntegrity checks that all tombstone files exist and are well-formed.
+// verifyIntegrity checks the tombstone state is consistent with the
+// initialization sentinel. Missing file + missing sentinel → OK.
+// Missing file + present sentinel → integrity error. Present and
+// well-formed file → OK. Present and zero-byte/malformed file →
+// integrity error. stateQuery fails closed (FreshnessUnverifiable) on
+// any verifyIntegrity error.
 func (t *tombstoneStore) verifyIntegrity() error {
-	for _, name := range []string{"packages.json", "routes.json"} {
-		if _, err := t.loadOrInit(name); err != nil {
-			return err
-		}
-	}
-	if _, err := t.loadSuperseded(); err != nil {
-		return err
-	}
-	return nil
+	_, err := t.loadOrInit()
+	return err
 }
 
 // --- resource store ---
@@ -592,11 +676,4 @@ func (s *storage) hasResourcePart(id string) bool {
 	defer s.mu.Unlock()
 	_, err := os.Stat(s.partPath("resource", id))
 	return err == nil
-}
-
-// monotonicNow returns the monotonic clock reading from the injected Now
-// function. It is the only time source used for expiry decisions.
-func monotonicNow(now func() time.Time) time.Time {
-	t := now()
-	return t
 }

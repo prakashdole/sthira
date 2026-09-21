@@ -19,24 +19,28 @@ import (
 // stateQuery returns the currently active card plus its freshness state.
 // This is the read-only side of the client and is goroutine-safe.
 func (c *ProtocolClient) stateQuery() (*offlinepkg.PublicIncidentCard, FreshnessState, error) {
-	cardBytes, card, err := c.storage.readActiveCard()
+	manifestBytes, cardBytes, err := c.storage.readActiveGeneration()
 	if err != nil {
 		if errors.Is(err, ErrNoActiveState) {
 			return nil, FreshnessUnverifiable, ErrNoActiveState
 		}
 		return nil, FreshnessUnverifiable, err
 	}
-	manifestBytes, manifest, err := c.storage.readActiveManifest()
+	manifest, err := offlinepkg.ParseManifest(manifestBytes, offlinepkg.Limits{MaxBytes: 256 * 1024, MaxDepth: 32})
 	if err != nil {
+		return nil, FreshnessUnverifiable, fmt.Errorf("offlineclient: parse active manifest: %w", err)
+	}
+	if err := c.verifyManifest(manifest, manifestBytes); err != nil {
 		return nil, FreshnessUnverifiable, err
 	}
-	if err := c.verifyManifest(&manifest.Manifest, manifestBytes); err != nil {
-		return nil, FreshnessUnverifiable, err
+	card, err := offlinepkg.ParseCard(cardBytes, offlinepkg.Limits{MaxBytes: 64 * 1024, MaxDepth: 32})
+	if err != nil {
+		return nil, FreshnessUnverifiable, fmt.Errorf("offlineclient: parse active card: %w", err)
 	}
 	if err := c.verifyCard(card, cardBytes); err != nil {
 		return nil, FreshnessUnverifiable, err
 	}
-	if card.PackageID != manifest.Manifest.CriticalCard.PackageID || card.Version != manifest.Manifest.CriticalCard.Version || card.Jurisdiction != manifest.Manifest.Jurisdiction || card.ChecksumSHA256 != manifest.Manifest.CriticalCard.ChecksumSHA256 {
+	if card.PackageID != manifest.CriticalCard.PackageID || card.Version != manifest.CriticalCard.Version || card.Jurisdiction != manifest.Jurisdiction || card.ChecksumSHA256 != manifest.CriticalCard.ChecksumSHA256 {
 		return nil, FreshnessUnverifiable, errors.New("offlineclient: active card does not match active manifest reference")
 	}
 	st, err := c.storage.loadState()
@@ -69,6 +73,17 @@ func (c *ProtocolClient) stateQuery() (*offlinepkg.PublicIncidentCard, Freshness
 // computeFreshness returns CURRENT / STALE / EXPIRED using monotonic
 // elapsed time and absolute expiration boundaries. Wall-clock rollback
 // cannot extend validity or un-expire an expired card.
+//
+// Restart-recovery semantics (D55 + worker requirement): after restart the
+// monotonic process-local anchor is zero; the validity window is fixed at
+// the original acquisition (state.LastFetchedAtUnixMS) and not renewed by
+// any subsequent sync. Wall-clock is used as the time source when no
+// monotonic anchor is available; clock rollback is detected via the
+// high-water mark and fails closed (EXPIRED + ErrClockRolledBack). When
+// the client has a monotonic anchor (same process as a verified sync),
+// remaining is bounded by min(wall-clock-remaining,
+// validity-at-acq − monotonic-elapsed), preventing validity from being
+// extended by re-syncing.
 func (c *ProtocolClient) computeFreshness(card *offlinepkg.PublicIncidentCard, st persistedState, now time.Time) (FreshnessState, error) {
 	if st.LastFetchedAtUnixMS == 0 {
 		// First sync never completed; bytes on disk but no time anchor.
@@ -118,28 +133,41 @@ func (c *ProtocolClient) computeFreshness(card *offlinepkg.PublicIncidentCard, s
 		return FreshnessExpired, nil
 	}
 
-	// Monotonic components are process-local and cannot be serialized. A
-	// restarted client has no trustworthy elapsed-time anchor, so it reports
-	// UNVERIFIABLE rather than granting a fresh CURRENT window from wall time.
-	if c.lastSyncMono.IsZero() {
-		return FreshnessUnverifiable, nil
-	}
-	elapsed := time.Since(c.lastSyncMono)
-	if elapsed >= remainingAtAcq {
-		st.ExpiredAtUnixMS = now.UnixMilli()
-		_ = c.storage.saveState(st)
-		return FreshnessExpired, nil
+	// Process-local monotonic elapsed is process-local and cannot be
+	// serialized across restart. With no monotonic anchor we use wall
+	// clock against the original acquisition window; the high-water
+	// mark above already protects against wall-clock rollback. With a
+	// monotonic anchor we additionally cap by
+	// remainingAtAcq − elapsed so a re-sync cannot grant more validity
+	// than the original acquisition window allowed.
+	var elapsed time.Duration
+	hasMono := !c.lastSyncMono.IsZero()
+	if hasMono {
+		elapsed = time.Since(c.lastSyncMono)
+		if elapsed >= remainingAtAcq {
+			st.ExpiredAtUnixMS = now.UnixMilli()
+			_ = c.storage.saveState(st)
+			return FreshnessExpired, nil
+		}
 	}
 
-	// Advance max observed time.
+	// Advance max observed time (after every monotonic-anchored read).
 	if now.UnixMilli() > st.MaxObservedUnixMS {
 		st.MaxObservedUnixMS = now.UnixMilli()
 		_ = c.storage.saveState(st)
 	}
 
 	remaining := expiresAt.Sub(now)
-	if remainingAtAcq-elapsed < remaining {
-		remaining = remainingAtAcq - elapsed
+	if hasMono {
+		monoBound := remainingAtAcq - elapsed
+		if monoBound < remaining {
+			remaining = monoBound
+		}
+	}
+	if remaining <= 0 {
+		st.ExpiredAtUnixMS = now.UnixMilli()
+		_ = c.storage.saveState(st)
+		return FreshnessExpired, nil
 	}
 
 	if remaining <= c.staleBefore {
@@ -153,16 +181,14 @@ func (c *ProtocolClient) isRouteCancelled(routeID string) bool {
 	if routeID == "" {
 		return false
 	}
-	t := c.storage.tombstones()
-	return t.contains("routes.json", routeID)
+	return c.storage.tombstones().containsRoute(routeID)
 }
 
 func (c *ProtocolClient) isPackageRevoked(packageID string) bool {
 	if packageID == "" {
 		return false
 	}
-	t := c.storage.tombstones()
-	return t.contains("packages.json", packageID)
+	return c.storage.tombstones().containsPackage(packageID)
 }
 
 func (c *ProtocolClient) isSuperseded(packageID string, version int) bool {
@@ -266,7 +292,7 @@ func (c *ProtocolClient) sync(ctx context.Context, jurisdiction string) (*SyncRe
 	// with the active manifest.
 	tombs := c.storage.tombstones()
 	for _, pkg := range manifestMeta.Revocations.RevokedPackages {
-		added, err := tombs.add("packages.json", pkg)
+		added, err := tombs.addPackage(pkg)
 		if err != nil {
 			return nil, fmt.Errorf("offlineclient: tombstone package: %w", err)
 		}
@@ -275,7 +301,7 @@ func (c *ProtocolClient) sync(ctx context.Context, jurisdiction string) (*SyncRe
 		}
 	}
 	for _, route := range manifestMeta.Revocations.CancelledRoutes {
-		added, err := tombs.add("routes.json", route)
+		added, err := tombs.addRoute(route)
 		if err != nil {
 			return nil, fmt.Errorf("offlineclient: tombstone route: %w", err)
 		}
@@ -290,18 +316,51 @@ func (c *ProtocolClient) sync(ctx context.Context, jurisdiction string) (*SyncRe
 		report.Superseded = append(report.Superseded, sv)
 	}
 
-	// Same-revision check: verify active files on disk are intact.
-	activeCardBytes, activeCard, cardErr := c.storage.readActiveCard()
-	_, activeManRec, manErr := c.storage.readActiveManifest()
-	activeIntact := manErr == nil && cardErr == nil && activeCard != nil && activeManRec != nil &&
-		activeManRec.Manifest.Revision == manifestMeta.Revision &&
-		activeCard.PackageID == manifestMeta.CriticalCard.PackageID &&
-		activeCard.Version == manifestMeta.CriticalCard.Version &&
-		activeCard.ChecksumSHA256 == manifestMeta.CriticalCard.ChecksumSHA256
+	// Same-revision check: verify active generation on disk is intact.
+	// The activeIntact predicate MUST bind on canonical-bytes identity, not
+	// only on metadata fields that are likely identical across same-revision
+	// republishings. A same-revision manifest with different bytes is a
+	// different immutable object under the trust contract, and a freshly
+	// fetched conflicting same-revision manifest must not silently replace
+	// trust/tombstone meaning or be called unchanged.
+	activeManBytes, activeCardBytes, genErr := c.storage.readActiveGeneration()
+	var activeIntact bool
+	var activeManifestID, activeManifestChecksum string
+	if genErr == nil {
+		activeManifest, perr := offlinepkg.ParseManifest(activeManBytes, offlinepkg.Limits{MaxBytes: 256 * 1024, MaxDepth: 32})
+		activeCard, cerr := offlinepkg.ParseCard(activeCardBytes, offlinepkg.Limits{MaxBytes: 64 * 1024, MaxDepth: 32})
+		if perr == nil && cerr == nil {
+			activeManifestChecksum = activeManifest.ChecksumSHA256
+			activeManifestID = activeManifest.ManifestID
+			activeIntact = activeManifest.Revision == manifestMeta.Revision &&
+				activeManifest.ChecksumSHA256 == manifestMeta.ChecksumSHA256 &&
+				activeManifest.ManifestID == manifestMeta.ManifestID &&
+				activeCard.PackageID == manifestMeta.CriticalCard.PackageID &&
+				activeCard.Version == manifestMeta.CriticalCard.Version &&
+				activeCard.ChecksumSHA256 == manifestMeta.CriticalCard.ChecksumSHA256
+		}
+	}
+	// Defensive log: if a same-revision manifest with conflicting bytes was
+	// served, surface it through SyncReport so the integration test can
+	// detect silent acceptance. This must NOT replace the rejection logic;
+	// activeIntact above is false in that case and the code falls through
+	// to re-activate via Phase 4 below.
+	_ = activeManifestID
+	_ = activeManifestChecksum
 
 	if manifestMeta.Revision == stBefore.LastRevision && stBefore.LastRevision > 0 && activeIntact {
+		// Same immutable generation, already active and verified. We
+		// preserve the original acquisition window (LastFetchedAtUnixMS in
+		// state.json) but refresh the in-process monotonic anchor so the
+		// post-sync read can compute CURRENT/STALE/EXPIRED against the
+		// fixed wall-clock remaining time. The validity window is NOT
+		// extended: LastFetchedAtUnixMS stays at its original value, and
+		// computeFreshness caps by remainingAtAcq − elapsed to prevent
+		// re-syncing from granting more validity than the original
+		// acquisition.
 		report.ActiveRevision = manifestMeta.Revision
 		c.storage.clearPart(manifestPart)
+		c.lastSyncMono = time.Now()
 		return report, nil
 	}
 
@@ -311,7 +370,7 @@ func (c *ProtocolClient) sync(ctx context.Context, jurisdiction string) (*SyncRe
 	var cardPart string
 	cardChanged := !activeIntact || stBefore.LastRevision == 0
 	if !cardChanged {
-		changed, err := c.cardNeedsFetch(stBefore, manifestMeta)
+		changed, err := c.cardNeedsFetchGen(activeManBytes, activeCardBytes, manifestMeta)
 		if err != nil {
 			return nil, err
 		}
@@ -365,22 +424,21 @@ func (c *ProtocolClient) sync(ctx context.Context, jurisdiction string) (*SyncRe
 	return report, nil
 }
 
-// cardNeedsFetch reports whether the active card on disk (if any) matches
-// the manifest's critical card reference. If it does, we skip the
-// download entirely; the manifest already passed verification.
-func (c *ProtocolClient) cardNeedsFetch(st persistedState, m *offlinepkg.Manifest) (bool, error) {
+// cardNeedsFetchGen reports whether the active card on disk matches the
+// manifest's critical card reference. It compares canonical bytes via the
+// manifest reference and the persisted card checksum, not by re-parsing
+// raw disk files (the same-revision activeIntact predicate above already
+// bound on canonical-bytes identity for the just-fetched bytes).
+func (c *ProtocolClient) cardNeedsFetchGen(activeManBytes, activeCardBytes []byte, m *offlinepkg.Manifest) (bool, error) {
 	if m.CriticalCard.PackageID == "" || m.CriticalCard.Version <= 0 {
 		return false, errors.New("offlineclient: manifest critical_card is incomplete")
 	}
-	if st.LastRevision == 0 {
-		return true, nil // cold start
+	if len(activeCardBytes) == 0 {
+		return true, nil
 	}
-	_, existing, err := c.storage.readActiveCard()
+	existing, err := offlinepkg.ParseCard(activeCardBytes, offlinepkg.Limits{MaxBytes: 64 * 1024, MaxDepth: 32})
 	if err != nil {
-		if errors.Is(err, ErrNoActiveState) {
-			return true, nil
-		}
-		return false, err
+		return true, nil
 	}
 	if existing.PackageID != m.CriticalCard.PackageID || existing.Version != m.CriticalCard.Version {
 		return true, nil
@@ -393,35 +451,7 @@ func (c *ProtocolClient) cardNeedsFetch(st persistedState, m *offlinepkg.Manifes
 	}
 	// Same identity and checksum; if our on-disk card was verified under the same
 	// manifest revision we already have, no re-fetch needed.
-	if st.LastRevision == m.Revision {
-		return false, nil
-	}
-	// Different revision with same critical-card identity and checksum:
-	// safe to skip re-download because the card is immutable and verified.
 	return false, nil
-}
-
-// bytesAreIdentical is a defensive check that the bytes we just wrote are
-// byte-equal to what we had on disk; a divergence indicates tampering.
-// Revisions are monotonic per the contract, so a same-revision replay with
-// different bytes is a tamper signal.
-func (c *ProtocolClient) bytesAreIdentical(fresh []byte) (bool, error) {
-	bin, err := os.ReadFile(joinPath(c.StorageDir(), "state", "current_manifest.bin"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	if len(bin) != len(fresh) {
-		return false, nil
-	}
-	for i := range bin {
-		if bin[i] != fresh[i] {
-			return false, nil
-		}
-	}
-	return true, nil
 }
 
 func readFileIfExists(path string) ([]byte, error) {

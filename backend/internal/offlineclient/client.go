@@ -248,11 +248,11 @@ func (c *ProtocolClient) GetActiveCard() (*offlinepkg.PublicIncidentCard, Freshn
 
 // GetActiveManifest returns the currently active manifest.
 func (c *ProtocolClient) GetActiveManifest() (*offlinepkg.Manifest, error) {
-	_, rec, err := c.storage.readActiveManifest()
+	manifestBytes, _, err := c.storage.readActiveGeneration()
 	if err != nil {
 		return nil, err
 	}
-	return &rec.Manifest, nil
+	return offlinepkg.ParseManifest(manifestBytes, offlinepkg.Limits{MaxBytes: 256 * 1024, MaxDepth: 32})
 }
 
 // IsRouteCancelled reports whether the named route ID has been tombstoned
