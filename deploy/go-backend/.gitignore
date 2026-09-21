@@ -1,0 +1,11 @@
+# Built by `bin/build-image.sh` and the lifecycle scripts on demand.
+# Do not commit binary outputs from this module's go build.
+migrate/pgdsn-env
+migrate/sthmigrate
+
+# BuildKit staged build context (created by bin/build-image.sh).
+.sthira-go-stage-*/
+
+# Local secrets that the lifecycle scripts read; never committed.
+.env
+.env.local
