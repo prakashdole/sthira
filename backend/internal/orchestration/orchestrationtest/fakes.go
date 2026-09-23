@@ -341,18 +341,37 @@ func (r *Templates) Keys() []string {
 
 // Build constructs a typed ScopedContext for tests.
 func BuildScopedContext(jurisdiction, language string) contracts.ScopedContext {
+	// Digests for the two default keys' canonical test texts. Tests that
+	// register a different Text must update ApprovedTemplateSHA accordingly.
+	welcomeSHA := DigestString("Welcome, citizen.")
+	destSHA := DigestString("Destination choices are displayed on screen.")
 	return contracts.ScopedContext{
 		RequestID:        "sc-" + jurisdiction,
 		DataVersion:      "PKG-1:1",
 		Jurisdiction:     jurisdiction,
 		SchemaVersion:    contracts.SchemaVersionV3,
+		SourceID:         "SRC-1",
 		SourceStatus:     contracts.FreshnessCurrent,
 		SourceVersion:    1,
 		TemplateVersion:  1,
 		AllowedLanguages: []string{language},
 		TemplateKeys:     []string{"welcome", "destination_options"},
-		IssuedAt:         "2026-09-21T00:00:00Z",
+		ApprovedSpeechKeys: map[string][]string{
+			"welcome":             {language},
+			"destination_options": {language},
+		},
+		ApprovedTemplateSHA: map[string]string{
+			"welcome":             welcomeSHA,
+			"destination_options": destSHA,
+		},
+		IssuedAt: "2026-09-21T00:00:00Z",
 	}
+}
+
+// DigestString is the SHA-256 hex of a canonical template string.
+func DigestString(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }
 
 // NewOrchestrator wires a fresh orchestrator with the supplied

@@ -2,6 +2,8 @@ package ttsworker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"sync"
@@ -97,6 +99,7 @@ func craftReq(t *testing.T, renderer *templates.Renderer, clock *StandaloneSourc
 		Text:            text,
 		SourceVersion:   clock.Current(),
 		TemplateVersion: 1,
+		TemplateSHA256:  mustDigest(text),
 		Settings:        SynthesisSettings{SampleRate: 22050, BitDepth: 16, Channels: 1, SpeakingRate: 1.0},
 		DeadlineMillis:  5000,
 	}
@@ -111,11 +114,17 @@ func identityFor(t *testing.T, renderer *templates.Renderer, clock *StandaloneSo
 		TemplateKey:       "destination_options",
 		TemplateVersion:   1,
 		SourceVersion:     clock.Current(),
+		TemplateSHA256:    mustDigest(text),
 		Language:          lang,
 		ModelRevision:     "rev-1",
 		VoiceRevision:     "ml-IN-female-1",
 		SynthesisSettings: SynthesisSettings{SampleRate: 22050, BitDepth: 16, Channels: 1, SpeakingRate: 1.0},
 	}
+}
+
+func mustDigest(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }
 
 // silenceWAVCache puts a silent WAV into the cache for an identity.
@@ -143,6 +152,7 @@ func TestWorkerHotPathServesCachedAudio(t *testing.T) {
 		Text:            id.Text,
 		SourceVersion:   id.SourceVersion,
 		TemplateVersion: id.TemplateVersion,
+		TemplateSHA256:  id.TemplateSHA256,
 		Settings:        id.SynthesisSettings,
 		DeadlineMillis:  5000,
 	}

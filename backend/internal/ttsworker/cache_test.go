@@ -12,8 +12,8 @@ import (
 // TestCacheIdentityStringIsStable: the same identity across rebuilds
 // produces the same canonical string.
 func TestCacheIdentityStringIsStable(t *testing.T) {
-	a := CacheIdentity{Text: "hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, ModelRevision: "rev-1", VoiceRevision: "v-1"}
-	b := CacheIdentity{Text: "hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, ModelRevision: "rev-1", VoiceRevision: "v-1"}
+	a := CacheIdentity{Text: "hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "d0", ModelRevision: "rev-1", VoiceRevision: "v-1"}
+	b := CacheIdentity{Text: "hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "d0", ModelRevision: "rev-1", VoiceRevision: "v-1"}
 	if a.String() != b.String() {
 		t.Fatalf("identity strings should match: %q vs %q", a.String(), b.String())
 	}
@@ -23,16 +23,17 @@ func TestCacheIdentityStringIsStable(t *testing.T) {
 // identity string. This is the cache-correctness invariant: a
 // parameter change MUST invalidate the cache.
 func TestCacheIdentityStrDiffersOnAnyField(t *testing.T) {
-	base := CacheIdentity{Text: "hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, ModelRevision: "rev-1", VoiceRevision: "v-1"}
+	base := CacheIdentity{Text: "hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "d0", ModelRevision: "rev-1", VoiceRevision: "v-1"}
 	baseStr := base.String()
 	variants := []CacheIdentity{
-		{Text: "Hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, ModelRevision: "rev-1", VoiceRevision: "v-1"},
-		{Text: "hello", TemplateKey: "b", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, ModelRevision: "rev-1", VoiceRevision: "v-1"},
-		{Text: "hello", TemplateKey: "a", Language: "ml-IN", SourceVersion: 1, TemplateVersion: 1, ModelRevision: "rev-1", VoiceRevision: "v-1"},
-		{Text: "hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 2, TemplateVersion: 1, ModelRevision: "rev-1", VoiceRevision: "v-1"},
-		{Text: "hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 2, ModelRevision: "rev-1", VoiceRevision: "v-1"},
-		{Text: "hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, ModelRevision: "rev-2", VoiceRevision: "v-1"},
-		{Text: "hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, ModelRevision: "rev-1", VoiceRevision: "v-2"},
+		{Text: "Hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "d0", ModelRevision: "rev-1", VoiceRevision: "v-1"},
+		{Text: "hello", TemplateKey: "b", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "d0", ModelRevision: "rev-1", VoiceRevision: "v-1"},
+		{Text: "hello", TemplateKey: "a", Language: "ml-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "d0", ModelRevision: "rev-1", VoiceRevision: "v-1"},
+		{Text: "hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 2, TemplateVersion: 1, TemplateSHA256: "d0", ModelRevision: "rev-1", VoiceRevision: "v-1"},
+		{Text: "hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 2, TemplateSHA256: "d0", ModelRevision: "rev-1", VoiceRevision: "v-1"},
+		{Text: "hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "d0", ModelRevision: "rev-2", VoiceRevision: "v-1"},
+		{Text: "hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "d0", ModelRevision: "rev-1", VoiceRevision: "v-2"},
+		{Text: "hello", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "d1", ModelRevision: "rev-1", VoiceRevision: "v-1"},
 	}
 	for i, v := range variants {
 		if v.String() == baseStr {
@@ -46,7 +47,7 @@ func TestCacheIdentityStrDiffersOnAnyField(t *testing.T) {
 func TestCodecStoresAndServes(t *testing.T) {
 	clock := NewStandaloneSourceVersionClock(1)
 	c := NewCodec(1024*1024, time.Minute, clock)
-	id := CacheIdentity{Text: "h", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, ModelRevision: "r-1", VoiceRevision: "v-1"}
+	id := CacheIdentity{Text: "h", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "d0", ModelRevision: "r-1", VoiceRevision: "v-1"}
 	bytes := []byte("WAVBYTES")
 	if err := c.Put(id, bytes); err != nil {
 		t.Fatal(err)
@@ -69,7 +70,7 @@ func TestCodecLRUEvictsUnderBudget(t *testing.T) {
 	clock := NewStandaloneSourceVersionClock(1)
 	c := NewCodec(20, time.Minute, clock)
 	for i := 0; i < 5; i++ {
-		id := CacheIdentity{Text: string(rune('a' + i)), TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, ModelRevision: "r-1", VoiceRevision: "v-1"}
+		id := CacheIdentity{Text: string(rune('a' + i)), TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "d0", ModelRevision: "r-1", VoiceRevision: "v-1"}
 		if err := c.Put(id, bytes.Repeat([]byte{'x'}, 10)); err != nil {
 			t.Fatal(err)
 		}
@@ -88,7 +89,7 @@ func TestCodecLRUEvictsUnderBudget(t *testing.T) {
 func TestCodecInvalidatesOnSourceAdvance(t *testing.T) {
 	clock := NewStandaloneSourceVersionClock(1)
 	c := NewCodec(1024*1024, time.Hour, clock)
-	id := CacheIdentity{Text: "h", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, ModelRevision: "r-1", VoiceRevision: "v-1"}
+	id := CacheIdentity{Text: "h", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "d0", ModelRevision: "r-1", VoiceRevision: "v-1"}
 	if err := c.Put(id, []byte("WAVBYTES")); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +111,7 @@ func TestCodecInvalidatesOnSourceAdvance(t *testing.T) {
 func TestCodecWithdrawsMidServe(t *testing.T) {
 	clock := NewStandaloneSourceVersionClock(1)
 	c := NewCodec(1024*1024, time.Hour, clock)
-	id := CacheIdentity{Text: "h", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, ModelRevision: "r-1", VoiceRevision: "v-1"}
+	id := CacheIdentity{Text: "h", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "d0", ModelRevision: "r-1", VoiceRevision: "v-1"}
 	if err := c.Put(id, []byte("WAVBYTES")); err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +146,7 @@ func TestCodecWithdrawsMidServe(t *testing.T) {
 func TestCodecPurgeHelper(t *testing.T) {
 	clock := NewStandaloneSourceVersionClock(1)
 	c := NewCodec(1024*1024, time.Hour, clock)
-	id := CacheIdentity{Text: "h", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, ModelRevision: "r-1", VoiceRevision: "v-1"}
+	id := CacheIdentity{Text: "h", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "d0", ModelRevision: "r-1", VoiceRevision: "v-1"}
 	if err := c.Put(id, []byte("WAVBYTES")); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +166,7 @@ func TestCodecTTLExpires(t *testing.T) {
 	c.now = func() time.Time {
 		return time.Unix(0, 0)
 	}
-	id := CacheIdentity{Text: "h", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, ModelRevision: "r-1", VoiceRevision: "v-1"}
+	id := CacheIdentity{Text: "h", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "d0", ModelRevision: "r-1", VoiceRevision: "v-1"}
 	if err := c.Put(id, []byte("WAVBYTES")); err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +182,7 @@ func TestCodecTTLExpires(t *testing.T) {
 // TestCacheIdentityValidate: an identity with missing fields is
 // rejected so partial identities can never map to existing entries.
 func TestCacheIdentityValidate(t *testing.T) {
-	ok := CacheIdentity{Text: "h", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, ModelRevision: "r", VoiceRevision: "v"}
+	ok := CacheIdentity{Text: "h", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "d", ModelRevision: "r", VoiceRevision: "v"}
 	if err := ok.Validate(); err != nil {
 		t.Fatalf("expected ok identity to validate: %v", err)
 	}
@@ -193,6 +194,8 @@ func TestCacheIdentityValidate(t *testing.T) {
 		{Text: "h", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, ModelRevision: "r"},                    // missing voice
 		{Text: "h", TemplateKey: "a", Language: "en-IN", ModelRevision: "r", VoiceRevision: "v"},                  // missing source_version
 		{Text: "", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, ModelRevision: "r", VoiceRevision: "v"}, // empty text
+		{Text: "h", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 0, TemplateSHA256: "d", ModelRevision: "r", VoiceRevision: "v"},
+		{Text: "h", TemplateKey: "a", Language: "en-IN", SourceVersion: 1, TemplateVersion: 1, TemplateSHA256: "", ModelRevision: "r", VoiceRevision: "v"},
 	}
 	for i, b := range bad {
 		err := b.Validate()

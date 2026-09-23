@@ -1,12 +1,21 @@
 package orchestration
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"sort"
 	"sync"
 
 	"sthira/backend/internal/contracts"
 )
+
+// sha256HexOfString digests canonical template bytes (tpl.Text), never
+// the rendered substitution output.
+func sha256HexOfString(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
 
 // ProductionValidator implements VoiceValidator using the contracts package's
 // shape and scoped semantic validators.
@@ -49,10 +58,15 @@ func NewMapTemplateRegistry() *MapTemplateRegistry {
 	}
 }
 
-// Add inserts or updates an approved template.
+// Add inserts or updates an approved template. The template's
+// TemplateSHA256 is computed over Text when empty so the orchestrator
+// can compare against the DB-approved digest.
 func (r *MapTemplateRegistry) Add(t contracts.ApprovedTemplate) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if t.TemplateSHA256 == "" {
+		t.TemplateSHA256 = sha256HexOfString(t.Text)
+	}
 	key := t.SpeechKey + "/" + t.Language
 	r.tpls[key] = t
 }

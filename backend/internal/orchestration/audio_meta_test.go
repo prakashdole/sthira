@@ -19,7 +19,9 @@ import (
 // audio and the cache key would mismatch on the next request.
 func TestStageTTS_PropagatesReturnedSettingsNotRequestSide(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
-	resolver := orchestrationtest.NewResolver(orchestrationtest.BuildScopedContext("JTEST", "en-IN"))
+	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	sc.ApprovedTemplateSHA["welcome"] = orchestrationtest.DigestString("Welcome.")
+	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
 	tpls.Add(contracts.ApprovedTemplate{
@@ -89,7 +91,9 @@ func TestStageTTS_PropagatesReturnedSettingsNotRequestSide(t *testing.T) {
 // "Never declare 16 kHz while delivering native-rate audio" guard.
 func TestStageTTS_RejectsMismatchedSettings(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
-	resolver := orchestrationtest.NewResolver(orchestrationtest.BuildScopedContext("JTEST", "en-IN"))
+	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	sc.ApprovedTemplateSHA["welcome"] = orchestrationtest.DigestString("Welcome.")
+	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
 	tpls.Add(contracts.ApprovedTemplate{

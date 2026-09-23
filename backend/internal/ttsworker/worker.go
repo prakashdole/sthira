@@ -25,14 +25,16 @@ const (
 // SynthesizeRequest is the worker-side mirror of
 // contracts.TTSWorkerRequest.
 type SynthesizeRequest struct {
-	RequestID       string            `json:"request_id"`
-	SpeechKey       templates.Key     `json:"speech_key"`
-	Language        string            `json:"language"`
-	Text            string            `json:"text"` // rendered template text only
-	SourceVersion   int               `json:"source_version"`
-	TemplateVersion int               `json:"template_version"`
-	Settings        SynthesisSettings `json:"settings"`
-	DeadlineMillis  int64             `json:"deadline_ms"`
+	RequestID       string        `json:"request_id"`
+	SpeechKey       templates.Key `json:"speech_key"`
+	Language        string        `json:"language"`
+	Text            string        `json:"text"` // rendered template text only
+	SourceVersion   int           `json:"source_version"`
+	TemplateVersion int           `json:"template_version"`
+	// TemplateSHA256 is the approved canonical template digest (B01).
+	TemplateSHA256 string            `json:"template_sha256"`
+	Settings       SynthesisSettings `json:"settings"`
+	DeadlineMillis int64             `json:"deadline_ms"`
 	// Voice is the explicit voice selection (optional). The default
 	// voice for the language is used when empty.
 	Voice string `json:"voice,omitempty"`
@@ -453,6 +455,7 @@ func (w *Worker) handleJob(j *job) {
 		TemplateKey:       string(j.req.SpeechKey),
 		TemplateVersion:   j.req.TemplateVersion,
 		SourceVersion:     j.req.SourceVersion,
+		TemplateSHA256:    j.req.TemplateSHA256,
 		Language:          j.req.Language,
 		ModelRevision:     w.runtime.Revision(),
 		VoiceRevision:     voiceRev,

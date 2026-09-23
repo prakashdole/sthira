@@ -111,9 +111,14 @@ type ScopedContext struct {
 	// TemplateKeys lists the approved speech_key values. Worker 7 freezes
 	// the rendered text for each key.
 	TemplateKeys []string `json:"template_keys"`
-	// ApprovedSpeechKeys maps speech_key to the exact list of approved languages.
-	// Wildcard approval (NULL in DB) is represented as ["*"].
+	// ApprovedSpeechKeys maps speech_key to the exact list of approved
+	// languages. Wildcard approval is not representable: B01 fails closed
+	// when language or digests are missing.
 	ApprovedSpeechKeys map[string][]string `json:"approved_speech_keys,omitempty"`
+	// ApprovedTemplateSHA maps speech_key to the approved template_sha256
+	// digest (hex). The orchestrator rejects a registered template whose
+	// Text digest does not match this value.
+	ApprovedTemplateSHA map[string]string `json:"approved_template_sha256,omitempty"`
 
 	// KnownPlaces maps a place_id to its typed candidate. Distinct from the
 	// flat KnownIDs map; it carries kind and jurisdiction for validation.
@@ -180,21 +185,23 @@ func (sc ScopedContext) IsTemplateKeyAllowed(key string) bool {
 	return false
 }
 
-// IsSpeechKeyApprovedForLanguage reports whether the speech_key is approved for the given language.
+// IsSpeechKeyApprovedForLanguage reports whether the speech_key is approved
+// for the given language. B01: fail closed — empty ApprovedSpeechKeys does
+// not fall back to TemplateKeys, and "*" is not an accepted language.
 func (sc ScopedContext) IsSpeechKeyApprovedForLanguage(key, language string) bool {
-	if len(sc.ApprovedSpeechKeys) > 0 {
-		langs, ok := sc.ApprovedSpeechKeys[key]
-		if !ok {
-			return false
-		}
-		for _, l := range langs {
-			if l == "*" || l == language {
-				return true
-			}
-		}
+	if key == "" || language == "" {
 		return false
 	}
-	return sc.IsTemplateKeyAllowed(key)
+	langs, ok := sc.ApprovedSpeechKeys[key]
+	if !ok || len(langs) == 0 {
+		return false
+	}
+	for _, l := range langs {
+		if l != "" && l != "*" && l == language {
+			return true
+		}
+	}
+	return false
 }
 
 // IsKnownID reports whether id appears in known places, safe zones, red zones, routes or facilities.

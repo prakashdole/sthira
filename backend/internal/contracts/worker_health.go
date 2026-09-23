@@ -114,14 +114,17 @@ type MiddleWorkerResponse struct {
 // TTSWorkerRequest is the typed shape the orchestrator sends to the TTS
 // worker's POST /synthesize. Only Go-approved text and versions flow.
 type TTSWorkerRequest struct {
-	RequestID       string               `json:"request_id"`
-	SpeechKey       string               `json:"speech_key"`
-	Language        string               `json:"language"`
-	Text            string               `json:"text"` // rendered template text only
-	SourceVersion   int                  `json:"source_version"`
-	TemplateVersion int                  `json:"template_version"`
-	Settings        TTSSynthesisSettings `json:"settings"`
-	DeadlineMillis  int64                `json:"deadline_ms"`
+	RequestID       string `json:"request_id"`
+	SpeechKey       string `json:"speech_key"`
+	Language        string `json:"language"`
+	Text            string `json:"text"` // rendered template text only
+	SourceVersion   int    `json:"source_version"`
+	TemplateVersion int    `json:"template_version"`
+	// TemplateSHA256 is the approved canonical template digest; the
+	// worker binds its cache identity to it (B01).
+	TemplateSHA256 string               `json:"template_sha256"`
+	Settings       TTSSynthesisSettings `json:"settings"`
+	DeadlineMillis int64                `json:"deadline_ms"`
 }
 
 // TTSWorkerResponse is the typed envelope the TTS worker returns.

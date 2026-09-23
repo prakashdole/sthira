@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -334,7 +336,9 @@ func TestScopedContext_VerifierReadsViaAcceptableRoute(t *testing.T) {
 	// Worker 7's registry (P6 templates worker) supplies the
 	// authoritative TemplateKeys at request time; the persisted
 	// snapshot does not carry them. Inject a single key for this test.
+	// B01: also inject ApprovedSpeechKeys so the fail-closed check passes.
 	sc.TemplateKeys = []string{"destination_options"}
+	sc.ApprovedSpeechKeys = map[string][]string{"destination_options": {"ml-IN"}}
 	intent := contracts.IntentShowRoute
 	prop := contracts.ModelOutput{
 		SchemaVersion: "3.0",
@@ -481,12 +485,14 @@ func TestScopedGuidance_ExactLanguageBinding(t *testing.T) {
 	now := nowUTC()
 	srcID := findKLP6Source(t, fx.store.DB())
 
-	// Seed approved translation for "en-IN" only.
+	// Seed approved translation for "en-IN" only (B01: digest required).
+	dsum := sha256.Sum256([]byte("Clarify the location."))
+	dig := hex.EncodeToString(dsum[:])
 	if _, err := fx.store.DB().ExecContext(context.Background(), `
 		INSERT INTO approved_translations
-			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, approved_by, evidence_ref, approved_at)
-		VALUES ($1, $2, 'clarify_place', 'en-IN', 7, 7, $3, 'reviewer-1', 'doc-1', $4)`,
-		"APP-EN-"+uid("X"), fx.jurisdictionID, srcID, now); err != nil {
+			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, template_sha256, approved_by, evidence_ref, approved_at)
+		VALUES ($1, $2, 'clarify_place', 'en-IN', 7, 7, $3, $4, 'reviewer-1', 'doc-1', $5)`,
+		"APP-EN-"+uid("X"), fx.jurisdictionID, srcID, dig, now); err != nil {
 		t.Fatalf("seed approved translation: %v", err)
 	}
 
@@ -512,11 +518,12 @@ func TestScopedGuidance_VersionAndSourceMismatchRejected(t *testing.T) {
 	srcID := findKLP6Source(t, fx.store.DB())
 
 	// 1. Older source/template version 6 (package is at version 7) -> must NOT approve
+	oldDig := hex.EncodeToString(func() []byte { s := sha256.Sum256([]byte("old")); return s[:] }())
 	if _, err := fx.store.DB().ExecContext(context.Background(), `
 		INSERT INTO approved_translations
-			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, approved_by, evidence_ref, approved_at)
-		VALUES ($1, $2, 'old_key', 'en-IN', 6, 6, $3, 'reviewer-1', 'doc-1', $4)`,
-		"APP-OLD-"+uid("X"), fx.jurisdictionID, srcID, now); err != nil {
+			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, template_sha256, approved_by, evidence_ref, approved_at)
+		VALUES ($1, $2, 'old_key', 'en-IN', 6, 6, $3, $4, 'reviewer-1', 'doc-1', $5)`,
+		"APP-OLD-"+uid("X"), fx.jurisdictionID, srcID, oldDig, now); err != nil {
 		t.Fatalf("seed old translation: %v", err)
 	}
 
@@ -528,11 +535,12 @@ func TestScopedGuidance_VersionAndSourceMismatchRejected(t *testing.T) {
 		otherSrcID, now); err != nil {
 		t.Fatalf("seed other source: %v", err)
 	}
+	otherDig := hex.EncodeToString(func() []byte { s := sha256.Sum256([]byte("other")); return s[:] }())
 	if _, err := fx.store.DB().ExecContext(context.Background(), `
 		INSERT INTO approved_translations
-			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, approved_by, evidence_ref, approved_at)
-		VALUES ($1, $2, 'other_source_key', 'en-IN', 7, 7, $3, 'reviewer-1', 'doc-1', $4)`,
-		"APP-OTHER-"+uid("X"), fx.jurisdictionID, otherSrcID, now); err != nil {
+			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, template_sha256, approved_by, evidence_ref, approved_at)
+		VALUES ($1, $2, 'other_source_key', 'en-IN', 7, 7, $3, $4, 'reviewer-1', 'doc-1', $5)`,
+		"APP-OTHER-"+uid("X"), fx.jurisdictionID, otherSrcID, otherDig, now); err != nil {
 		t.Fatalf("seed other source translation: %v", err)
 	}
 
@@ -558,11 +566,12 @@ func TestScopedGuidance_RevocationDuringInference(t *testing.T) {
 	srcID := findKLP6Source(t, fx.store.DB())
 
 	transID := "APP-REVOKE-" + uid("X")
+	welcomeDig := hex.EncodeToString(func() []byte { s := sha256.Sum256([]byte("Welcome, citizen.")); return s[:] }())
 	if _, err := fx.store.DB().ExecContext(context.Background(), `
 		INSERT INTO approved_translations
-			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, approved_by, evidence_ref, approved_at)
-		VALUES ($1, $2, 'welcome', 'en-IN', 7, 7, $3, 'reviewer-1', 'doc-1', $4)`,
-		transID, fx.jurisdictionID, srcID, now); err != nil {
+			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, template_sha256, approved_by, evidence_ref, approved_at)
+		VALUES ($1, $2, 'welcome', 'en-IN', 7, 7, $3, $4, 'reviewer-1', 'doc-1', $5)`,
+		transID, fx.jurisdictionID, srcID, welcomeDig, now); err != nil {
 		t.Fatalf("seed translation: %v", err)
 	}
 

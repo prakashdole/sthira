@@ -203,20 +203,21 @@ func BuildScopedContext(ctx context.Context, db DBTX, jurisdiction, packageID st
 	// (external gate O11); seeding it from a test is an isolated
 	// fixture, not an invented approved translation.
 	//
-	// A row with a NULL language approves the speech_key for every
-	// language the jurisdiction serves; a concrete language restricts
-	// it to that reviewer's sign-off and is only surfaced when that
-	// language is in the context's allowed set.
+	// A row with a NULL language, source_id or template_sha256 cannot
+	// authorize speech: migration 0010 quarantines such active rows and
+	// readApprovedSpeechKeys fails closed (no wildcard, no empty-source
+	// match). An empty result is an honest fail-closed signal.
 	allowedLangs := make(map[string]struct{}, len(sc.AllowedLanguages))
 	for _, l := range sc.AllowedLanguages {
 		allowedLangs[l] = struct{}{}
 	}
-	approved, approvedLangs, err := readApprovedSpeechKeys(ctx, db, jurisdiction, sourceVersion, sc.TemplateVersion, sourceID, now, allowedLangs)
+	approved, approvedLangs, digests, err := readApprovedSpeechKeys(ctx, db, jurisdiction, sourceVersion, sc.TemplateVersion, sourceID, now, allowedLangs)
 	if err != nil {
 		return contracts.ScopedContext{}, fmt.Errorf("store: read approved translations: %w", err)
 	}
 	sc.TemplateKeys = approved
 	sc.ApprovedSpeechKeys = approvedLangs
+	sc.ApprovedTemplateSHA = digests
 
 	// Place aliases: each alias maps a normalized lookup key to a place
 	// ID; we expose them as KnownPlaces with kind guessed from where
@@ -324,44 +325,54 @@ func readAliases(ctx context.Context, db DBTX, jurisdiction string) ([]PlaceCand
 }
 
 // readApprovedSpeechKeys returns the distinct, ascending set of
-// speech_keys currently approved for the jurisdiction matching
-// sourceVersion, templateVersion and sourceID, active at now,
-// backed by the persisted approved_translations authority table.
-// A row with a NULL language is approved for every allowed language ("*");
-// a concrete language is surfaced only when that language is in allowed.
-// Returns both the unique keys and a map of key -> approved languages.
-func readApprovedSpeechKeys(ctx context.Context, db DBTX, jurisdiction string, sourceVersion, templateVersion int, sourceID string, now time.Time, allowed map[string]struct{}) ([]string, map[string][]string, error) {
+// speech_keys currently approved for the jurisdiction matching the exact
+// sourceVersion, templateVersion and sourceID, active at now, backed by
+// the persisted approved_translations authority table.
+//
+// B01 fail-closed rules:
+//   - empty sourceID returns no approvals (cannot authorize every source);
+//   - source_id must be non-NULL and exactly equal to sourceID;
+//   - language must be non-NULL (no wildcard) and in the allowed set;
+//   - template_sha256 must be non-NULL (64-hex digest) and is returned
+//     as speech_key -> digest for the orchestrator's template check.
+func readApprovedSpeechKeys(ctx context.Context, db DBTX, jurisdiction string, sourceVersion, templateVersion int, sourceID string, now time.Time, allowed map[string]struct{}) ([]string, map[string][]string, map[string]string, error) {
+	if sourceID == "" {
+		return nil, nil, map[string]string{}, nil
+	}
 	rows, err := db.QueryContext(ctx, `
-		SELECT speech_key, language
+		SELECT speech_key, language, template_sha256
 		FROM approved_translations
 		WHERE jurisdiction = $1
 		  AND source_version = $2
 		  AND template_version = $3
-		  AND (source_id IS NULL OR $4 = '' OR source_id = $4)
+		  AND source_id IS NOT NULL
+		  AND source_id = $4
+		  AND language IS NOT NULL
+		  AND template_sha256 IS NOT NULL
 		  AND revoked_at IS NULL
 		  AND approved_at <= $5
 		ORDER BY speech_key, language`,
 		jurisdiction, sourceVersion, templateVersion, sourceID, now)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer rows.Close()
 	seen := map[string]struct{}{}
 	approvedLangs := map[string][]string{}
+	digests := map[string]string{}
 	var out []string
 	for rows.Next() {
-		var key string
-		var lang sql.NullString
-		if err := rows.Scan(&key, &lang); err != nil {
-			return nil, nil, err
+		var key, digest string
+		var lang string
+		if err := rows.Scan(&key, &lang, &digest); err != nil {
+			return nil, nil, nil, err
 		}
-		if lang.Valid {
-			if _, ok := allowed[lang.String]; !ok {
-				continue
-			}
-			approvedLangs[key] = append(approvedLangs[key], lang.String)
-		} else {
-			approvedLangs[key] = append(approvedLangs[key], "*")
+		if _, ok := allowed[lang]; !ok {
+			continue
+		}
+		approvedLangs[key] = append(approvedLangs[key], lang)
+		if digest != "" {
+			digests[key] = digest
 		}
 		if _, dup := seen[key]; !dup {
 			seen[key] = struct{}{}
@@ -369,10 +380,10 @@ func readApprovedSpeechKeys(ctx context.Context, db DBTX, jurisdiction string, s
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	sort.Strings(out)
-	return out, approvedLangs, nil
+	return out, approvedLangs, digests, nil
 }
 
 func isInMap(id string, m map[string]contracts.ZoneRef) bool { _, ok := m[id]; return ok }
@@ -564,7 +575,8 @@ func (r *ScopedContextResolver) SnapshotRevalidate(ctx context.Context, sc contr
 				  AND source_version = $2
 				  AND template_version = $3
 				  AND speech_key = $4
-				  AND (source_id IS NULL OR $5 = '' OR source_id = $5)
+				  AND source_id IS NOT NULL
+				  AND source_id = $5
 				  AND revoked_at IS NOT NULL
 				  AND revoked_at <= $6
 			)`, sc.Jurisdiction, sc.SourceVersion, sc.TemplateVersion, key, sc.SourceID, r.now()).Scan(&isRevoked)
@@ -573,12 +585,12 @@ func (r *ScopedContextResolver) SnapshotRevalidate(ctx context.Context, sc contr
 		}
 	}
 
-	// 2. Active approved speech keys and languages must match the snapshot.
+	// 2. Active approved speech keys, languages and digests must match the snapshot.
 	allowedLangs := make(map[string]struct{}, len(sc.AllowedLanguages))
 	for _, l := range sc.AllowedLanguages {
 		allowedLangs[l] = struct{}{}
 	}
-	currentKeys, currentApprovedLangs, err := readApprovedSpeechKeys(ctx, r.store.DB(), sc.Jurisdiction, sc.SourceVersion, sc.TemplateVersion, sc.SourceID, r.now(), allowedLangs)
+	currentKeys, currentApprovedLangs, currentDigests, err := readApprovedSpeechKeys(ctx, r.store.DB(), sc.Jurisdiction, sc.SourceVersion, sc.TemplateVersion, sc.SourceID, r.now(), allowedLangs)
 	if err != nil {
 		return err
 	}
@@ -600,6 +612,14 @@ func (r *ScopedContextResolver) SnapshotRevalidate(ctx context.Context, sc contr
 				return errors.New(contracts.ErrStaleSnapshot)
 			}
 		}
+	}
+	for k, want := range sc.ApprovedTemplateSHA {
+		if currentDigests[k] != want {
+			return errors.New(contracts.ErrStaleSnapshot)
+		}
+	}
+	if len(currentDigests) != len(sc.ApprovedTemplateSHA) {
+		return errors.New(contracts.ErrStaleSnapshot)
 	}
 
 	return nil

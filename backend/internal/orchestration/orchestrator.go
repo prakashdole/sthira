@@ -598,14 +598,27 @@ func (o *Orchestrator) stageTemplate(ctx context.Context, sc contracts.ScopedCon
 			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template is synthetic-only", Retryable: false,
 		})
 	}
-	if tpl.TemplateVersion != 0 && tpl.TemplateVersion != sc.TemplateVersion {
+	if tpl.TemplateVersion == 0 || tpl.TemplateVersion != sc.TemplateVersion {
 		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
 			Stage: StageTemplate, Code: contracts.ErrStaleVersion, Reason: fmt.Sprintf("template version %d does not match active context %d", tpl.TemplateVersion, sc.TemplateVersion), Retryable: false,
 		})
 	}
-	if tpl.SourceVersion != 0 && tpl.SourceVersion != sc.SourceVersion {
+	if tpl.SourceVersion == 0 || tpl.SourceVersion != sc.SourceVersion {
 		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
 			Stage: StageTemplate, Code: contracts.ErrStaleVersion, Reason: fmt.Sprintf("template source version %d does not match active context %d", tpl.SourceVersion, sc.SourceVersion), Retryable: false,
+		})
+	}
+	// B01: approved template identity is the SHA-256 of the canonical
+	// template bytes (tpl.Text), not the rendered substitution output.
+	wantSHA, ok := sc.ApprovedTemplateSHA[speechKey]
+	if !ok || wantSHA == "" {
+		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
+			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template digest not approved for language", Retryable: false,
+		})
+	}
+	if got := sha256HexOfString(tpl.Text); got != wantSHA {
+		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
+			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template digest mismatch", Retryable: false,
 		})
 	}
 	// Validate args against the template's ArgSchema; the orchestrator

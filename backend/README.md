@@ -32,8 +32,8 @@ go version   # must report go1.27.1 or a compatible supported release
 - `internal/store/` — durable P3 persistence layer: SQL + transactions +
   optimistic-concurrency guards, sources/artifacts, packages, sessions,
   reservations/inventory, idempotency, audit/outbox, expiry worker,
-  migration-aware readiness prober. **Required schema revision is 9**
-  (constant `SchemaRevision` in `store/store.go`); a DB at revision < 9
+  migration-aware readiness prober. **Required schema revision is 10**
+  (constant `SchemaRevision` in `store/store.go`); a DB at revision < 10
   fails readiness.
 - `internal/capfeed/` — bounded CAP 1.2 ingestion (1 MiB parse limit,
   DOCTYPE rejection, dedup, supersession/cancel/quarantine lifecycle,
@@ -57,7 +57,7 @@ go version   # must report go1.27.1 or a compatible supported release
   digest / freshness semantics.
 - `internal/scenarioprep/` — scenario workspace loader + validator +
   bundler used by `cmd/scenario-prep`.
-- `migrations/` — versioned SQL migrations 0001–0009. Apply in order.
+- `migrations/` — versioned SQL migrations 0001–0010. Apply in order.
 - `contracts/openapi.yaml` — frozen contract for the implemented slice
   (health, voice, voice-p6, stay, operations, offline delivery).
 - `testdata/` — golden fixtures.
@@ -86,7 +86,7 @@ STHIRA_ADDR=127.0.0.1:8080 go run ./cmd/sthira
 - `GET /health/live` — liveness only (always 200 while the process runs).
 - `GET /health/ready` — 503 in foundation mode (no DB); 200 only when
   `STHIRA_DATABASE_DSN` is set AND the DB is reachable AND `schema_migrations`
-  reached `SchemaRevision` (9).
+  reached `SchemaRevision` (10).
 
 ## Run (durable mode)
 

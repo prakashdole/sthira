@@ -433,12 +433,13 @@ var _ = drain
 func TestA1_TTSWithdrawalStaleContext_DropsActions(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	sc.ApprovedTemplateSHA["destination_options"] = orchestrationtest.DigestString("Destination choices are displayed on screen.")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
 	tpls.Add(contracts.ApprovedTemplate{
 		SpeechKey: "destination_options", Language: "en-IN", TemplateVersion: 1, SourceVersion: 1,
-		Text: "Destination options on screen.", SyntheticOnly: false,
+		Text: "Destination choices are displayed on screen.", SyntheticOnly: false,
 	})
 	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
 
@@ -491,12 +492,13 @@ func TestA1_TTSWithdrawalStaleContext_DropsActions(t *testing.T) {
 func TestA1_TTSFailureUnchangedContext_PreservesActions(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	sc.ApprovedTemplateSHA["destination_options"] = orchestrationtest.DigestString("Destination choices are displayed on screen.")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
 	tpls.Add(contracts.ApprovedTemplate{
 		SpeechKey: "destination_options", Language: "en-IN", TemplateVersion: 1, SourceVersion: 1,
-		Text: "Destination options on screen.", SyntheticOnly: false,
+		Text: "Destination choices are displayed on screen.", SyntheticOnly: false,
 	})
 	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
 
@@ -707,12 +709,13 @@ func TestA1_ModelBytes_ValidProposalPasses(t *testing.T) {
 func TestA1_TTSCancellationStaleContext_DropsActions(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	sc.ApprovedTemplateSHA["destination_options"] = orchestrationtest.DigestString("Destination choices are displayed on screen.")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
 	tpls.Add(contracts.ApprovedTemplate{
 		SpeechKey: "destination_options", Language: "en-IN", TemplateVersion: 1, SourceVersion: 1,
-		Text: "Destination options on screen.", SyntheticOnly: false,
+		Text: "Destination choices are displayed on screen.", SyntheticOnly: false,
 	})
 	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
 
@@ -778,6 +781,7 @@ func TestA1_TTSCancellationStaleContext_DropsActions(t *testing.T) {
 func TestA1_SynthesizeStaleSnapshotDuringSynthesis(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	sc.ApprovedTemplateSHA["welcome"] = orchestrationtest.DigestString("Welcome.")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()

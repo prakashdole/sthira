@@ -20,6 +20,16 @@ func mkScoped() ScopedContext {
 		TemplateVersion:  7,
 		AllowedLanguages: []string{"ml-IN", "en-IN"},
 		TemplateKeys:     []string{"destination_options", "clarify_place", "verified_route_unavailable"},
+		ApprovedSpeechKeys: map[string][]string{
+			"destination_options":        {"ml-IN", "en-IN"},
+			"clarify_place":              {"ml-IN", "en-IN"},
+			"verified_route_unavailable": {"ml-IN", "en-IN"},
+		},
+		ApprovedTemplateSHA: map[string]string{
+			"destination_options":        "x",
+			"clarify_place":              "x",
+			"verified_route_unavailable": "x",
+		},
 		KnownPlaces: map[string]PlaceCandidate{
 			"PLACE-1": {PlaceID: "PLACE-1", PlaceKind: "ADMIN", Name: "Ward 8", Jurisdiction: "KL"},
 		},
