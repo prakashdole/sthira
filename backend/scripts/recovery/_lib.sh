@@ -260,7 +260,7 @@ start_owned_cluster() {
   # Pick a port in the high 20000s that no other runner is using. We avoid
   # 5432 explicitly. The chosen port may collide with an unrelated
   # service; if so, retry a few times before giving up.
-  for try in 1 2 3 4 5 6 7 8 9 10; do
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
     OWNED_PORT="$(( 24000 + RANDOM % 4000 ))"
     if ! (echo > /dev/tcp/127.0.0.1/$OWNED_PORT) 2>/dev/null; then
       break
@@ -304,7 +304,7 @@ EOF
   pg_ctl -D "$OWNED_DATA_DIR" -l "$SCRATCH_DIR/pg.log" -o "-p $OWNED_PORT -h 127.0.0.1 -k ${OWNED_DATA_DIR}" start >"$SCRATCH_DIR/start.log" 2>&1
   OWNED_CLUSTER_PID="$(head -1 "$OWNED_DATA_DIR/postmaster.pid" 2>/dev/null || echo '')"
   # Wait for readiness.
-  for try in $(seq 1 30); do
+  for _ in $(seq 1 30); do
     if pg_isready -h 127.0.0.1 -p "$OWNED_PORT" -q; then
       OWNED_BIN_HOST="127.0.0.1"
       OWNED_BIN_PORT="$OWNED_PORT"
@@ -345,7 +345,7 @@ stop_owned_cluster() {
 # HA / failover (would require a promoted replica).
 restart_owned_cluster() {
   stop_owned_cluster fast
-  for try in $(seq 1 30); do
+  for _ in $(seq 1 30); do
     if pg_isready -h 127.0.0.1 -p "${OWNED_BIN_PORT:-$OWNED_PORT}" -q; then
       return 0
     fi
@@ -355,7 +355,7 @@ restart_owned_cluster() {
   pg_ctl -D "$OWNED_DATA_DIR" -l "$SCRATCH_DIR/pg-restarred.log" \
     -o "-p $OWNED_BIN_PORT -h 127.0.0.1 -k ${OWNED_DATA_DIR}" start \
     >"$SCRATCH_DIR/restart.log" 2>&1
-  for try in $(seq 1 30); do
+  for _ in $(seq 1 30); do
     if pg_isready -h 127.0.0.1 -p "$OWNED_BIN_PORT" -q; then
       return 0
     fi

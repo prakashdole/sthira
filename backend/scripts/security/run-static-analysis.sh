@@ -21,6 +21,7 @@ cd "${SCRIPT_DIR}/../.." # repo backend/
 snapshot_metadata
 
 FAIL=0
+SKIPPED=0
 
 echo "==> go vet ./..."
 if ! go vet ./...; then
@@ -37,7 +38,7 @@ if command -v staticcheck >/dev/null 2>&1; then
     fi
 else
     echo "skip staticcheck: not installed (pin ${STATICCHECK_VERSION}; install when run-window opens)"
-    exit 77
+    SKIPPED=1
 fi
 
 echo "==> govulncheck (pinned ${GOVULNCHECK_VERSION})"
@@ -49,6 +50,7 @@ if command -v govulncheck >/dev/null 2>&1; then
     fi
 else
     echo "skip govulncheck: not installed (pin ${GOVULNCHECK_VERSION})"
+    SKIPPED=1
 fi
 
 echo "==> gosec (pinned ${GOSEC_VERSION})"
@@ -72,9 +74,18 @@ if command -v gosec >/dev/null 2>&1; then
         | tee "${REPORTS_DIR}/gosec.txt" || FAIL=1
 else
     echo "skip gosec: not installed (pin ${GOSEC_VERSION})"
+    SKIPPED=1
 fi
 
-if [ "$FAIL" -eq 0 ]; then
-    echo "OK: static analysis clean"
+if [ "$FAIL" -ne 0 ]; then
+    echo "FAIL: static analysis found issues" >&2
+    exit 1
 fi
-exit "$FAIL"
+
+if [ "$SKIPPED" -ne 0 ]; then
+    echo "NOTICE: one or more pinned static analysis tools are not installed (recorded as NOT_RUN)"
+    exit 77
+fi
+
+echo "OK: static analysis clean"
+exit 0

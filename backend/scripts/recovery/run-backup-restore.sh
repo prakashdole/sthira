@@ -45,16 +45,12 @@ forbid_shared_target "$(hostname)" "0" "$OWNED_SYSTEM_USER" || true
 make_owned_scratch
 mkdir -p "$SCRATCH_DIR"/{dumps,reports}
 DSN_FILE="$SCRATCH_DIR/dsn.txt"
-{
-  start_owned_cluster
-} > "$DSN_FILE"
-DSN="$(cat "$DSN_FILE")"
+start_owned_cluster > "$DSN_FILE"
 OWNED_BIN_PORT="$(grep -oE 'port=[0-9]+' "$DSN_FILE" | cut -d= -f2)"
 
 # ----- SOURCE -----
 
 SRC_DB="r7recover_src_$(date +%s)_$$"
-CURRENT_OWNED_DBS+=("$SRC_DB")
 SRC_T0=$(now_ms)
 new_owned_db "$SRC_DB" >/dev/null
 time_record "src.create" "$SRC_T0"
@@ -129,7 +125,6 @@ time_record "src.dump" "$DUMP_T"
 # ----- RESTORE -----
 
 DST_DB="r7recover_dst_$(date +%s)_$$"
-CURRENT_OWNED_DBS+=("$DST_DB")
 RESTORE_T=$(now_ms)
 new_owned_db "$DST_DB" >/dev/null
 PGHOST="$OWNED_BIN_HOST" PGPORT="$OWNED_BIN_PORT" PGUSER="$OWNED_SYSTEM_USER" \
@@ -197,7 +192,7 @@ STHIRA_PID=$!
 trap 'kill -TERM "$STHIRA_PID" 2>/dev/null || true; wait "$STHIRA_PID" 2>/dev/null || true' RETURN
 
 # Wait for liveness.
-for try in $(seq 1 50); do
+for _ in $(seq 1 50); do
   if curl -sf "http://127.0.0.1:$PORT/health/live" >/dev/null; then
     break
   fi
@@ -235,7 +230,7 @@ esac
 TERM_T=$(now_ms)
 kill -TERM "$STHIRA_PID" 2>/dev/null || true
 WAIT_BUDGET_MS=11000
-for try in $(seq 1 220); do
+for _ in $(seq 1 220); do
   if ! kill -0 "$STHIRA_PID" 2>/dev/null; then
     break
   fi

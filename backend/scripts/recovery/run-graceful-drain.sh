@@ -42,11 +42,9 @@ forbid_shared_target "$(hostname)" "0" "$OWNED_SYSTEM_USER" || true
 make_owned_scratch
 mkdir -p "$SCRATCH_DIR"/{bin,reports}
 start_owned_cluster > "$SCRATCH_DIR/dsn.txt"
-DSN="$(cat "$SCRATCH_DIR/dsn.txt")"
 OWNED_BIN_PORT="$(grep -oE 'port=[0-9]+' "$SCRATCH_DIR/dsn.txt" | cut -d= -f2)"
 
 DB="r7recover_drain_$(date +%s)_$$"
-CURRENT_OWNED_DBS+=("$DB")
 new_owned_db "$DB" >/dev/null
 apply_migrations "$DB"
 
@@ -64,7 +62,7 @@ STHIRA_PID=$!
 trap 'kill -KILL "$STHIRA_PID" 2>/dev/null || true' RETURN
 
 # Live.
-for try in $(seq 1 50); do
+for _ in $(seq 1 50); do
   if curl -sf "http://127.0.0.1:$PORT/health/live" >/dev/null; then break; fi
   sleep 0.1
 done
@@ -87,7 +85,7 @@ kill -TERM "$STHIRA_PID" || true
 # connections. Therefore a new GET against the port must observe a
 # connection refusal or a non-200 within a small window.
 NEW_REQ_REFUSED=""
-for try in $(seq 1 30); do
+for _ in $(seq 1 30); do
   NEW_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 1 \
     "http://127.0.0.1:$PORT/health/ready" 2>/dev/null || true)"
   # On connection refused / curl exit non-zero, NEW_CODE is empty.
@@ -106,7 +104,7 @@ fi
 
 # Wait for the process to actually exit within ShutdownTimeout (10s) + slack.
 EXITED=""
-for try in $(seq 1 220); do
+for _ in $(seq 1 220); do
   if ! kill -0 "$STHIRA_PID" 2>/dev/null; then
     EXITED="yes"
     break
