@@ -1,3 +1,378 @@
+# Sthira autonomous execution playbook
+
+Authored 2026-09-23 against `CLEAN` at `a12350bf5bc64261fe49e9c976972e45cc2168d0`.
+This is the current execution entry point. It is an instruction set, not a completion certificate.
+
+## 1. Objective, authority and reading boundary
+
+Finish the round-two demonstration first: actual selected models, a polished laptop/phone journey, understandable source provenance, and consent-based arrival assistance. Preserve and then complete remaining backend engineering. Do not restart P0–P7, translate the Python reference again, or spend the demo window chasing full production certification.
+
+User decisions: Go product backend; Python/native ML runtimes permitted; IndicConformer-600M-Multi ASR, Sarvam-30B middle model (~2.4B active non-embedding parameters), Indic Parler-TTS; Android+iPhone eventual launch; one million TOTAL users (peak mix to measure); immediate and 7–30-day temporary relocation; no hazard prediction/permanent resettlement. September 28–29 round two takes priority. Actual round-three readiness is evidence-dependent.
+
+The user requested one detailed playbook for models to execute without another reviewer between every step. Workers may continue to the next eligible task within their assigned lane after acceptance. A final integrated review remains necessary. More instructions cannot guarantee a model's correctness.
+
+Scope assumption, pending user correction: demo first, remaining production backend afterward. Parallelism is optional: one sequential executor, two normal lanes, or up to four non-overlapping active implementation lanes. This document does not provision workers automatically. User launch message selects lane/count; if none is specified, use sequential execution. Do not incur paid compute or spawn extra agents merely to consume credits.
+
+**Current user overrides of older documents:** prototype frontend may proceed before Gate B. User now requests location tracking to help determine arrival. Implement the bounded opt-in foreground journey in R04; older blanket “no geofencing” text is superseded for this feature only. Automatic occupancy changes, involuntary/background surveillance, inferred welfare and AI approval remain prohibited. No approval to deploy, push, rewrite Git history, rent hardware or activate live government integrations is created by this file.
+
+**Read once per new chat:** applicable root instructions (`CLAUDE.md`, `GEMINI.md`, any scoped AGENTS.md), the mandatory product documents listed there, then this current playbook through section 10 and your assigned task. Read `plan/round-two-demo.md`, `plan/open-decisions.md`, and the task's exact source/callers. Use targeted sections of large documents. Historical instructions below the `Historical phase ledger` heading preserve evidence only: never execute their old cherry-picks, initial migration plans or former worker assignments by default.
+
+At resume read git state, current task status and relevant changed source. Do not re-read every handoff or dump full logs. Current code beats stale README claims; instructions govern desired behavior, not proof that implementation exists.
+
+## 2. Copilot review reconciliation and verified starting evidence
+
+The supplied Copilot review gives no review commit and principally describes `src/sthira_v2` Python. Its claim that this branch has no Go, SQL persistence, authorization, offline implementation or database tests is contradicted by current source. Do not implement its suggested replacement architecture. Its 8% completion, ratings, timeline and launch probabilities are unsupported estimates, not planning inputs. Its advice to substitute mocks to obtain passing storage tests is rejected. Models run on servers; the 3 GB phone requirement is for the client.
+
+Evidence inspected at the baseline above (source inspection, NOT a new full runtime certification):
+
+| Topic | Actual path / finding | Action |
+| --- | --- | --- |
+| Go service and SQL | `backend/go.mod`, `backend/cmd/sthira/main.go`, `backend/internal/store/`, migrations 0001–0009 | Preserve; do not rebuild |
+| Auth/stays | `backend/internal/httpserver/operator*.go`, `stay_handlers.go`, store and real-DB integration tests | Preserve boundaries; live IdP remains absent |
+| Offline | `backend/internal/offlinepkg/`, `offlineclient/`, `offlinedelivery/`, `offlinequeue/`, `offlineresources/` | Preserve; verify affected integration |
+| Destination order | `store/scoped.go:buildEligible` uses policy order as facility IDs, while package policy orders safe zones; two inventory-query errors are ignored | R01 |
+| TTS | `orchestration/orchestrator.go:stageTTS` requests fixed 16000 Hz; verify actual WAV/response metadata propagation | R02 |
+| Worker lifecycle | ASR/TTS listener access lacks synchronization; `eval/provider/http_realserver_test.go` excludes race builds | R02 |
+| Readiness | `store/store.go:SchemaRevision` is 7; scoped flow uses migrations through 9 | R00 |
+| Translation authority | `store/scoped.go` accepts wildcard source binding; migration 0009 has a content digest needing runtime enforcement | B01; no operational speech until fixed |
+| Deployment | Dockerfile builds nested migration module from parent; distroless migration dependencies missing; Compose naming/bind/publish needs repair | R06 |
+| Documentation | `backend/README.md` still describes P1/no DB; older tech-stack observations remain historical | R00 |
+
+Other bounded findings retained from `plan/reviews/review-four-workers-round-two-2026-09-21.md`, requiring reproduction before editing: scenario path containment/read-size limits; old persisted reservation payload-hash compatibility; isolated synthetic pipeline setup missing; actual selected-model inference not demonstrated. Original commit IDs in historical docs were rewritten to remove generated blobs while retaining individual commits. Do not cherry-pick obsolete IDs or infer missing work from SHA changes; use source and ancestry.
+
+Previously recorded multi-module/real-DB checks belong to that reviewed revision. They are not a substitute for checking changed behavior. No new completion percentage is asserted here.
+
+## 3. Copyable launch instructions
+
+### Coordinator / single executor launch
+
+> Work in `/Users/apple/Documents/Projects/MonitoringZ`. Read the current section of `plan/prompt.md`, applicable project instructions and product context. Execute this playbook; do not generate another plan. You are coordinator. You may integrate only this playbook's verified task commits locally into uppercase CLEAN, preserving individual commits and unrelated work; no push is authorized. Start R00, establish current state and evidence, then run eligible round-two tasks in dependency order. If no workers are assigned, implement sequentially. If workers are assigned, allocate disjoint lanes and freeze shared contracts before dispatch. Record exact commits, tests and blockers in the task table. Continue eligible authorized work without requiring the planning model after each commit. Do not change main, push, rewrite history, download weights, spend money, use real government endpoints or claim mock results as real inference. Pause backend expansion while R07 demo acceptance is unresolved; explicit user assignment to a B-task allows that bounded parallel work. Stop at the final handoff rules.
+
+### Worker launch (send common and task instructions together)
+
+> Read `plan/prompt.md` sections 1–5 and 8–10 plus task **[TASK_ID]** and its prerequisites. Work only on **[ASSIGNED_BRANCH/WORKTREE]**, based on **[INTEGRATED_BASE_SHA]**. Your task is **[TASK_ID]**, and your next authorized tasks are **[EXPLICIT_IDS or NONE]**. Read actual source and callers; implement and verify the stated behavior. Preserve public contracts unless a contract change was agreed with the coordinator. Do not edit another lane's files, the shared ledger or main. Commit verified stages locally. Report commit SHAs, exact checks, remaining dependencies and a small reproduction/run command in `plan/evidence/execution-[TASK_ID].md`. No broad review document, unbounded test logs, generated binaries or model data in Git. Stop if a missing prerequisite or shared-file change requires coordination; continue independent work within your task.
+
+If placeholders are unfilled, obtain task/base/ownership from coordinator before editing. Do not give every worker the coordinator role. Worker completion does not authorize it to merge other workers or start an arbitrary phase.
+
+## 4. Scheduling and dependencies
+
+A worker slot includes a coordinator when it is actively implementing. Do not have two processes commit in the same checkout. Default maximum useful implementation concurrency is **four**; a fifth queue does not eliminate shared-file or GPU dependencies.
+
+| Task | Deliverable | Required dependencies | Owner / allowed parallelism |
+| --- | --- | --- | --- |
+| R00 | Orientation, readiness minimum, contract and scenario freeze | Current checkout | Coordinator alone first |
+| R01 | Correct destination context + isolated exercise backend | R00 | Backend lane |
+| R02 | Correct real-model plumbing and launch instructions | R00 | Inference lane, parallel R01 |
+| R03 | Responsive actual-API voice/map UI | R00 contracts; R01/R02 for final acceptance | UI lane, parallel R01/R02 until integration |
+| R04 | Foreground journey tracking and explicit arrival | R03; R01 for stay arrival | Same UI lane, serial after R03 |
+| R05 | Bounded safe scenario preparation | R00 | Data lane; may share fourth slot with R06 serially |
+| R06 | Runnable local/staging packaging and recovery commands | R00; R01/R02 for final integration | Deployment lane, parallel R01/R02/R03 |
+| R07 | Integrated demonstration, rehearsal and founder handoff | R01–R04 and selected R05 output; R06 only if demo uses containers | Coordinator after integration; actual models required |
+| B01 | Strict translation/source/content authorization | R01 integrated; R07 by default | Backend lane; serial with other scoped.go work |
+| B02 | Durable upgrade/replay and source/offline continuity | B01 | Backend lane |
+| B03 | Remaining security, deployment and recovery closure | R06, B01/B02 before final verification | Operations lane; code-independent tooling may run earlier |
+| B04 | Real language, load, cost and resource evidence | R02/R07; agreed hardware and budgets | Inference/performance lane; do not compete for same GPU with demo |
+| B05 | Backend release-candidate reconciliation | B01–B04 | Coordinator; final integrated checkpoint |
+
+**With one worker:** R00 → R01 → R02 → R03 → R04 → R05 as needed → R06 if needed → R07 → B01 → B02 → B03 → B04 → B05. A hardware-blocked R02 must not block implementation of R03/R04/R05/R06; it does block real-demo acceptance.
+
+**With two workers:** first R00; then worker A R01 → R05 → R06, worker B R02 → R03 → R04. UI can start after R02's interface correction even if real GPU proof waits. Integrate at task boundaries; R07 is serial. After demo, A B01→B02, B B03 preparation then B04; final B03 proof awaits B02; B05 serial.
+
+**With four workers:** R00 first. A R01, B R02, C R03→R04, D R05→R06. Integration is coordinator-owned, not a fifth simultaneous editor of shared files. After demo: A B01→B02; B B04; C may take a separately assigned scoped B03 code fix, D B03 ops. No overlapping B03 ownership; otherwise leave a slot unused. Do not invent extra features to fill slots.
+
+**Dependencies mean integrated interfaces, not optimistic handoff text.** A worker may implement against a frozen response fixture, labelled as such, but may not claim end-to-end acceptance before the actual dependency works.
+
+## 5. Common implementation and evidence rules
+
+1. Inspect `git status --short`, `git branch --show-current`, `git log -6 --oneline`, `git worktree list`. Record base. Integration target is uppercase `CLEAN`, never `main`. If a checkout is on main or contains unrelated edits, create/use an isolated task checkout; do not reset/stash another person's work.
+2. For parallel edits use `codex/<task-id>-<purpose>` branches from the coordinator's exact frozen base. Worktree creation is within the assigned execution task; cleanup removes only owned resources. Existing worktrees stay untouched. User must authorize integration if their launch did not authorize it; ordinary worker assignment alone does not authorize merging into CLEAN. Ask once with concrete checked commits when needed.
+3. Coordinator owns shared contracts/OpenAPI, `cmd/sthira/main.go`, root CI/Makefile, root module dependencies/migrations, cross-lane wiring and this ledger. A task can receive explicit ownership of one shared file for that stage; otherwise propose the exact delta, do not silently edit it. Allocate migration numbers centrally. Module-local inference changes belong to R02. No concurrent shared-file edits.
+4. Before a fix write a short acceptance checklist in the task handoff. Reproduce the reported issue through the responsible boundary; if already fixed, prove that case and mark existing evidence, do not reimplement. Trace all callers before changing common helpers. Avoid broad cosmetic refactors.
+5. For any added behavior specify required/missing/invalid states, source of truth, authorization, failure response, retry and cancellation behavior. Use existing envelopes/error taxonomy and validators. Freeze any genuinely necessary additive contract with coordinator before UI or worker consumers implement it; do not guess endpoint names.
+6. Real DB tests prove persistence; real HTTP handlers prove transport; fake inference proves plumbing only. A test name, no-tests-to-run, compiled-out suite, skipped dependency or script self-check never proves the required behavior. Test desired invariants, not the same broken assumptions as production code.
+7. Preserve source authority, signed freshness, jurisdiction, current grants, transactional capacity and explicit user confirmation. Do not remove guards or relabel synthetic sources/phrases to unblock a demo. LLM receives no credentials, direct DB writes or arbitrary tools. No automatic calls or rescue dispatch.
+8. No model download/GPU rental/paid inference/new paid external tool without explicit existing authorization and a budget. Inspect known local artifacts and hardware metadata only; never text-read weights. A missing loader is ENGINEERING_REMAINING; missing approved hardware is BLOCKED_HARDWARE. Do not conflate either with O14 (IdP).
+9. Honor no `.txt` changes, secrets, raw load samples, binaries, model weights or unrelated files in commits. Dependency changes needing `requirements-voice.txt` must be proposed and await an explicit exception; do not evade the rule by creating a competing dependency file. Preserve individual commits; no amend/squash/reset/rewrite/push. Local verified stage commits are expected.
+10. Keep raw output in a task-owned temporary directory, not the repo. No million-line metrics. Bound runs before starting; save only compact counts, percentiles, redacted findings, reproducible commands and artifact hashes. Do not delete another worker's reports; inspect names/sizes first and request authorization for unrelated deletion.
+11. Failure: identify code vs invocation vs environment. After three consecutive failed attempts without material new evidence, stop that issue, record exact blocker and continue eligible independent work. Do not skip a required check and call the task done.
+12. After a coherent stage: focused checks → diff review → stage explicit files → local commit → handoff. Before commit ensure unrelated staged files will not be included. Report execution exit codes and skips, not just “all green.” Do not rerun unchanged successful full suites repeatedly.
+
+## 6. Round-two tasks
+
+### R00 — Correct orientation and freeze one visible journey
+
+Read: `backend/cmd/sthira/main.go`, `backend/internal/store/store.go`, `backend/migrations/`, `backend/contracts/openapi.yaml`, `plan/p6-contract.md`, `frontend/v2/src/main.ts`, root and backend README, current `plan/tech-stack.md` and demo plan.
+
+Deliver:
+- Update active README/stack descriptions to point to `/api/v3` Go and identify Python as reference plus retained ML adapters. Preserve historical evidence as dated history. Remove active claims that DB/Go do not exist. Reconcile old frontend/geofencing prohibitions with the narrow user overrides in section 1; record rationale in decisions, not a silent rule deletion.
+- Correct migration readiness: derive the required schema from actual queries/current migrations (baseline requires 9); a DB at 7/8 must not claim ready for revision-9 queries. Current schema succeeds; absent DB and failed migration fail closed. Do not merely edit the constant without checking the real prober and startup.
+- Freeze the demo's existing/public request/response contracts: place/jurisdiction resolution, voice process/audio metadata, destination browsing vs reservability, evidence/freshness, map action, stay confirmation and errors. Use actual OpenAPI/runtime shapes. Record minimal additional fields only when necessary.
+- Select one already permitted exercise package and language. Ask user for case/language if absent; meanwhile use a named fictional synthetic fixture for development, never claim a real historical scenario. O01 catalogue remains open. Capture local GPU/model path availability without reading secret files or downloading artifacts. Record missing resource requests once.
+- Document the round-two target flow: speak → resolve place → display labelled incident/destinations → choose → show supplied route → useful audio; explicit stay and arrival only when implemented. Distinct second journey handles offline/errors.
+
+Acceptance: docs paths exist, package identifiers match actual schemas, readiness rejects lower schema through real HTTP+DB; current migrated DB succeeds. R00 does not claim live model inference. Freeze commit SHA unlocks parallel work.
+
+### R01 — Destination selection and an explicitly isolated exercise backend
+
+Own: scoped destination-building logic/tests, relevant HTTP composition and a coordinator-assigned local exercise entry point/seed. Shared contracts/main/migrations require ownership grant. Do not take B01 translation work concurrently.
+
+Read: `backend/internal/store/scoped.go`, `choice.go`, `stay.go`, `opkg/package.go`, `httpserver/server.go`, `voice_process.go`, `stay_handlers.go`, orchestration resolver interfaces and exercise options.
+
+Implement:
+1. Map each permitted safe-zone ID in allocation order to its member facilities. Preserve authority ordering and explain ties: deterministic display order within one zone must not become a claimed authority safety ranking. Unknown/missing zone IDs cannot invent facilities. Multiple facilities in one zone must work. Preserve informational browsing when party/dates are absent; no free-capacity promise from a general MAX(capacity) query.
+2. Propagate inventory/zone query errors, distinguish no inventory from DB failure and from zero capacity. Scope all reads to the correct package/jurisdiction. At actual reserve/extend/transfer time keep existing locked authority, policy, route, snapshot and capacity revalidation.
+3. Supply a reproducible local exercise launch/seed using existing Store/Server seams, real DB and real HTTP handlers. Two eligible choices only when fixture defines them. Exercise-only template/source handling must be process-controlled, isolated and visibly synthetic. Ordinary production binary/config must still reject synthetic commitments and unapproved speech. Header/body/query fields cannot activate it. Do not add a general fake government verifier.
+4. Run selected successful browsing/confirmation through actual API, not direct store-only demos. Existing stays/arrival must remain explicit and idempotent. If stay UI cannot be accepted in time, do not expose a deceptive active button; report unfinished visible scope.
+
+Acceptance: mismatching facility/zone IDs; two facilities per zone; empty/invalid order; query failure; wrong jurisdiction; unavailable/full destination; ordinary server rejects exercise data; isolated server displays correct labelled choices; successful real-DB reserve plus same-key replay without duplicate capacity; package withdrawal denies new work. Reuse existing regression suites and add only missing cases. Return seed/start/reset commands operating only on owned data.
+
+### R02 — Real model integration, audio correctness and worker lifecycle
+
+Own: `backend/internal/asrworker/`, `ttsworker/`, `middleworker/`, `orchestration/`, `backend/eval/`, retained Python adapter implementation/tests. Coordinate shared contracts/dependencies and `voice_process.go` with R01.
+
+Read: `orchestration/orchestrator.go:stageTTS`, `http_client.go`, worker request/response types, ASR/TTS server lifecycle, runtime adapters/IPC, `src/sthira_v2/speech_asr_adapter.py`, `speech_tts_adapter.py`, `tests/test_b2_adapters.py`, `tests/test_v2_real_adapters.py`, `eval/provider/http_realserver_test.go`, `eval/commands.md`.
+
+Implement:
+1. Trace output WAV from actual TTS adapter to public response and browser. Negotiate supported settings or use returned validated metadata; resample only if needed using supported dependencies. Check RIFF sample rate/channels/bit depth/length and enforce bounds. Never declare 16 kHz while delivering native-rate audio or silently mislabel bytes. Preserve cache identity for text/language/template/source/settings.
+2. Synchronize ASR/TTS listener lifecycle at the owner and inspect middle worker separately. Establish Start/Addr/Cancel/Wait behavior under success/failure/concurrent shutdown. Remove `!race` exclusion once actual servers pass; do not suppress races. Preserve bounded IPC writes, deadlines, process reaping and correlation.
+3. Establish exact local selected model revisions, licenses, processor/tokenizer/runtime compatibility and actual supported language. Sarvam uses its real tokenizer template, constrained output and reasoning setting verified for the pinned runtime. Do not reuse speculative templates or assume active parameter count is resident memory. Record cold/warm RAM/VRAM, including runtime/KV overhead.
+4. READY requires successful load/needed warmup. Missing artifacts, unsupported language, decode error, timeout or unavailable worker returns explicit failure, never a fabricated transcript/audio/canned success. Keep text fallback usable when voice is unavailable.
+5. Supply a minimal reproducible launch and real-inference smoke using an authorized local clip: actual ASR transcript → actual Sarvam structured action → independent validator → actual Parler WAV. Include the public HTTP route and actual context. The same protocol must also have lightweight fake-runtime regression coverage for CI, labelled PLUMBING_ONLY.
+
+Acceptance: native-rate WAV accepted with truthful metadata; mismatch rejected; corrupt/oversized audio rejected without panic; cancellation drops stale responses; Start/Addr/stop under `-race`; actual server conformance tests participate in race build. Real demonstration records model revisions, hardware, input/output hashes, observed latency and a reviewed transcription/action/audio. If hardware/weights unavailable, commit working plumbing with REAL_INFERENCE=NOT_RUN and precise next command; do not mark R02/R07 accepted or replace the selected models without user agreement.
+
+### R03 — Polished responsive UI on the existing stack
+
+Own: `frontend/v2/`; API shape changes go to coordinator. Read current `package.json`, `src/main.ts`, `i18n.ts`, `mapActions.ts`, styles and actual R00 frozen endpoints. Reuse TypeScript/Vite/MapLibre; no framework rewrite for round two.
+
+Build one coherent screen journey on laptop and phone: prominent mic, readable captions, language selection only for supported evidence, map with clear source labels, destination cards and touch/text fallback. Avoid clutter and unnecessary animations. Large tap targets (aim >=44 CSS px), keyboard focus, labelled controls, readable contrast and zoomed text; chat cannot be hidden from users who need it.
+
+Integrate actual Go endpoints, correct session/jurisdiction/version/request IDs and returned validated map actions. Do not hard-code fake transcript/destinations as successful API output. Render untrusted names/text safely. Browser microphone/geolocation needs secure context: document phone HTTPS or an approved local secure setup; laptop localhost success is not phone permission proof.
+
+States: idle/listening/processing/cancelled; ambiguous place choices; unsupported language; no destinations; unknown vs full capacity; permission denied; model unavailable; stale/revoked package; lost network; interrupted response. Avoid race where old request replaces newer map selection. Explain useful outcomes, not repetitive “I am doing” speech. Play audio with appropriate user gesture/autoplay handling and show text if playback fails.
+
+Map: render supplied polygons/routes only; no inferred safe shortcut or Google/public routing fallback. Include legend, attribution and non-map textual directions. Use a permitted basemap or a clearly labelled local schematic if rights unavailable. Do not bulk-download public OSM tiles. Cache only allowed data; the Go offline protocol is not automatically a browser integration. For demo, any cached read must retain integrity/version/freshness rules and present unknown freshness after restart unless revalidated. Do not replay offline writes as confirmed success; reuse existing queue semantics if exposed, otherwise explicitly disable new offline commitments.
+
+Acceptance: `npm ci` with existing lockfile, `npm run build`; exercise actual browser + actual API on laptop and phone-sized viewport, then real phone when available. Demonstrate selected happy journey and permission/error/offline flows. Network inspection must show real endpoints and no fallback Python v2 path for the new flow. Document physical phone NOT_RUN if absent; screenshots alone do not prove function. Hand off the exact start/proxy commands and route to R04/R07.
+
+### R04 — Consent-based foreground tracking and arrival assistance
+
+Own: same frontend lane after R03; backend changes only if required by an accepted sharing contract. This feature is now requested, but no automatic welfare certification or background surveillance is authorized.
+
+Build minimal journey state around selected destination/package/route: NOT_STARTED → TRACKING → NEAR_DESTINATION → ARRIVAL_REPORTED, with PAUSED/LOCATION_UNAVAILABLE and stale-route states. Use current OS/browser position permission, accuracy and timestamp. User starts/stops explicitly; stop watch on cancellation/unmount/arrival. Do not upload a continuous trace by default or put coordinates in analytics/logs.
+
+Compare position deterministically with the supplied destination geometry. Account for uncertainty: poor accuracy, stale position or an accuracy region straddling the boundary cannot prove arrival. Use existing geometry support where sufficient; do not invent a radius, confidence percentage or boundary tolerance as official policy. Define and record conservative demo thresholds as exercise settings, and support manual confirmation. Reject malformed geometry/coordinates. No invented GPS reading except visibly labelled simulation.
+
+Display “near destination” as an advisory prompt; explicit touch/keyboard confirmation calls the existing idempotent arrival operation only when a valid stay exists. Location-only trip without a reservation can record self-reported journey arrival without inventing a stay. Do not double-decrement capacity. Self-report, location-supported report and authorized facility-confirmed check-in remain distinct. No location = unknown, not “missing person.” Background/tab suspension shows last updated and does not claim continuous tracking.
+
+Default round-two sharing: selected-destination progress on the citizen screen and the existing authorized stay status, without raw trace storage. If user requires a remote live tracking dashboard, record this as a separate dependency: coordinator must define opt-in recipient, session ownership, minimum precision, TTL/deletion, access scope, throttling and authorized operator UI before implementing a bounded location-snapshot endpoint. Do not mark remote live tracking delivered by a client dot. Do not expose citizen locations through public map endpoints; O10/O14 gate operational access.
+
+Acceptance: permission denied; stop removes watch; stale/inaccurate/edge position never auto-confirms; outside/inside valid geometry; duplicate arrival produces one transition; offline explicit arrival stays pending/not confirmed; route revocation warns and stops guidance. Use injected position inputs for deterministic logic checks, plus real-device foreground location/permission evidence when available. Label which tracking/sharing components are delivered and which await a contract/device.
+
+### R05 — Safe scenario preparation and truthful demo data
+
+Own: `backend/internal/scenarioprep/`, `backend/cmd/scenario-prep/`, `tools/scenario-prep/`, task-specific fixtures. Do not edit signed offline protocol independently.
+
+Reproduce lexical containment bypass using a parent symlink and large input using existing CLI. Bound reads before allocation/decode; check resolved input/output containment, parent components and file types as appropriate. Do not leave a check-then-open substitution vulnerability if claiming support for untrusted concurrently writable input: either implement safe handles with supported APIs or explicitly restrict workspace ownership and reject symlinks. Never overwrite a pre-existing output tree unexpectedly. Reuse strict parser and package/catalogue validators.
+
+Prepare one deterministic development exercise with explicit IDs, provenance, red zone, destinations, routes/modes and synthetic allocation policy. Missing official historical reference remains missing. Scenario handoff bundle is not a signed P5 publication; pass through existing importer/signing/exercise boundary. Do not independently create a second policy schema. Do not fabricate the 10–15-state catalogue to satisfy a count.
+
+Acceptance: valid roundtrip init/validate/report/bundle; parent/leaf symlink escape; oversized index and package rejected before unbounded read; path traversal; existing output preserved; malformed/duplicate-key inputs; stable bundle hashes; missing data → INCOMPLETE, never READY. Run these actual CLI commands with supported flags from `--help`; use `tools/scenario-prep/README.md` as orientation and fix stale examples discovered.
+
+### R06 — Reproducible local deployment, not another infrastructure platform
+
+Own: `deploy/go-backend/`; coordinate main.go/config/CI with coordinator. Read Dockerfile, Compose, migration module and scripts. Reuse existing backend/recovery code; no Kubernetes/Redis/broker/new cloud architecture.
+
+Fix nested module build from its own module directory; no `go mod download || true`. Ensure migration execution actually has required SQL files and `psql` or an existing equivalent verified runner, using a dedicated migration image/job if simpler than enlarging the API image. API remains non-root. Correct Compose numeric published port vs host IP; API listens on reachable container interface while host exposure stays loopback unless explicitly configured. Remove fixed container/volume names that defeat project isolation. Pin/declare supported Postgres/PostGIS versions based on actual compatibility; do not assume the old 16/3.4 image equals tested 18/3.6.
+
+Provide start/migrate/health/stop and backup/restore commands with ownership-based cleanup. No printed secrets/DSNs. Database readiness is not source/operator/model readiness. Real IdP stays absent/fail-closed, model workers private. Container networking must not accidentally publish inference/admin ports. Never start paid cloud resources.
+
+Acceptance: Compose config parses; image builds; fresh owned project migrates through required revision; actual host API responds; too-old DB fails readiness; stop/restart persists data; backup restored into a second owned DB preserves stay/audit sample and chain verification; two project names do not collide. If Docker unavailable, local build/static checks can proceed, but CONTAINER_RUNTIME=NOT_RUN; R07 may use documented local processes instead. Do not make Docker the demo's critical path unnecessarily.
+
+### R07 — Integrated demo freeze and founder/team handoff
+
+Coordinator integrates checked lanes under user's integration authorization, preserving every verified commit. Inspect overlapping changes and rerun affected actual paths on combined HEAD. No “each branch passed” substitute for integration. Do not introduce new features here.
+
+Acceptance journey on exact demo laptop/phone setup:
+1. Start services from documented commands on owned data; show exercise label and component status.
+2. Actual microphone → selected ASR → selected Sarvam → validated destination/map action → actual Parler audio in chosen language.
+3. Ambiguous village requires clarification. Bad/stale/unauthorized action cannot move to an invented destination or allocate.
+4. Explicit destination/stay choice succeeds and reads back after restart where stay is exposed; arrival remains explicit.
+5. Foreground tracking permission, near-destination advisory and stop/manual confirmation work; no automatic capacity mutation.
+6. Disable network/model service: useful cached/text state or explicit unavailable response; reconnect does not duplicate commitment. No stale operational safety claim.
+7. Rehearse one labelled backup recording and recovery command. Recording is never presented as live inference.
+
+Update `plan/round-two-demo.md` with exact start commands, walkthrough, a plain-language architecture explanation, visible features, source responsibilities and limitations. Include a compact script mapping what judges see to actual backend operations; no new PPT generation unless requested. Record actual model/data/build revisions, device/network and pass/fail/NOT_RUN. Do not claim all languages, all states, million-user scale or production readiness. User controls any public deployment.
+
+Mark DEMO_ENGINEERING_ACCEPTED only if required visible behavior works; separately show hardware/device/language/authority blockers. Freeze demo features through the event unless user explicitly asks for fixes/expansion. Remaining backend work below may proceed independently when assigned, without destabilizing the rehearsed release.
+
+## 7. Backend completion after the demo priority
+
+These are remaining engineering packets, not permission to reimplement previous phases. New evidence can retire a finding without edits. Before each B-task, compare source at current HEAD with the recorded finding and scope only actual remaining work.
+
+### B01 — Strict speech/source/template authorization
+
+Owner backend, after R01 (same scoped.go ownership). Trace migration 0008/0009, approval creation, current context resolution, registry/template rendering, TTS request and final public result. Make source ID/jurisdiction/language/source version/template version/template SHA binding exact and fail closed. NULL/empty/zero cannot authorize every source, language or version. Compute/check the digest over the actual approved canonical template bytes; approved template identity must not be confused with rendered substitutions. Validate substitutions against scoped facts. Preserve intended shared-template use only through explicit documented authorization records, never wildcard fallback.
+
+Do not invent an approver or silently mark old approval rows valid. Provide migration/backfill quarantine/re-approval semantics for existing incomplete rows. Revocation/version change while a request is in flight must suppress outdated output according to the existing revalidation boundary. Synthetic reviewed test phrases remain isolated from operational approval. Cache keys bind the same versions/digests/language/voice/settings; cached audio cannot resurrect withdrawn instructions.
+
+Acceptance through real DB→context→production validator/public HTTP: wrong source, jurisdiction, language, digest; zero versions; NULL legacy fields; revoked translation; source withdrawn during inference; stale cached audio; valid exact approval works. Outbound TTS must not run for unauthorized text. Operator grant revalidation and fail-closed no-IdP behavior remain intact. Update contract/docs and record exact approved-content owner still required (O03/O11).
+
+### B02 — Compatibility, persistence and offline continuity
+
+Owner backend after B01. Trace current reservation operation/payload hashing and stored idempotency records from earlier migrations. Reproduce replay using a legacy persisted row. Define a bounded compatibility policy: an old request can replay only for the original authenticated actor/resource and equivalent validated original semantics; new discriminating fields cannot alias it. If safe comparison is impossible, explicitly reject/reconcile ambiguous requests without creating another allocation. Do not rely solely on expiration or silently wipe old keys. Preserve committed replay even when later eligibility changes, with current authorization checked before disclosure.
+
+Verify integrated source suspend/revoke/quarantine, package supersession and translation revocation flow into persisted context, publication/cached delivery and offline queue through actual application lifecycle. Reuse existing signatures, immutable publication, resumable-download and monotonic-freshness machinery. Verify source update cannot relabel old package authority, restart cannot fabricate freshness, and unknown write outcomes reconcile same key/payload. Do not rebuild P5 because Copilot read offline.py.
+
+Acceptance: upgrade from populated prior revision; original replay one result/no double allocation; conflicting actor/resource/payload denied; current and legacy rows coexist; cross-process last-space/crash-after-commit tests; live withdrawal reaches subsequent actual cached HTTP request across instances; interrupted resume validated; pending queue survives restart and uncertain response reconciles. Run a backup/restore across the tested migration path. Fix only reproduced gaps; P2 catalogue and production maps remain external gates.
+
+### B03 — Security, deployment and operational recovery
+
+Owner operations with explicit backend subtask ownership if needed. Read `plan/assurance.md`, `backend/security/`, `backend/scripts/security/`, `backend/scripts/recovery/`, `backend/deploy/recovery/`, `loadmodel/`, R06 runbook. Reuse existing runners; repair false exit codes or missing coverage rather than inventing another harness.
+
+Prioritize real exploitable boundaries: object/jurisdiction authorization; stale grants; parser limits and SSRF/egress; credential/log redaction; model worker isolation; public admission/queue/timeout limits; overload without corrupting pending writes. Include new location permissions/access/retention if any server location endpoint exists. Aggregate dependency readiness without confusing unavailable government approval with dead process. Retain liveness during degraded dependencies as designed.
+
+Run available pinned vet/Staticcheck/govulncheck/gosec/secret/container scans; triage findings with minimal reproductions and focused fixes. Record uninstalled tools as NOT_RUN. Active ZAP/Strix requires explicit allowed staging targets, credentials limited to test accounts, attack scope/time/spend and network isolation. Do not point at government hosts, assume localhost owns all services, or treat Strix configuration as a completed scan.
+
+Exercise physical backup/restore and chain/business invariant checks, graceful drain, DB/model outage, restart and rollback on owned infrastructure. Update executable deployment documentation and CI for the actually required suites; no printed secrets, ignored command failures or skipped required tests. Do not mandate overlapping scanners just for a checklist.
+
+Acceptance: each required control has real result/reproduction/fix or named blocker; no unresolved critical/high exploitable gap for release; missing external assessment remains visible. Recovery records measured data loss/recovery time vs agreed targets, not a promise of zero loss. Updated images/Compose must be executed, not just formatted. Follow R06's separate-project/resource ownership.
+
+### B04 — Real language, load and hosting budget evidence
+
+Owner inference/performance; do not run while R07 uses same GPU/database. Read `backend/eval/`, `loadmodel/README.md`, existing performance budgets in `plan/parameters.md`, `plan/assurance.md`, and O03/O04/O09/O11. Reuse existing bounded tools.
+
+Select a versioned, permissioned corpus with human-reviewed expected place/intent/clarification and intelligible TTS outcomes for every claimed language. Include noisy/code-switched speech, ambiguous village names, older speakers where consent exists, prohibited actions, stale context, cancel and overload. Fake runtimes stay a separate plumbing suite. Report each language/cohort, denominator and limitations; no national average hiding failure.
+
+Measure real model cold/warm latency, WER/CER as suitable, intent/entity/action success, TTS intelligibility, p50/p95/p99, GPU/CPU/RAM/VRAM and error/timeout rates. Pin weights/tokenizer/runtime/quantization. For load, distinguish cached reads, DB writes, one-facility hotspot and inference. One million registered users is not simultaneous inference. Propose a small documented normal/surge traffic mix for a bounded experiment; product owner must accept SLOs/costs before gate acceptance. Measure throughput/queue/admission behavior, retry storms and upstream request volume. Fetch government-like updates from local fixtures only, never hammer live agencies.
+
+Measure client startup/map/audio bytes and 3 GB device behavior separately from server inference. A 41 MiB synthetic descriptor is not a measured regional map pack. Report legal map-pack coverage and actual transferred bytes. Keep a fixed duration/output budget; no unbounded raw per-request JSON. Missing GPU/device/budget/rights blocks those measurements, not all independent code.
+
+Acceptance: reproducible manifest and commands; useful per-language results and approved review; actual load evidence vs explicit provisional/accepted targets; hosting estimate with GPU resident memory and concurrency overhead, not active-parameter size alone. Optimize only measured bottlenecks. Round-two one-language success cannot close full P6/P7 language/scale gates.
+
+### B05 — Backend handoff and readiness reconciliation
+
+Coordinator only after integrated B01–B04. Verify the exact combined revision, current contracts, migrations, ordinary production defaults, exercise isolation, restart/replay and dependency failures. Reconcile active docs, API specification, README and runner commands; archive dated history without deleting Python/reference evidence still used by adapters/tests. Do not retire legacy modules just for language percentages. Permanent cleanup remains P10 unless a proven unreferenced artifact is explicitly in scope.
+
+Create a concise final acceptance matrix in this ledger linking each requirement to real command/results/revision. Classify: ENGINEERING_VERIFIED, FAILED, BLOCKED_EXTERNAL, BLOCKED_HARDWARE, NOT_RUN; phase status remains separate. Gate B cannot pass by averaging completion or treating scanners/models as assumed. Carry O01/O03/O04/O05/O06/O07/O08/O09/O10/O11/O14/O15 as applicable; do not close them without named evidence.
+
+Deliver one integrated final-review handoff: base/head, individual commits, changed behavior, exact checks, mock-vs-real evidence, unresolved defects, required input and next eligible phase. The user will request the final reviewer once this work is ready. Do not automatically implement native mobile P8, launch P11/P12, push, publish or operate government APIs. Optional frontend framework decisions remain distinct from backend completion.
+
+## 8. Verification commands and ownership-safe execution
+
+Run commands from the correct module; root `go test ./...` is not all modules. Inspect current go.mod/go.sum and installed `go version`; baseline pins Go 1.27.1. Never silently change toolchain/version to hide an unavailable environment.
+
+For every changed Go module, from that module directory:
+
+```sh
+gofmt -l .
+go vet ./...
+go build ./...
+go test -count=1 ./...
+```
+
+Formatting output must be inspected; `gofmt -l` exit zero does not mean clean. Format only owned changed files. Integration sweep includes these existing module roots, checked once at final affected checkpoint:
+
+```text
+backend
+backend/internal/asrworker
+backend/internal/ttsworker
+backend/internal/middleworker
+backend/eval
+loadmodel
+deploy/go-backend/migrate
+```
+
+R02 needs `go test -race -count=1 ./...` within changed worker modules and `backend/eval`; no test-exclusion workaround. If native race runtime unavailable, explicitly NOT_RUN. Scope Python checks to adapter files using the existing environment, for example repository root `.venv/bin/python -m pytest -q tests/test_b2_adapters.py tests/test_v2_real_adapters.py`. Read test setup first: these may use fake models and are not real inference. Root legacy Python suite is not authority for Go acceptance; do not silently fix unrelated legacy failures.
+
+**Real DB preparation:** use an owned disposable DB, not `sthira_test`. Verify psql/createdb versions/server identity and permission to create a DB. Provide `STHIRA_TEST_ADMIN_DSN` explicitly with `/postgres` database because existing helpers use a literal replacement; do not let it fall back to test DSN. Avoid printing DSNs. If helper logs secrets or skips supplied failed config, fix that narrow runner defect before calling acceptance complete. The following local no-password example is only for a confirmed local development PostgreSQL server; adapt credentials using libpq environment/secret management, not committed strings.
+
+```sh
+# Run in bash, from backend/, against verified local development PostgreSQL.
+# This creates and drops ONLY the randomly named DB this invocation owns.
+set -euo pipefail
+export PGHOST=localhost
+export PGPORT=5432
+export PGDATABASE=postgres
+task_db="sthira_exec_$(date +%s)_${RANDOM}_$$"
+task_db_created=0
+cleanup_task_db() {
+  if [ "$task_db_created" = 1 ]; then dropdb --if-exists "$task_db"; fi
+}
+trap cleanup_task_db EXIT
+createdb "$task_db"
+task_db_created=1
+for migration in migrations/[0-9]*.sql; do
+  psql -X -v ON_ERROR_STOP=1 -d "$task_db" -f "$migration" >/dev/null
+done
+export STHIRA_TEST_ADMIN_DSN='postgres://localhost/postgres?sslmode=disable'
+export STHIRA_TEST_DSN="postgres://localhost/${task_db}?sslmode=disable"
+go test -count=1 ./...
+STHIRA_RUN_PROCESS_TESTS=1 go test -count=1 -v -tags crashtest \
+  -run '^(TestCrossProcessLastSpace|TestCrashAfterCommitBeforeResponse)$' \
+  ./internal/httpserver
+```
+
+This is verification of local data only; plain local sslmode is not production transport guidance. Ensure SQL prerequisites/extensions are available before running. Each lane uses its own DB/ports; helpers may create their own uniquely named DBs and must clean those on failure too. No TRUNCATE of shared databases. Running without DSN can skip integration suites; such a run is unit/plumbing evidence only.
+
+Capture the full exit code to owned temporary logs. If piping, enable pipefail and preserve go-test exit status; `tail`, `grep`, or an echo after a pipeline must not mask failure. Inspect skipped-test events with bounded `go test -json` output when needed; do not paste giant logs. A selected regex executing zero tests is NOT_RUN. Process tests need BOTH build tag and environment switch. Do not mix their intentionally skipped control runs with acceptance totals.
+
+Frontend R03/R04: from `frontend/v2`, `npm ci` then `npm run build` with the existing lockfile. Verify interactive flow against actual API in a browser. Confirm secure context and real phone separately. Container R06 uses actual `docker compose ... config/build/up` commands after correcting config; derive supported flags/env from checked source, and never run `down -v` against someone else's project.
+
+Before each commit inspect `git diff --check`, `git diff --stat`, explicit changed files and staged diff; `git diff --name-only -- '*.txt'` must be empty for your changes. Do not stage everything blindly. No new full suite until changed code, new integration or unresolved failure justifies it. Documentation-only changes need link/path/scope checks, not the whole model/DB stack.
+
+## 9. Completion ledger and compact handoffs
+
+Task statuses below describe this NEW playbook, not whether an older P-phase exists. Coordinator updates rows as work happens. Worker reports go in one bounded `plan/evidence/execution-<ID>.md` each; do not duplicate this playbook or create nested progress frameworks.
+
+| Task | Status | Base / implementation commits | Verification / blockers |
+| --- | --- | --- | --- |
+| R00 | NOT_STARTED | — | Source findings above; no new runtime acceptance |
+| R01 | NOT_STARTED | — | Needs R00 contract freeze |
+| R02 | NOT_STARTED | — | Real model/hardware availability must be established |
+| R03 | NOT_STARTED | — | Needs R00; final actual API acceptance R01/R02 |
+| R04 | NOT_STARTED | — | New requested tracking feature; scope as above |
+| R05 | NOT_STARTED | — | One exercise; catalogue O01 remains external |
+| R06 | NOT_STARTED | — | Docker availability unconfirmed |
+| R07 | NOT_STARTED | — | No full real-model demo certified |
+| B01 | NOT_STARTED | — | After demo priority unless explicitly assigned |
+| B02 | NOT_STARTED | — | B01 dependency |
+| B03 | NOT_STARTED | — | Tools/attack authorization and runtime evidence required |
+| B04 | NOT_STARTED | — | Hardware/language/load budgets required |
+| B05 | NOT_STARTED | — | Final integrated evidence required |
+
+Handoff format (normally <=100 lines, no transcripts):
+
+```text
+Task / implementation status / acceptance status:
+Base / branch / worktree / implementation commits:
+Observable changes and key paths:
+Acceptance checklist: requirement -> test/run -> result
+Commands, versions, environment, actual exit codes and skipped checks:
+Real vs fake evidence, device/model/data revisions when relevant:
+Remaining defect or external blocker, exact owner/input needed:
+Shared-contract changes required (or none):
+Next eligible task and integration order:
+Owned resources cleaned/preserved:
+```
+
+Record implementation commit IDs in a later evidence commit if needed; do not invent a commit's own SHA before creation. Integration coordinator verifies the final tree. A worker's self-review cannot be called independent review. Do not say “no defects” because the assigned tests pass; say which bounded acceptance passed.
+
+## 10. Automatic continuation and stop conditions
+
+- After a task passes, commit and move to the next assigned eligible task. No need to ask the expensive planning model for another prompt.
+- If all assigned tasks finish, stop with handoff. If blocked, continue nondependent assigned tasks; leave blocker visible. Do not write hundreds of speculative scaffolding lines while waiting.
+- Ask user only for consequential missing input: selected demo case/language; approved hardware/artifact access/budget; required sharing/privacy policy; actual government/route/stay/IdP authority; conflicting edits; integration/push/deploy authorization not already granted. State what can continue without it.
+- Real-model access is required for a real-model demonstration. No approval, unavailable hardware, missing human language review or lost network is not permission to fabricate success.
+- Before and through round two: R07 is the visible goal, not closing every production gate. Backend B-work preserves the frozen demo and cannot absorb all UI/rehearsal time. No exact production completion date is guaranteed.
+- Stop at B05 with one honest final-review handoff. P8–P12 require their existing scoped acceptance, devices, official data and explicit operational authorization; they are not silently included in “finish backend.”
+
+---
+
+# Historical phase ledger
+
+The following original P0–P12 material is retained for evidence and long-term acceptance references. Dated execution instructions, former baselines, worker ownership and frontend/location restrictions are historical where superseded above. The R/B task table is the current work queue; the P-phase ledger below remains the phase-level evidence record and must not be reset or marked DONE merely because a new task passes.
+
 # Phase execution prompts and evidence ledger
 
 > **2026-09-21 priority override:** Round-two prototype/UI/real-model demo and pitch take priority through September 28–29. Read [round-two-demo.md](round-two-demo.md) first. Frontend prototype work may proceed before Gate B; production gates and the long-term roadmap remain intact.

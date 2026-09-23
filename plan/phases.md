@@ -2,7 +2,7 @@
 
 > **2026-09-21 priority override:** Round-two prototype/UI/real-model demo and pitch take priority through September 28–29. Read [round-two-demo.md](round-two-demo.md) first. Frontend prototype work may proceed before Gate B; production gates and the long-term roadmap remain intact.
 
-Updated 2026-09-19. New Go/mobile phases have not been executed. Historical Python work is captured in [changes.md](changes.md); detailed executable instructions and the single status ledger are in [prompt.md](prompt.md).
+Current execution entry point: [prompt.md](prompt.md), updated 2026-09-23. Its R/B tasks prioritize the round-two demo and then remaining backend work; the P0–P12 roadmap below is retained. Go implementation exists; phase completion must be read from recorded evidence, not this original roadmap. Historical Python work is captured in [changes.md](changes.md).
 
 | Phase | Deliverable | Verification gate |
 | --- | --- | --- |
@@ -30,6 +30,6 @@ B defines the requested backend 80–90% milestone by capability, not line count
 
 ## Scope control
 
-Frontend planning and API contracts happen now; implementation/framework selection is P8. Legacy deletion is P10 after replacements pass, with small earlier removals only if P0 proves no consumer/evidence dependency and the user authorizes that cleanup stage. No permanent-relocation modules are rebuilt. Existing inference frameworks need not become Go. Route authority remains open; there is no operational automatic-route-generation phase.
+Production mobile framework selection remains P8. The user-authorized responsive round-two prototype may be implemented before Gate B, as described in the current playbook. Legacy deletion is P10 after replacements pass, with small earlier removals only if P0 proves no consumer/evidence dependency and the user authorizes that cleanup stage. No permanent-relocation modules are rebuilt. Existing inference frameworks need not become Go. Route authority remains open; there is no operational automatic-route-generation phase.
 
 Each phase ends with tests, diff review, a verified local stage commit where safe, and a concise evidence/next-step update. Unknown APIs, absent devices/GPU, unsigned policies or missing scenario data are named blockers, not invented results.
