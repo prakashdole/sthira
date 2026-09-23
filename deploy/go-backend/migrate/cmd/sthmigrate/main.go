@@ -110,9 +110,16 @@ func run(logger *slog.Logger, args []string) error {
 		logger.Warn("DSN has no password component; assuming peer/trust auth")
 	}
 
+	target := *targetFlag
+	if target == -1 && fs.NArg() > 0 {
+		if t, err := strconv.Atoi(fs.Arg(0)); err == nil {
+			target = t
+		}
+	}
+
 	switch cmd {
 	case "up":
-		return runUp(logger, *dir, dsn, *targetFlag, *psqlPath)
+		return runUp(logger, *dir, dsn, target, *psqlPath)
 	case "status":
 		return runStatus(logger, *dir, dsn, *psqlPath)
 	case "verify":

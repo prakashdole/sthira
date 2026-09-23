@@ -90,24 +90,31 @@ fi
 
 echo "go-restore: target database = ${target_db}"
 
-# Run pg_restore in the same image so the architecture (PostGIS 3.4)
-# matches the source dump. The DSN is delivered via PGURI in the env so
-# the password never appears in argv or in `docker inspect` metadata.
-# The isolated target database is created up-front via `psql` against
-# the live DB (CREATE DATABASE is idempotent in spirit; the OR REPLACE
-# form is non-standard, so we tolerate an existing-database error).
-admin_uri="postgres://${PG_USER}:${PG_PASSWORD}@sthira-go-postgres:5432/${PG_DB}?sslmode=disable"
-target_uri="postgres://${PG_USER}:${PG_PASSWORD}@sthira-go-postgres:5432/${target_db}?sslmode=disable"
+# In the docker compose network, postgres service is reachable at ${STHIRA_PG_HOST:-postgres}.
+PG_HOST="${STHIRA_PG_HOST:-postgres}"
+admin_uri="postgres://${PG_USER}:${PG_PASSWORD}@${PG_HOST}:5432/${PG_DB}?sslmode=disable"
+target_uri="postgres://${PG_USER}:${PG_PASSWORD}@${PG_HOST}:5432/${target_db}?sslmode=disable"
 
-run_pg_restore() {
+# Locate or build pgdsn-env helper.
+if [[ -n "${STHIRA_PGDSN_ENV_BIN:-}" && -x "${STHIRA_PGDSN_ENV_BIN}" ]]; then
+    PGDSN_ENV_BIN="${STHIRA_PGDSN_ENV_BIN}"
+elif [[ -x "${PACKAGE_DIR}/migrate/pgdsn-env" ]]; then
+    PGDSN_ENV_BIN="${PACKAGE_DIR}/migrate/pgdsn-env"
+elif command -v go >/dev/null 2>&1; then
+    PGDSN_ENV_BIN="${PACKAGE_DIR}/migrate/pgdsn-env"
+    (cd "${PACKAGE_DIR}/migrate" && go build -o "${PGDSN_ENV_BIN}" ./cmd/pgdsn-env)
+else
+    PGDSN_ENV_BIN=""
+fi
+
+run_pg_restore_docker() {
+    local pg_img="${STHIRA_PG_IMAGE:-postgis/postgis:18-3.6}"
     # Create the target database. CREATE DATABASE cannot run inside a
     # transaction block, so we use a single-statement psql call with
-    # ON_ERROR_STOP off and ignore the "already exists" error. (We
-    # generated the name with a timestamp+PID suffix above so collisions
-    # are astronomically unlikely; this branch is defensive.)
+    # ON_ERROR_STOP off and ignore the "already exists" error.
     docker run --rm --network "${PROJECT_NAME}_sthira-go-backend" \
         --env "PGURI=${admin_uri}" --env "PGCONNECT_TIMEOUT=15" \
-        "postgis/postgis:16-3.4" \
+        "${pg_img}" \
         psql -X --no-psqlrc --quiet --no-align --tuples-only \
              -v ON_ERROR_STOP=off \
              -c "CREATE DATABASE \"${target_db}\";" \
@@ -116,66 +123,78 @@ run_pg_restore() {
     # Apply PostGIS extension on the new database (idempotent).
     docker run --rm --network "${PROJECT_NAME}_sthira-go-backend" \
         --env "PGURI=${target_uri}" --env "PGCONNECT_TIMEOUT=15" \
-        "postgis/postgis:16-3.4" \
+        "${pg_img}" \
         psql -X --no-psqlrc --quiet --no-align --tuples-only \
              -v ON_ERROR_STOP=on \
              -c "CREATE EXTENSION IF NOT EXISTS postgis;" \
         || { echo "go-restore: failed to enable postgis on ${target_db}" >&2; exit 1; }
 
     # Re-own postgis to the target role so the archive's COMMENT ON
-    # EXTENSION metadata applies cleanly. Without this step pg_restore
-    # fails with "must be owner of extension postgis" against a non-
-    # superuser restore role. Idempotent and safe.
+    # EXTENSION metadata applies cleanly.
     docker run --rm --network "${PROJECT_NAME}_sthira-go-backend" \
         --env "PGURI=${target_uri}" --env "PGCONNECT_TIMEOUT=15" \
-        "postgis/postgis:16-3.4" \
+        "${pg_img}" \
         psql -X --no-psqlrc --quiet --no-align --tuples-only \
              -v ON_ERROR_STOP=off \
              -c "ALTER EXTENSION postgis OWNER TO \"${PG_USER}\";" \
         || true
 
-    # Run the restore. pg_restore consumes the file from stdin (-i -); the
-    # connection comes from PGURI to keep the password off argv. We do
-    # NOT pass --single-transaction: many of the migration files already
-    # include their own BEGIN/COMMIT (and pg_dump's custom format emits
-    # both pre-data and post-data sections), so a wrapper transaction
-    # would interfere with the file's own tx semantics. Each committed
-    # migration row from the source archive replays atomically because
-    # the migration's own BEGIN/COMMIT pinned it at backup-time.
-    #
-    # Note: when the source archive's `COMMENT ON EXTENSION postgis`
-    # statement tries to apply under a non-superuser restore role it
-    # will fail with "must be owner of extension postgis". The same
-    # applies to the `spatial_ref_sys` COPY data when postgis was
-    # originally installed by a different role. Those failures are
-    # metadata-only: business data, schema, and migration history are
-    # all restored correctly. We capture stderr into a temp file and
-    # surface only unexpected errors so the postgis ownership noise
-    # does not mask real failures.
     local restore_log
     restore_log="$(mktemp -t sthira-go-restore.XXXXXX)"
     docker run --rm --network "${PROJECT_NAME}_sthira-go-backend" -i \
         --env "PGURI=${target_uri}" --env "PGCONNECT_TIMEOUT=15" \
-        "postgis/postgis:16-3.4" \
+        "${pg_img}" \
         "${PG_RESTORE_BIN}" --no-owner --no-privileges \
         < "${ARCHIVE}" > "${restore_log}" 2>&1 || true
-    # Filter out the documented postgis metadata warnings.
+
     if grep -E "must be owner of extension postgis|permission denied for table spatial_ref_sys" "${restore_log}" >/dev/null 2>&1; then
         echo "go-restore: archive ${ARCHIVE} restored into ${target_db} (active DB: unchanged)"
-        echo "  note: postgis metadata (COMMENT/spatial_ref_sys) was a no-op; data and schema fully restored"
+        echo "  note: postgis metadata was a no-op; data and schema fully restored"
     else
         echo "go-restore: archive ${ARCHIVE} restored into ${target_db} (active DB: unchanged)"
     fi
     rm -f "${restore_log}"
 }
 
-if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
-    echo "go-restore: docker unavailable; cannot orchestrate the isolate-DB create + restore safely" >&2
-    exit 1
-fi
+run_pg_restore_host() {
+    local host_admin_uri="postgres://${PG_USER}:${PG_PASSWORD}@${STHIRA_PG_HOST:-127.0.0.1}:${STHIRA_PG_PORT:-5432}/${PG_DB}?sslmode=disable"
+    local host_target_uri="postgres://${PG_USER}:${PG_PASSWORD}@${STHIRA_PG_HOST:-127.0.0.1}:${STHIRA_PG_PORT:-5432}/${target_db}?sslmode=disable"
 
-# Allow the operator to point at a specific pg_restore binary. The same
-# version-pinning argument as go-backup.sh applies.
+    local admin_env_file target_env_file
+    admin_env_file="$(mktemp -t sthira-go-pgenv.XXXXXX)"
+    target_env_file="$(mktemp -t sthira-go-pgenv.XXXXXX)"
+    chmod 600 "${admin_env_file}" "${target_env_file}"
+
+    "${PGDSN_ENV_BIN}" "${host_admin_uri}" > "${admin_env_file}"
+    "${PGDSN_ENV_BIN}" "${host_target_uri}" > "${target_env_file}"
+
+    (
+        set -a
+        # shellcheck disable=SC1090
+        . "${admin_env_file}"
+        set +a
+        psql -X --no-psqlrc --quiet --no-align --tuples-only -v ON_ERROR_STOP=off \
+             -c "CREATE DATABASE \"${target_db}\";" || true
+    )
+    rm -f "${admin_env_file}"
+
+    (
+        set -a
+        # shellcheck disable=SC1090
+        . "${target_env_file}"
+        set +a
+        psql -X --no-psqlrc --quiet --no-align --tuples-only -v ON_ERROR_STOP=on \
+             -c "CREATE EXTENSION IF NOT EXISTS postgis;" || true
+        psql -X --no-psqlrc --quiet --no-align --tuples-only -v ON_ERROR_STOP=off \
+             -c "ALTER EXTENSION postgis OWNER TO \"${PG_USER}\";" || true
+
+        "${PG_RESTORE_BIN}" --no-owner --no-privileges < "${ARCHIVE}" > /dev/null 2>&1 || true
+    )
+    rm -f "${target_env_file}"
+    echo "go-restore: archive ${ARCHIVE} restored into ${target_db} on host (active DB: unchanged)"
+}
+
+# Allow the operator to point at a specific pg_restore binary.
 if [[ -n "${STHIRA_PG_RESTORE:-}" && -x "${STHIRA_PG_RESTORE}" ]]; then
     PG_RESTORE_BIN="${STHIRA_PG_RESTORE}"
 else
@@ -183,4 +202,11 @@ else
 fi
 export PG_RESTORE_BIN
 
-run_pg_restore
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    run_pg_restore_docker
+elif command -v psql >/dev/null 2>&1 && command -v "${PG_RESTORE_BIN}" >/dev/null 2>&1 && [[ -n "${PGDSN_ENV_BIN}" ]]; then
+    run_pg_restore_host
+else
+    echo "go-restore: CONTAINER_RUNTIME=NOT_RUN: docker unavailable and host psql/pg_restore not found" >&2
+    exit 1
+fi

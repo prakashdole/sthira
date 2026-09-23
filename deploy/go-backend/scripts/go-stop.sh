@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/go-stop.sh — stop the package's API and Postgres containers
 # without removing the persistent volume. Rebuilds/upgrades preserve data.
-# Pass `--purge` to also remove the containers and the named volume
+# Pass `--purge` to also remove the containers and the volume
 # (destructive; refuses unless explicitly opted in).
 
 set -Eeuo pipefail
@@ -29,10 +29,10 @@ for arg in "$@"; do
 Usage: $0 [--purge]
 
 Without flags: stop the API and Postgres containers. The pgdata volume
-named "sthira-go-pgdata" is left intact so a subsequent
+for project "${PROJECT_NAME}" is left intact so a subsequent
 \`scripts/go-start.sh\` rebuild can read the existing schema.
 
---purge:    additionally remove the stopped containers and the pgdata
+--purge:    additionally remove the stopped containers and the project
             volume. DESTRUCTIVE. Refuses if STHIRA_PURGE_CONFIRM=y is
             unset.
 USAGE
@@ -42,16 +42,14 @@ USAGE
     esac
 done
 
-"${COMPOSE[@]}" stop api postgres
-
 if (( PURGE )); then
     if [[ "${STHIRA_PURGE_CONFIRM:-}" != "y" ]]; then
-        echo "go-stop: refusing --purge without STHIRA_PURGE_CONFIRM=y (would drop pgdata)" >&2
+        echo "go-stop: refusing --purge without STHIRA_PURGE_CONFIRM=y (would drop pgdata for ${PROJECT_NAME})" >&2
         exit 1
     fi
-    "${COMPOSE[@]}" rm -f api postgres
-    docker volume rm -- "$(docker volume ls -q | grep -E '^sthira-go-pgdata$' || true)"
-    echo "go-stop: containers and pgdata volume removed"
+    "${COMPOSE[@]}" down -v --remove-orphans
+    echo "go-stop: containers and pgdata volume removed for project ${PROJECT_NAME}"
 else
-    echo "go-stop: containers stopped; pgdata volume preserved"
+    "${COMPOSE[@]}" stop api postgres
+    echo "go-stop: containers stopped; pgdata volume preserved for project ${PROJECT_NAME}"
 fi

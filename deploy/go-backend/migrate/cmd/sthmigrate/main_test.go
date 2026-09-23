@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -50,6 +51,28 @@ func TestDiscoverMigrationsOrdering(t *testing.T) {
 	}
 }
 
+func TestDiscoverMigrationsDuplicates(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"0001_p3.sql":      "BEGIN;\nCOMMIT;\n",
+		"0002_p4_a.sql":    "BEGIN;\nCOMMIT;\n",
+		"0002_p4_b.sql":    "BEGIN;\nCOMMIT;\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	_, err := discoverMigrations(dir)
+	if err == nil {
+		t.Fatalf("expected duplicate revision error, got nil")
+	}
+	if !strings.Contains(err.Error(), "duplicate migration revision 2") {
+		t.Fatalf("expected duplicate error message, got: %v", err)
+	}
+}
+
 func TestSplitRevision(t *testing.T) {
 	cases := map[string]struct {
 		rev  int
@@ -90,5 +113,87 @@ func TestRedactedDSN(t *testing.T) {
 		if got != c.out || hp != c.hasP {
 			t.Errorf("redactedDSN(%q) = (%q,%v); want (%q,%v)", c.in, got, hp, c.out, c.hasP)
 		}
+	}
+}
+
+func TestMergePGEnv(t *testing.T) {
+	baseEnv := []string{
+		"PATH=/usr/bin",
+		"HOME=/root",
+		"PGHOST=oldhost",
+		"PGUSER=olduser",
+	}
+	overrides := []string{
+		"PGHOST=newhost",
+		"PGPORT=5432",
+		"PGUSER=newuser",
+		"PGPASSWORD=secret",
+		"IGNORED_KEY=value",
+	}
+
+	merged := mergePGEnv(baseEnv, overrides)
+	envMap := make(map[string]string)
+	for _, entry := range merged {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	if envMap["PGHOST"] != "newhost" {
+		t.Errorf("PGHOST = %q, want newhost", envMap["PGHOST"])
+	}
+	if envMap["PGPORT"] != "5432" {
+		t.Errorf("PGPORT = %q, want 5432", envMap["PGPORT"])
+	}
+	if envMap["PGUSER"] != "newuser" {
+		t.Errorf("PGUSER = %q, want newuser", envMap["PGUSER"])
+	}
+	if envMap["PGPASSWORD"] != "secret" {
+		t.Errorf("PGPASSWORD = %q, want secret", envMap["PGPASSWORD"])
+	}
+	if envMap["PATH"] != "/usr/bin" {
+		t.Errorf("PATH = %q, want /usr/bin", envMap["PATH"])
+	}
+	if _, ok := envMap["IGNORED_KEY"]; ok {
+		t.Errorf("IGNORED_KEY should have been excluded")
+	}
+}
+
+func TestNewPsqlRunner(t *testing.T) {
+	dsn := "postgres://myuser:mypass@db.internal:5433/mydb?sslmode=disable&application_name=migrator"
+	runner, err := newPsqlRunner("psql", dsn)
+	if err != nil {
+		t.Fatalf("newPsqlRunner error: %v", err)
+	}
+
+	envMap := make(map[string]string)
+	for _, entry := range runner.pgEnv {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	if envMap["PGHOST"] != "db.internal" {
+		t.Errorf("PGHOST = %q, want db.internal", envMap["PGHOST"])
+	}
+	if envMap["PGPORT"] != "5433" {
+		t.Errorf("PGPORT = %q, want 5433", envMap["PGPORT"])
+	}
+	if envMap["PGUSER"] != "myuser" {
+		t.Errorf("PGUSER = %q, want myuser", envMap["PGUSER"])
+	}
+	if envMap["PGPASSWORD"] != "mypass" {
+		t.Errorf("PGPASSWORD = %q, want mypass", envMap["PGPASSWORD"])
+	}
+	if envMap["PGDATABASE"] != "mydb" {
+		t.Errorf("PGDATABASE = %q, want mydb", envMap["PGDATABASE"])
+	}
+	if envMap["PGSSLMODE"] != "disable" {
+		t.Errorf("PGSSLMODE = %q, want disable", envMap["PGSSLMODE"])
+	}
+	if envMap["PGAPPNAME"] != "migrator" {
+		t.Errorf("PGAPPNAME = %q, want migrator", envMap["PGAPPNAME"])
 	}
 }

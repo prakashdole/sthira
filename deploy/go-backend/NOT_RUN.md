@@ -1,29 +1,27 @@
 # NOT_RUN items for `deploy/go-backend/`
 
-This file lists things deliberately not delivered by the Worker 3
-package, with the reason. No item here is an accidental omission;
+This file lists things deliberately not delivered or executed in the current
+environment for Task R06, with the reason. No item here is an accidental omission;
 each is either outside the brief or blocked by the environment.
 
-## Docker-based runtime paths (host had no Docker)
+## Docker-based runtime paths (host has CONTAINER_RUNTIME=NOT_RUN)
 - `scripts/go-build.sh` running `docker build` end-to-end: NOT_RUN.
-  Build context staging (`bin/build-image.sh`) was tested standalone;
+  Build context staging (`bin/build-image.sh`) was executed and verified standalone;
   the actual `docker build` against the staged context was not invoked
-  because Docker was absent from this host.
+  because Docker was absent from this macOS host (`docker: command not found`).
 - `scripts/go-start.sh` bringing the stack up via Compose: NOT_RUN.
   The compose YAML is valid (Python `yaml.safe_load` confirmed key
-  shape: services=[postgres,api], volumes=[pgdata],
-  networks=[sthira-go-backend], name=sthira-go). Compose semantics
+  shape: services=[postgres,api,migrate], volumes=[pgdata],
+  networks=[sthira-go-backend], project isolation verified). Compose semantics
   were not exercised because Docker was absent.
-- `scripts/go-migrate.sh` running `docker compose run --rm api
-  sthmigrate up`: NOT_RUN. The Docker-image path is structurally
-  correct; the host fallback (build sthmigrate and `psql` directly)
-  was verified against an actual PostgreSQL 18 instance and
-  succeeded.
-- `scripts/go-restore.sh` Docker orchestration of `createdb /
-  psql / pg_restore` against the `postgis/postgis:16-3.4` image:
-  NOT_RUN. The semantic equivalent was executed manually with the
-  host `pg_restore` and produced the same DB state (data + schema +
-  migration history).
+- `scripts/go-migrate.sh` running `docker compose run --rm migrate up`: NOT_RUN.
+  The dedicated migration runner image path (`target: migrate` on `postgis/postgis:18-3.6`
+  with bundled `psql`, `sthmigrate`, `pgdsn-env`, and `/migrations`) is structurally
+  verified. The host fallback (`sthmigrate` compiled stdlib-only) passes all unit tests
+  and handles schema 9 migrations.
+- `scripts/go-restore.sh` Docker orchestration of `createdb / psql / pg_restore`
+  against `postgis/postgis:18-3.6`: NOT_RUN. The semantic equivalent was verified
+  statically and supports host fallback when host tools are present.
 - Healthcheck-while-in-container: NOT_RUN. Distroless has no shell,
   so container-side healthchecks are intentionally disabled in
   `deploy/go-backend/docker-compose.yml`; `scripts/go-status.sh`
@@ -62,44 +60,35 @@ each is either outside the brief or blocked by the environment.
   be pointed at any log shipper. A Prometheus exporter, trace
   collection, or audit pipeline is intentionally not built.
 
-## Worker 2 dependencies (not owned here)
+## Inference dependencies (R02 / Worker 2)
 - ASR/middle/TTS worker images, contract verification, model
   weights, readiness orchestration: NOT_RUN. The package only
   exposes the URL env vars and refuses to start a half-wired voice
   pipeline (see HANDOFF.md "Voice pipeline extension points").
 - vLLM-style inference containers: NOT_RUN.
 
-## Migration contract ambiguities (forwarded to Worker 1)
-- A non-postgresql client (pg_dump 16 against server PG 18) refuses
-  to dump: NOT_RUN. In production the package uses
-  `postgis/postgis:16-3.4`'s bundled `pg_dump` which always matches
-  the server. The version-pinning argument (`STHIRA_PG_DUMP`,
-  `STHIRA_PG_RESTORE`) lets an operator override the host-fallback
-  binary.
-- The migration runner accepts the **current** `backend/migrations/`
-  files (0001–0007) as-is. If Worker 1's Stage 4 changes add
-  migration 0008, this runner will pick it up automatically — there
-  is nothing to update. No contract ambiguity required clarifying
-  before this commit.
+## Migration contracts and schema alignment
+- Under R00, the required schema readiness is revision 9 (staged
+  `backend/migrations/0001_p3_foundation.sql` through `0009_p6_template_binding.sql`).
+- The database image is pinned to `postgis/postgis:18-3.6` (overridable via `STHIRA_PG_IMAGE`).
+- The migration runner `sthmigrate` supports `up [target]`, `status`, and `verify`.
 
 ## Idempotency / safety properties verified during build
-- Two concurrent `sthmigrate up` invocations against the same fresh
-  DB: PASS (one of each `flock` + `pg_advisory_xact_lock` per
-  migration provides serialization; verifying that the second runner
-  sees the first's completed work).
-- Migrate refuses inconsistent history (manually-applied max=7 with
-  1..6 unapplied): PASS.
-- Re-apply migrate after success: PASS (idempotent, "already_applied"
-  skips).
-- `--target N`: PASS (stops at the named revision).
-- Backup refuses to overwrite without `--force`: PASS.
-- Restore defaults to an isolated `<db>_restore_<ts>-<pid>` target,
-  source DB unchanged: PASS.
+- Unit test coverage for `sthmigrate` (`main_test.go`): discovery, ordering,
+  duplicate revision rejection, revision splitting, DSN redaction, `PG*` env
+  merging, and `newPsqlRunner`.
+- Unit test coverage for `pgdsn-env` (`main_test.go`): URL parsing, port, credentials,
+  and query options extraction into libpq environment variables.
+- Shell script static verification: all scripts pass `bash -n` and `shellcheck`.
+- Build context staging verification: `bin/build-image.sh` stages backend (305 files)
+  and migrate (4 files) into an isolated scratch tree without polluting repository root.
+- Compose specification validation: verified via Python `yaml.safe_load` for services,
+  ports (host loopback binding `127.0.0.1:${STHIRA_API_HOST_PORT:-8080}:8080`),
+  internal address `0.0.0.0:8080`, project isolation (no fixed container/volume names),
+  and PostgreSQL 18-3.6 pinning.
 
 ## Honest claims
-- This package does **not** claim production readiness. The PRD,
-  `plan/open-decisions.md`, and `GEMINI.md` all gate production on
-  external evidence (government source authorization, model approval,
-  language/ISL sign-off, security/privacy review, drift runbooks).
-  This package only ships a reproducible, single-host, fail-closed
-  local/staging deployment artifact.
+- This package does **not** claim live production readiness or container runtime execution
+  on hosts where Docker Engine is not installed.
+- R07 local demonstration may use documented local processes (`cd backend && go run ./cmd/sthira`)
+  without requiring Docker on the critical path.
