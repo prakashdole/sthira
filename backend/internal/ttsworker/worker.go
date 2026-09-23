@@ -39,19 +39,24 @@ type SynthesizeRequest struct {
 }
 
 // SynthesizeResponse is the worker-side mirror of
-// contracts.TTSWorkerResponse.
+// contracts.TTSWorkerResponse. Settings carries the synthesis
+// parameters that produced the returned audio (filled from the
+// cache identity on hit); the orchestrator propagates these into
+// PipelineAudio so the client sees the ACTUAL sample rate /
+// bit depth / channels, never a value declared by the request.
 type SynthesizeResponse struct {
-	RequestID      string   `json:"request_id"`
-	SpeechKey      string   `json:"speech_key"`
-	Language       string   `json:"language"`
-	State          TTSState `json:"state"`
-	AudioB64       string   `json:"audio_b64,omitempty"`    // base64 of PCM/WAV bytes when state == OK
-	ContentType    string   `json:"content_type,omitempty"` // audio/wav
-	ChecksumSHA256 string   `json:"checksum_sha256,omitempty"`
-	ModelRevision  string   `json:"model_revision,omitempty"`
-	VoiceRevision  string   `json:"voice_revision,omitempty"`
-	CacheHit       bool     `json:"cache_hit"`
-	ByteSize       int64    `json:"byte_size,omitempty"`
+	RequestID      string            `json:"request_id"`
+	SpeechKey      string            `json:"speech_key"`
+	Language       string            `json:"language"`
+	State          TTSState          `json:"state"`
+	AudioB64       string            `json:"audio_b64,omitempty"`    // base64 of PCM/WAV bytes when state == OK
+	ContentType    string            `json:"content_type,omitempty"` // audio/wav
+	ChecksumSHA256 string            `json:"checksum_sha256,omitempty"`
+	ModelRevision  string            `json:"model_revision,omitempty"`
+	VoiceRevision  string            `json:"voice_revision,omitempty"`
+	Settings       SynthesisSettings `json:"settings,omitempty"`
+	CacheHit       bool              `json:"cache_hit"`
+	ByteSize       int64             `json:"byte_size,omitempty"`
 }
 
 // Worker is the TTS worker lifecycle. It owns the bounded queue, the
@@ -474,8 +479,13 @@ func (w *Worker) handleJob(j *job) {
 			ChecksumSHA256: entry.ChecksumSHA256,
 			ModelRevision:  id.ModelRevision,
 			VoiceRevision:  id.VoiceRevision,
-			CacheHit:       true,
-			ByteSize:       entry.ByteSize,
+			// SynthesizeResponse.Settings must mirror the actual
+			// synthesis that produced the cached bytes; the cache
+			// identity is the source of truth for "what rate / depth /
+			// channels produced this WAV".
+			Settings: id.SynthesisSettings,
+			CacheHit: true,
+			ByteSize: entry.ByteSize,
 		})
 		w.processed.Add(1)
 		return

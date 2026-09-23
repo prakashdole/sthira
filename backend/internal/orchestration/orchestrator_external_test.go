@@ -949,14 +949,15 @@ func TestSynthesize_InvalidReturnedAudio(t *testing.T) {
 	})
 	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
 
-	// Hook TTS worker to return corrupt checksum
+	// Hook TTS worker to return corrupt checksum over valid WAV bytes
+	validWAV := makeTestWAV(t, 16000, 1)
 	tts.SetSynthesizeHook(func(ctx context.Context, req contracts.TTSWorkerRequest) (contracts.TTSWorkerResponse, error) {
 		return contracts.TTSWorkerResponse{
 			RequestID:      req.RequestID,
 			SpeechKey:      req.SpeechKey,
 			Language:       req.Language,
 			State:          contracts.TTSOK,
-			AudioB64:       base64.StdEncoding.EncodeToString([]byte("RIFFfake-audio")),
+			AudioB64:       base64.StdEncoding.EncodeToString(validWAV),
 			ContentType:    "audio/wav",
 			ChecksumSHA256: "corrupted_checksum",
 			ModelRevision:  "r0",

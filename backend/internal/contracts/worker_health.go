@@ -135,6 +135,13 @@ type TTSWorkerResponse struct {
 	ChecksumSHA256 string   `json:"checksum_sha256"`
 	ModelRevision  string   `json:"model_revision"`
 	VoiceRevision  string   `json:"voice_revision"`
+	// Settings records the synthesis parameters that produced the
+	// returned audio. The orchestrator propagates these into
+	// PipelineAudio so the client sees the ACTUAL sample rate /
+	// bit depth / channels, never a value declared by the
+	// orchestrator's request. Required when State == OK; absent
+	// when no audio is produced (AUDIO_UNAVAILABLE / etc).
+	Settings TTSSynthesisSettings `json:"settings,omitempty"`
 }
 
 // WorkerPrivateHeaders are the HTTP header names the orchestrator uses for

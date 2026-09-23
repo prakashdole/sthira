@@ -244,7 +244,7 @@ func TestVoiceProcess_RealHTTP_PersistedScopedContext_Pipeline(t *testing.T) {
 	defer middleServer.Close()
 
 	// 3. Loopback TTS Server
-	ttsAudioBytes := []byte("RIFF1234WAVEfmt 16....dataREAL_TTS_AUDIO")
+	ttsAudioBytes := generateWAVBytes(500)
 	ttsAudioB64 := base64.StdEncoding.EncodeToString(ttsAudioBytes)
 	ttsHash := sha256.Sum256(ttsAudioBytes)
 	ttsChecksum := hex.EncodeToString(ttsHash[:])

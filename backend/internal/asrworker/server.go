@@ -32,6 +32,7 @@ import (
 type Server struct {
 	worker       *Worker
 	listener     net.Listener
+	listenerMu   sync.Mutex // guards listener field; Addr() may be called from another goroutine
 	expectedTok  string
 	mux          *http.ServeMux
 	httpSrv      *http.Server
@@ -115,7 +116,9 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 	if err != nil {
 		return err
 	}
+	s.listenerMu.Lock()
 	s.listener = ln
+	s.listenerMu.Unlock()
 	errCh := make(chan error, 1)
 	go func() {
 		err := s.httpSrv.Serve(ln)
@@ -135,10 +138,13 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 
 // Wait blocks until the listener is closed. Pair with Cancel.
 func (s *Server) Wait() error {
-	if s.listener == nil {
+	s.listenerMu.Lock()
+	ln := s.listener
+	s.listenerMu.Unlock()
+	if ln == nil {
 		return errors.New("server not started")
 	}
-	if err := s.httpSrv.Serve(s.listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := s.httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil
@@ -154,10 +160,13 @@ func (s *Server) Cancel(ctx context.Context) error {
 
 // Addr returns the bound address (useful for tests).
 func (s *Server) Addr() string {
-	if s.listener == nil {
+	s.listenerMu.Lock()
+	ln := s.listener
+	s.listenerMu.Unlock()
+	if ln == nil {
 		return ""
 	}
-	return s.listener.Addr().String()
+	return ln.Addr().String()
 }
 
 // HandleTranscribeFor exposes the typed handler for unit tests so

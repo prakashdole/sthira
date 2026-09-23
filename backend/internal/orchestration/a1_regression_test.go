@@ -743,15 +743,16 @@ func TestA1_TTSCancellationStaleContext_DropsActions(t *testing.T) {
 		}
 		return nil
 	})
+	validWAV := makeTestWAV(t, 16000, 1)
 	tts.SetSynthesizeHook(func(_ context.Context, req contracts.TTSWorkerRequest) (contracts.TTSWorkerResponse, error) {
 		return contracts.TTSWorkerResponse{
 			RequestID:      req.RequestID,
 			SpeechKey:      req.SpeechKey,
 			Language:       req.Language,
 			State:          contracts.TTSOK,
-			AudioB64:       base64.StdEncoding.EncodeToString([]byte("RIFFfake-audio")),
+			AudioB64:       base64.StdEncoding.EncodeToString(validWAV),
 			ContentType:    "audio/wav",
-			ChecksumSHA256: "bea3c71fb25785bdaafb08a2537c55f03fff31fe94c566d50a9d9e8256dd7dfe",
+			ChecksumSHA256: sha256Hex(validWAV),
 			ModelRevision:  "r0",
 			VoiceRevision:  "v0",
 		}, nil
@@ -796,15 +797,16 @@ func TestA1_SynthesizeStaleSnapshotDuringSynthesis(t *testing.T) {
 		return nil
 	})
 
+	validWAV := makeTestWAV(t, 16000, 1)
 	tts.SetSynthesizeHook(func(_ context.Context, req contracts.TTSWorkerRequest) (contracts.TTSWorkerResponse, error) {
 		return contracts.TTSWorkerResponse{
 			RequestID:      req.RequestID,
 			SpeechKey:      req.SpeechKey,
 			Language:       req.Language,
 			State:          contracts.TTSOK,
-			AudioB64:       base64.StdEncoding.EncodeToString([]byte("RIFFfake-audio")),
+			AudioB64:       base64.StdEncoding.EncodeToString(validWAV),
 			ContentType:    "audio/wav",
-			ChecksumSHA256: "bea3c71fb25785bdaafb08a2537c55f03fff31fe94c566d50a9d9e8256dd7dfe",
+			ChecksumSHA256: sha256Hex(validWAV),
 			ModelRevision:  "r0",
 			VoiceRevision:  "v0",
 		}, nil

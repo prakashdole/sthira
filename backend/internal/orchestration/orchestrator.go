@@ -710,6 +710,39 @@ func (o *Orchestrator) stageTTS(ctx context.Context, id CorrelationID, sc contra
 			Stage: StageTTS, Code: contracts.ErrInternal, Reason: "tts checksum mismatch", Retryable: false,
 		})
 	}
+	// Audio metadata truthfulness: never declare 16 kHz (or any
+	// request-side rate) when the actual WAV bytes are at a
+	// different rate. The worker's SynthesizeResponse.Settings is
+	// the source of truth for what rate / depth / channels produced
+	// these bytes; the orchestrator inspects the RIFF header to
+	// confirm the worker did not mislabel bytes.
+	actual, err := readWAVHeader(bytes)
+	if err != nil {
+		return nil, pipelineError(contracts.PipelineModelUnavailable, 500, StageFailure{
+			Stage: StageTTS, Code: contracts.ErrInternal, Reason: "tts audio: " + err.Error(), Retryable: false,
+		})
+	}
+	if actual.SampleRate <= 0 || actual.Channels <= 0 || actual.BitDepth <= 0 {
+		return nil, pipelineError(contracts.PipelineModelUnavailable, 500, StageFailure{
+			Stage: StageTTS, Code: contracts.ErrInternal, Reason: "tts audio: missing RIFF header fields", Retryable: false,
+		})
+	}
+	effectiveSettings := settings
+	if (resp.Settings != contracts.TTSSynthesisSettings{}) {
+		effectiveSettings = contracts.TTSSynthesisSettings{
+			SampleRate:   resp.Settings.SampleRate,
+			BitDepth:     resp.Settings.BitDepth,
+			Channels:     resp.Settings.Channels,
+			SpeakingRate: resp.Settings.SpeakingRate,
+		}
+	}
+	if effectiveSettings.SampleRate != actual.SampleRate ||
+		effectiveSettings.BitDepth != actual.BitDepth ||
+		effectiveSettings.Channels != actual.Channels {
+		return nil, pipelineError(contracts.PipelineModelUnavailable, 500, StageFailure{
+			Stage: StageTTS, Code: contracts.ErrInternal, Reason: "tts audio declared settings do not match RIFF header", Retryable: false,
+		})
+	}
 	return &contracts.PipelineAudio{
 		AudioID:         checksum,
 		ContentType:     resp.ContentType,
@@ -721,8 +754,11 @@ func (o *Orchestrator) stageTTS(ctx context.Context, id CorrelationID, sc contra
 		VoiceRevision:   resp.VoiceRevision,
 		TemplateVersion: tpl.TemplateVersion,
 		SourceVersion:   tpl.SourceVersion,
-		Settings:        settings,
-		AudioB64:        resp.AudioB64,
+		// Propagate the WORKER's truth, not the orchestrator's
+		// request-side settings, so the client never sees a
+		// declared 16 kHz label on native-rate audio.
+		Settings: effectiveSettings,
+		AudioB64: resp.AudioB64,
 	}, nil
 }
 

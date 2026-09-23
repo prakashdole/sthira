@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"sync"
@@ -36,16 +37,51 @@ type Worker struct {
 	proposeHook    func(ctx context.Context, req contracts.MiddleWorkerRequest) (contracts.MiddleWorkerResponse, error)
 	synthesizeHook func(ctx context.Context, req contracts.TTSWorkerRequest) (contracts.TTSWorkerResponse, error)
 
-	audioBytes []byte
-	languages  []string
+	audioBytes    []byte
+	languages     []string
+	audioSettings contracts.TTSSynthesisSettings
 }
 
-// NewWorker returns a fake worker with sensible defaults.
+// NewWorker returns a fake worker with sensible defaults. The audio
+// default is a canonical 1-second silence WAV at the request's
+// declared rate (16000 Hz mono PCM16), so the orchestrator's
+// declared-settings vs RIFF-header check passes for the default
+// happy path. Tests that need a mismatch install a custom
+// synthesizeHook or override the audio bytes.
 func NewWorker() *Worker {
 	return &Worker{
 		languages:  []string{"en-IN", "hi-IN"},
-		audioBytes: []byte("RIFFfake-audio"),
+		audioBytes: silenceWAV(16000, 1),
+		audioSettings: contracts.TTSSynthesisSettings{
+			SampleRate: 16000, BitDepth: 16, Channels: 1,
+		},
 	}
+}
+
+// silenceWAV produces a canonical PCM 16-bit LE mono WAV holding
+// `seconds` of zeros at `rate`. The orchestrator's RIFF-header
+// validator requires PCM format=1, 16-bit, mono; this helper emits
+// exactly that.
+func silenceWAV(rate int, seconds float64) []byte {
+	samples := int(float64(rate) * seconds)
+	dataLen := samples * 2
+	total := 36 + dataLen
+	b := make([]byte, 44+dataLen)
+	copy(b[0:4], "RIFF")
+	binary.LittleEndian.PutUint32(b[4:8], uint32(total))
+	copy(b[8:12], "WAVE")
+	copy(b[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(b[16:20], 16)
+	binary.LittleEndian.PutUint16(b[20:22], 1) // PCM
+	binary.LittleEndian.PutUint16(b[22:24], 1) // mono
+	binary.LittleEndian.PutUint32(b[24:28], uint32(rate))
+	binary.LittleEndian.PutUint32(b[28:32], uint32(rate*2))
+	binary.LittleEndian.PutUint16(b[32:34], 2)
+	binary.LittleEndian.PutUint16(b[34:36], 16)
+	copy(b[36:40], "data")
+	binary.LittleEndian.PutUint32(b[40:44], uint32(dataLen))
+	// Samples default to zero.
+	return b
 }
 
 // MarkReady sets the worker's reported /health state to ready+warm.
@@ -135,6 +171,7 @@ func (w *Worker) Synthesize(ctx context.Context, req contracts.TTSWorkerRequest)
 		ChecksumSHA256: hex.EncodeToString(sum[:]),
 		ModelRevision:  "r0",
 		VoiceRevision:  "v0",
+		Settings:       w.audioSettings,
 	}, nil
 }
 
