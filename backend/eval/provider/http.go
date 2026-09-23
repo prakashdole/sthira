@@ -28,6 +28,8 @@ package provider
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -282,6 +284,11 @@ func (p *HTTPProvider) TTS(ctx context.Context, req TTSRequest) (TTSOutcome, err
 		settings["bit_depth"] = 16
 		settings["channels"] = 1
 	}
+	sha := req.TemplateSHA256
+	if sha == "" && req.Text != "" {
+		sum := sha256.Sum256([]byte(req.Text))
+		sha = hex.EncodeToString(sum[:])
+	}
 	wire := map[string]any{
 		"request_id":       req.RequestID,
 		"speech_key":       req.SpeechKey,
@@ -289,6 +296,7 @@ func (p *HTTPProvider) TTS(ctx context.Context, req TTSRequest) (TTSOutcome, err
 		"text":             req.Text,
 		"source_version":   req.SourceVersion,
 		"template_version": req.TemplateVersion,
+		"template_sha256":  sha,
 		"deadline_ms":      5000,
 	}
 	if req.Voice != "" {

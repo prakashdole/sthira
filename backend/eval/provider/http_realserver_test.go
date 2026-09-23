@@ -20,7 +20,9 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -441,10 +443,12 @@ func startRealTTS(t *testing.T, primeCache bool) string {
 	clock := ttsworker.NewStandaloneSourceVersionClock(7)
 	codec := ttsworker.NewCodec(1<<20, time.Hour, clock)
 	if primeCache {
+		sum := sha256.Sum256([]byte("कृपया निकटतम सुरक्षित क्षेत्र पर जाएं"))
 		id := ttsworker.CacheIdentity{
 			Text: "कृपया निकटतम सुरक्षित क्षेत्र पर जाएं", TemplateKey: "go_to_safe_zone",
 			TemplateVersion: 3, SourceVersion: 7, Language: "hi-IN",
-			ModelRevision: "rev-conf-1", VoiceRevision: "voice-conf-1",
+			TemplateSHA256: hex.EncodeToString(sum[:]),
+			ModelRevision:  "rev-conf-1", VoiceRevision: "voice-conf-1",
 			SynthesisSettings: ttsworker.SynthesisSettings{SampleRate: 44100, BitDepth: 16, Channels: 1},
 		}
 		if err := codec.Put(id, makeWavRIFF(make([]byte, 128), 44100)); err != nil {

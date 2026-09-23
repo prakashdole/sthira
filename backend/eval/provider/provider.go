@@ -111,6 +111,7 @@ type TTSRequest struct {
 	Args            map[string]any
 	SourceVersion   int
 	TemplateVersion int
+	TemplateSHA256  string
 	Case            corpus.Case
 }
 
