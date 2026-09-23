@@ -12,6 +12,17 @@ import '@fontsource/noto-sans-malayalam/400.css';
 import '@fontsource/noto-sans-malayalam/700.css';
 import '@fontsource/noto-sans-devanagari/400.css';
 import '@fontsource/noto-sans-devanagari/700.css';
+import {
+  type JourneyState,
+  type PositionReading,
+  type DestinationTarget,
+  type ProximityEvaluation,
+  evaluateProximity,
+  transitionOnPosition,
+  transitionOnArrival,
+  transitionOnRevocation,
+  DEFAULT_JOURNEY_OPTIONS,
+} from './journey';
 
 type RuntimeState = 'checking' | 'demo' | 'blocked' | 'offline';
 type ChatMessage = { role: 'USER' | 'ASSISTANT'; text: string; audioB64?: string };
@@ -91,6 +102,85 @@ let availableDestinations: DestinationChoice[] = [
   },
 ];
 let selectedDestination: DestinationChoice = availableDestinations[0]!;
+
+// R04: Consent-based foreground journey tracking state
+let journeyState: JourneyState = 'NOT_STARTED';
+let currentPosition: PositionReading | null = null;
+let lastProximityEval: ProximityEvaluation | null = null;
+let geolocationWatchId: number | null = null;
+let tabInBackground = false;
+let lastBackgroundTime: number | null = null;
+let simulationActive = false;
+let simulationNote = '';
+let locationErrorMessage = '';
+
+function getDestinationTarget(): DestinationTarget {
+  return {
+    id: selectedDestination.facility_id,
+    name: selectedDestination.facility_name,
+    longitude: mapData.shelter[0],
+    latitude: mapData.shelter[1],
+  };
+}
+
+function journeyBadgeClass(state: JourneyState): string {
+  switch (state) {
+    case 'TRACKING': return 'tracking';
+    case 'NEAR_DESTINATION': return 'near';
+    case 'ARRIVAL_REPORTED': return 'near';
+    case 'ROUTE_REVOKED': return 'revoked';
+    case 'LOCATION_UNAVAILABLE': return 'unavailable';
+    case 'PAUSED': return 'paused';
+    default: return 'paused';
+  }
+}
+
+type TranslationWords = (typeof words)[Language];
+
+function journeyStateLabel(state: JourneyState, t: TranslationWords): string {
+  switch (state) {
+    case 'TRACKING': return t.trackingActive;
+    case 'NEAR_DESTINATION': return t.trackingNear;
+    case 'ARRIVAL_REPORTED': return t.arrivalRecorded;
+    case 'ROUTE_REVOKED': return 'Route Revoked';
+    case 'LOCATION_UNAVAILABLE': return 'GPS Unavailable';
+    case 'PAUSED': return t.trackingPaused;
+    default: return 'Ready to Track';
+  }
+}
+
+function journeyTrackingDetail(
+  state: JourneyState,
+  evalResult: ProximityEvaluation | null,
+  pos: PositionReading | null,
+  t: TranslationWords
+): string {
+  if (state === 'ROUTE_REVOKED') return t.routeRevokedNotice;
+  if (state === 'LOCATION_UNAVAILABLE') return locationErrorMessage || t.locationUnavailable;
+  if (state === 'ARRIVAL_REPORTED') return t.arrivalRecorded;
+  if (state === 'NOT_STARTED') return 'Consent-based GPS tracking is off. Start tracking for arrival assistance.';
+  if (state === 'PAUSED') return 'GPS tracking paused by citizen.';
+
+  if (evalResult && pos) {
+    const km = (evalResult.distanceMeters / 1000).toFixed(1);
+    const acc = Math.round(pos.accuracyMeters);
+    if (evalResult.isStale) return `Signal stale (>30s old) · Distance ~${km} km`;
+    if (!evalResult.isAccurateEnough) return `Signal uncertain (±${acc}m) · Distance ~${km} km`;
+    if (evalResult.isNear) return `Within ${evalResult.distanceMeters}m of shelter (accuracy ±${acc}m)`;
+    return `Distance: ${km} km remaining (accuracy ±${acc}m)`;
+  }
+  return 'Acquiring GPS fix...';
+}
+
+function trackingButtonHtml(state: JourneyState, t: TranslationWords): string {
+  if (state === 'TRACKING' || state === 'NEAR_DESTINATION') {
+    return `<button class="secondary-action" style="min-height: 2.25rem; font-size: 0.75rem;" type="button" data-action="stop-tracking">${t.stopJourneyTracking}</button>`;
+  }
+  if (state === 'NOT_STARTED' || state === 'PAUSED' || state === 'LOCATION_UNAVAILABLE') {
+    return `<button class="secondary-action" style="min-height: 2.25rem; font-size: 0.75rem;" type="button" data-action="start-tracking">${t.startJourneyTracking}</button>`;
+  }
+  return '';
+}
 
 function speechLanguageTag(lang: Language): string {
   switch (lang) {
@@ -310,6 +400,33 @@ function render() {
             </div>
           ` : ''}
 
+          ${journeyState === 'ROUTE_REVOKED' ? `
+            <div class="warning-banner" role="alert">
+              <strong>${t.routeRevokedNotice}</strong>
+            </div>
+          ` : ''}
+
+          ${journeyState === 'LOCATION_UNAVAILABLE' ? `
+            <div class="warning-banner" role="alert">
+              <span>${escapeHtml(locationErrorMessage || t.locationUnavailable)}</span>
+            </div>
+          ` : ''}
+
+          ${tabInBackground ? `
+            <div class="warning-banner" role="status">
+              <span>${t.tabBackgroundNotice}</span>
+            </div>
+          ` : ''}
+
+          ${journeyState === 'NEAR_DESTINATION' ? `
+            <div class="near-destination-advisory" role="region" aria-label="${t.nearDestinationPrompt}">
+              <p>${icons.locate} ${t.nearDestinationPrompt}</p>
+              <button class="primary-action is-success" type="button" data-action="arrival-confirm-now">
+                ${t.confirmArrivalPrompt}
+              </button>
+            </div>
+          ` : ''}
+
           <article class="destination">
             <div>
               <span class="destination-label">${t.destinationLabel}</span>
@@ -321,6 +438,22 @@ function render() {
               <span>${selectedDestination.duration_minutes ?? 35} min</span>
             </div>
           </article>
+
+          <div class="journey-tracker" aria-label="${t.journeyTracking}">
+            <div class="journey-header">
+              <span><strong>${t.journeyTracking}</strong></span>
+              <span class="journey-status-badge journey-status-badge--${journeyBadgeClass(journeyState)}">
+                ${journeyStateLabel(journeyState, t)}
+              </span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+              <small style="color: var(--color-muted);">
+                ${journeyTrackingDetail(journeyState, lastProximityEval, currentPosition, t)}
+              </small>
+              ${trackingButtonHtml(journeyState, t)}
+            </div>
+            ${simulationActive ? `<small style="color: var(--color-danger); font-size: 0.72rem;">[Simulation: ${escapeHtml(simulationNote)}]</small>` : ''}
+          </div>
 
           <button class="primary-action ${routeStarted ? 'is-success' : ''}" data-testid="start-route" type="button" data-action="route">
             ${icons.route}<span>${routeStarted ? t.routeActive : t.startRoute}</span>${icons.arrow}
@@ -336,6 +469,18 @@ function render() {
             <button type="button" data-action="directions">${icons.route}<span>${t.directions}</span></button>
             <button type="button" data-action="listen">${icons.volume}<span>${t.listen}</span></button>
             <button type="button" data-action="voice-open">${icons.mic}<span>${t.askByVoice}</span></button>
+          </div>
+
+          <div class="simulation-panel">
+            <span>${t.simulateBarTitle}</span>
+            <div class="simulation-buttons">
+              <button type="button" data-sim="en-route">${t.simEnRoute}</button>
+              <button type="button" data-sim="near">${t.simNear}</button>
+              <button type="button" data-sim="inaccurate">${t.simInaccurate}</button>
+              <button type="button" data-sim="stale">${t.simStale}</button>
+              <button type="button" data-sim="revoke">${t.simRevoke}</button>
+              <button type="button" data-sim="reset">${t.simReset}</button>
+            </div>
           </div>
 
           <button class="arrival-action" data-testid="arrival-confirmation" type="button" data-action="arrival-open">
@@ -828,9 +973,123 @@ async function toggleLocalRecording() {
   }
 }
 
+function startTracking() {
+  simulationActive = false;
+  simulationNote = '';
+  locationErrorMessage = '';
+
+  if (!navigator.geolocation) {
+    journeyState = 'LOCATION_UNAVAILABLE';
+    locationErrorMessage = words[language].locationUnavailable;
+    render();
+    return;
+  }
+
+  if (geolocationWatchId !== null) {
+    navigator.geolocation.clearWatch(geolocationWatchId);
+    geolocationWatchId = null;
+  }
+
+  journeyState = 'TRACKING';
+  render();
+
+  geolocationWatchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      const reading: PositionReading = {
+        longitude: pos.coords.longitude,
+        latitude: pos.coords.latitude,
+        accuracyMeters: pos.coords.accuracy,
+        timestamp: pos.timestamp || Date.now(),
+      };
+      applyPositionUpdate(reading);
+    },
+    (err) => {
+      handleGeolocationError(err);
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+  );
+}
+
+function stopTracking() {
+  if (geolocationWatchId !== null) {
+    navigator.geolocation.clearWatch(geolocationWatchId);
+    geolocationWatchId = null;
+  }
+  if (journeyState !== 'ARRIVAL_REPORTED' && journeyState !== 'ROUTE_REVOKED') {
+    journeyState = 'PAUSED';
+  }
+  render();
+}
+
+function handleGeolocationError(err: GeolocationPositionError) {
+  journeyState = 'LOCATION_UNAVAILABLE';
+  if (err.code === 1) {
+    locationErrorMessage = words[language].locationDenied;
+  } else {
+    locationErrorMessage = words[language].locationUnavailable;
+  }
+  if (geolocationWatchId !== null) {
+    navigator.geolocation.clearWatch(geolocationWatchId);
+    geolocationWatchId = null;
+  }
+  render();
+}
+
+function applyPositionUpdate(reading: PositionReading) {
+  currentPosition = reading;
+  mapData.user = [reading.longitude, reading.latitude];
+
+  const evalResult = evaluateProximity(reading, getDestinationTarget(), DEFAULT_JOURNEY_OPTIONS);
+  lastProximityEval = evalResult;
+
+  const nextState = transitionOnPosition(journeyState, evalResult);
+  journeyState = nextState;
+  render();
+}
+
+function simulatePosition(
+  lon: number,
+  lat: number,
+  accuracy: number,
+  timestampOffsetMs: number = 0,
+  note: string = ''
+) {
+  if (geolocationWatchId !== null) {
+    navigator.geolocation.clearWatch(geolocationWatchId);
+    geolocationWatchId = null;
+  }
+  simulationActive = true;
+  simulationNote = note;
+  locationErrorMessage = '';
+
+  if (journeyState === 'NOT_STARTED' || journeyState === 'PAUSED' || journeyState === 'LOCATION_UNAVAILABLE') {
+    journeyState = 'TRACKING';
+  }
+
+  const reading: PositionReading = {
+    longitude: lon,
+    latitude: lat,
+    accuracyMeters: accuracy,
+    timestamp: Date.now() - timestampOffsetMs,
+  };
+  applyPositionUpdate(reading);
+}
+
+function revokeRoute() {
+  journeyState = transitionOnRevocation(journeyState);
+  if (geolocationWatchId !== null) {
+    navigator.geolocation.clearWatch(geolocationWatchId);
+    geolocationWatchId = null;
+  }
+  render();
+}
+
 async function startRouteReservation() {
   routeStarted = true;
   directionsOpen = true;
+  if (journeyState === 'NOT_STARTED') {
+    startTracking();
+  }
   render();
   focusRoute();
 
@@ -868,8 +1127,17 @@ async function startRouteReservation() {
 }
 
 async function confirmArrival() {
+  const transition = transitionOnArrival(journeyState);
+  if (!transition.isNewTransition) {
+    arrivalOpen = false;
+    render();
+    return;
+  }
+
+  journeyState = 'ARRIVAL_REPORTED';
   arrivalSuccess = true;
-  arrivalRecordedAt = new Date().toISOString();
+  arrivalRecordedAt = new Date().toLocaleTimeString();
+  stopTracking();
   render();
 
   // Send explicit ARRIVE event to Go backend if reservation exists
@@ -882,6 +1150,12 @@ async function confirmArrival() {
         body: JSON.stringify({
           type: 'ARRIVE',
           idempotency_key: 'arrive-' + Math.random().toString(36).slice(2, 10),
+          party_size: partySize,
+          payload: {
+            proximity_verified: lastProximityEval?.isNear ?? false,
+            accuracy_meters: currentPosition?.accuracyMeters ?? null,
+            timestamp: new Date().toISOString(),
+          },
         }),
       });
     } catch {
@@ -1029,6 +1303,50 @@ function bindInteractions() {
     assistanceOpen = false; render();
   });
 
+  document.querySelector<HTMLButtonElement>('[data-action="start-tracking"]')?.addEventListener('click', () => {
+    startTracking();
+  });
+
+  document.querySelector<HTMLButtonElement>('[data-action="stop-tracking"]')?.addEventListener('click', () => {
+    stopTracking();
+  });
+
+  document.querySelector<HTMLButtonElement>('[data-action="arrival-confirm-now"]')?.addEventListener('click', () => {
+    void confirmArrival();
+  });
+
+  document.querySelector<HTMLButtonElement>('[data-sim="en-route"]')?.addEventListener('click', () => {
+    simulatePosition(76.115, 11.560, 12, 0, 'En route 1.5 km');
+  });
+
+  document.querySelector<HTMLButtonElement>('[data-sim="near"]')?.addEventListener('click', () => {
+    simulatePosition(76.1053, 11.5702, 10, 0, 'Near shelter 40m');
+  });
+
+  document.querySelector<HTMLButtonElement>('[data-sim="inaccurate"]')?.addEventListener('click', () => {
+    simulatePosition(76.1053, 11.5702, 250, 0, 'Inaccurate GPS ±250m');
+  });
+
+  document.querySelector<HTMLButtonElement>('[data-sim="stale"]')?.addEventListener('click', () => {
+    simulatePosition(76.1053, 11.5702, 10, 45000, 'Stale GPS 45s old');
+  });
+
+  document.querySelector<HTMLButtonElement>('[data-sim="revoke"]')?.addEventListener('click', () => {
+    revokeRoute();
+  });
+
+  document.querySelector<HTMLButtonElement>('[data-sim="reset"]')?.addEventListener('click', () => {
+    simulationActive = false;
+    simulationNote = '';
+    journeyState = 'NOT_STARTED';
+    currentPosition = null;
+    lastProximityEval = null;
+    locationErrorMessage = '';
+    mapData.user = [76.123, 11.553];
+    stopTracking();
+    render();
+  });
+
   document.querySelectorAll<HTMLAnchorElement>('a[href="tel:112"]').forEach((a) =>
     a.addEventListener('click', (e) => {
       if (!assistanceOpen) {
@@ -1046,6 +1364,16 @@ void initSession();
 void checkRuntime();
 void queryGuidanceDestinations();
 
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    tabInBackground = true;
+    lastBackgroundTime = Date.now();
+  } else {
+    tabInBackground = false;
+  }
+  render();
+});
+
 window.addEventListener('online', () => {
   runtime = 'checking';
   void checkRuntime();
@@ -1055,3 +1383,4 @@ window.addEventListener('offline', () => {
   runtime = 'offline';
   render();
 });
+
