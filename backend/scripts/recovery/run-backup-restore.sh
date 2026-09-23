@@ -3,7 +3,8 @@
 #
 # Source of truth this runner proves:
 #   1. Every migration in backend/migrations/ applies cleanly to the
-#      schema_revision target expected by the binary (currently 6).
+#      schema_revision target expected by the binary (auto-derived from
+#      backend/internal/store/store.go SchemaRevision constant).
 #   2. A representative set of source / package / facility / stay /
 #      idempotency / audit records round-trips through pg_dump -Fc and a
 #      pg_restore into a separate, empty database.
