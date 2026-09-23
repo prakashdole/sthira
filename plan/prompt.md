@@ -462,7 +462,7 @@ Task statuses below describe this NEW playbook, not whether an older P-phase exi
 
 | Task | Status | Base / implementation commits | Verification / blockers |
 | --- | --- | --- | --- |
-| R00 | NOT_STARTED | — | Source findings above; no new runtime acceptance |
+| R00 | DONE | `f5951e0` on `CLEAN` | Bumped `SchemaRevision` 7→9 so the readiness prober rejects a DB at revisions <9 (0008/0009 added `source_id` / `template_sha256` that scoped queries depend on). `readiness_test.go` asserts the constant matches the highest revision under `backend/migrations/`. `recovery_integration_test.go` and the recovery script comment updated. README.md + backend/README.md + plan/tech-stack.md corrected to point at the Go `/api/v3` backend as the active product API; Python `src/sthira_v2/` retained as the ML-adapter runtime only. `plan/r0-demo-freeze.md` records the demo contract freeze (endpoint usage, error-code handling, the second journey for offline/errors). gofmt/vet/build/8 unit packages green. R00 unlocks parallel R01/R02/R03/R05/R06. |
 | R01 | NOT_STARTED | — | Needs R00 contract freeze |
 | R02 | NOT_STARTED | — | Real model/hardware availability must be established |
 | R03 | NOT_STARTED | — | Needs R00; final actual API acceptance R01/R02 |
