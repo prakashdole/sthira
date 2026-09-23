@@ -388,12 +388,24 @@ func isFacilityID(id string, m map[string]contracts.FacilityRef) bool {
 }
 
 // buildEligible populates sc.EligibleDestinations using the package's
-// authoritative allocation_policy.order. General destination browsing does
-// not assume party size or duration (PartySize and dates are unknown), so
-// it does not make synthetic capacity promises (CapacityKnown=false, Free=0).
-// Facilities must be in OPEN or PUBLISHED safe zones and non-zero total capacity.
-// If allocation policy order is empty, no arbitrary alphabetical order or
-// PermittedRank is fabricated.
+// authoritative allocation_policy.order, which lists SAFE-ZONE IDs (per
+// opkg.AllocationPolicy and the opkg validator). General destination
+// browsing does not assume party size or duration (PartySize and dates
+// are unknown), so it does not make synthetic capacity promises
+// (CapacityKnown=false, Free=0). Each safe-zone ID maps to ALL of its
+// member facilities; all facilities in a zone share the same
+// PermittedRank (= the zone's rank in policyOrder). Within a zone,
+// facilities are deterministically ordered by ID; that ordering is
+// display-only and is NOT a claimed authority safety ranking.
+//
+// Filtering:
+//   - Zone must be present in the package body and be OPEN or PUBLISHED.
+//   - Zone must have positive capacity in zone_versions for this package.
+//   - Unknown / missing zone IDs are dropped (never fabricated).
+//   - DB errors propagate; they are never silently swallowed.
+//
+// If allocation policy order is empty, no arbitrary alphabetical order
+// or PermittedRank is fabricated.
 func buildEligible(ctx context.Context, db DBTX, packageID, jurisdiction string, policyOrder []string, now time.Time, sc *contracts.ScopedContext) error {
 	if len(policyOrder) == 0 {
 		// No server-permitted order: leave sc.EligibleDestinations empty.
@@ -401,46 +413,59 @@ func buildEligible(ctx context.Context, db DBTX, packageID, jurisdiction string,
 		return nil
 	}
 
-	for _, facID := range policyOrder {
-		fac, ok := sc.KnownFacilities[facID]
-		if !ok {
+	for rank, szID := range policyOrder {
+		if szID == "" {
 			continue
 		}
-		// Facility must be in an OPEN or PUBLISHED safe zone.
-		sz, ok := sc.KnownSafeZones[fac.SafeZoneID]
-		if !ok || (sz.Status != contracts.ZoneStatusOpen && sz.Status != contracts.ZoneStatusPublished) {
+		// Zone must be present in the typed map built from the package.
+		sz, ok := sc.KnownSafeZones[szID]
+		if !ok {
+			// Unknown / missing zone ID: drop, never fabricate facilities.
+			continue
+		}
+		if sz.Status != contracts.ZoneStatusOpen && sz.Status != contracts.ZoneStatusPublished {
 			continue
 		}
 
-		// Check that the facility does not have zero total capacity in zone_versions.
+		// Zone capacity in this package. sql.ErrNoRows means the zone
+		// was named in policyOrder without a zone_versions row for this
+		// package — treat as zero / ineligible.
 		var zoneCap *int
 		err := db.QueryRowContext(ctx, `
 			SELECT zv.capacity FROM zone_versions zv
-			WHERE zv.zone_id = $1 AND zv.package_id = $2`, fac.SafeZoneID, packageID).Scan(&zoneCap)
-		if err == nil && zoneCap != nil && *zoneCap <= 0 {
-			// Zero zone capacity: ineligible
+			WHERE zv.zone_id = $1 AND zv.package_id = $2`, szID, packageID).Scan(&zoneCap)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return fmt.Errorf("store: read zone capacity for %s: %w", szID, err)
+		}
+		if zoneCap == nil || *zoneCap <= 0 {
 			continue
 		}
 
-		// Check facility inventory if any row exists; if inventory exists and all rows have capacity <= 0, ineligible.
-		var maxInvCap *int
-		err = db.QueryRowContext(ctx, `
-			SELECT MAX(capacity) FROM facility_inventory
-			WHERE facility_id = $1`, facID).Scan(&maxInvCap)
-		if err == nil && maxInvCap != nil && *maxInvCap <= 0 {
-			// Zero inventory capacity: ineligible
-			continue
+		// Find all facilities in this zone that belong to this package
+		// (KnownFacilities was built from the same package body).
+		var facs []string
+		for facID, fac := range sc.KnownFacilities {
+			if fac.SafeZoneID == szID {
+				facs = append(facs, facID)
+			}
 		}
+		sort.Strings(facs)
 
-		// Capacity is unknown for general browsing (no party size or dates assumed).
-		fac.CapacityKnown = false
-		fac.Free = 0
-		sc.KnownFacilities[facID] = fac
-
-		sc.EligibleDestinations = append(sc.EligibleDestinations, contracts.EligibleChoice{
-			Facility:      fac,
-			PermittedRank: len(sc.EligibleDestinations),
-		})
+		for _, facID := range facs {
+			fac := sc.KnownFacilities[facID]
+			// Capacity is unknown for general browsing (no party size or
+			// dates). The commit-time query enriches CapacityKnown + Free.
+			fac.CapacityKnown = false
+			fac.Free = 0
+			sc.KnownFacilities[facID] = fac
+			sc.EligibleDestinations = append(sc.EligibleDestinations, contracts.EligibleChoice{
+				Facility:      fac,
+				PermittedRank: rank,
+			})
+		}
 	}
 	return nil
 }

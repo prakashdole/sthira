@@ -2,6 +2,11 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
 	"time"
 )
 
@@ -72,7 +77,7 @@ func routeVerified(ctx context.Context, db DBTX, packageID, safeZoneID string, n
 		ORDER BY rv.route_id
 		LIMIT 1`, packageID, safeZoneID, now).Scan(&routeID)
 	if err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil, nil
 		}
 		return false, nil, err
@@ -80,70 +85,206 @@ func routeVerified(ctx context.Context, db DBTX, packageID, safeZoneID string, n
 	return true, &routeID, nil
 }
 
+// readPolicyOrderAndFacilityMap decodes the package body enough to drive
+// allocation-policy ordering. Returns the typed allocation_policy.order
+// (list of safe-zone IDs) and a map from facility ID to its safe-zone ID.
+// The same package body drives BuildScopedContext; the choice path keeps
+// the query minimal (just what ChoiceQuerier needs) so a missing package
+// body is reported as DATA_UNAVAILABLE rather than masquerading as an
+// empty query.
+func readPolicyOrderAndFacilityMap(ctx context.Context, db DBTX, packageID string) ([]string, map[string]string, error) {
+	var body []byte
+	if err := db.QueryRowContext(ctx, `SELECT body FROM packages WHERE package_id = $1`, packageID).Scan(&body); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, fmt.Errorf("store: read package body: %w", ErrNoScopedContext)
+		}
+		return nil, nil, fmt.Errorf("store: read package body: %w", err)
+	}
+	var pb struct {
+		Facilities []struct {
+			ID         string `json:"id"`
+			SafeZoneID string `json:"safe_zone_id"`
+		} `json:"facilities"`
+		AllocationPolicy struct {
+			Order []string `json:"order"`
+		} `json:"allocation_policy"`
+	}
+	if err := json.Unmarshal(body, &pb); err != nil {
+		return nil, nil, fmt.Errorf("store: parse package body: %w", err)
+	}
+	facZone := make(map[string]string, len(pb.Facilities))
+	for _, f := range pb.Facilities {
+		if f.ID == "" {
+			continue
+		}
+		facZone[f.ID] = f.SafeZoneID
+	}
+	return pb.AllocationPolicy.Order, facZone, nil
+}
+
 // ChoiceQuerier computes eligible destinations.
 type ChoiceQuerier struct{}
 
-// Eligible returns the destinations that satisfy every gate for the query. A
-// destination with unknown capacity is included with CapacityKnown=false
-// (informational) but cannot be reserved. No destination is invented, ranked by
-// guessed safety, or substituted.
+// Eligible returns the destinations that satisfy every gate for the query,
+// ordered by the package's authoritative allocation_policy.order (safe-zone
+// IDs). All facilities in a zone share the same ordering rank (the zone's
+// rank); within a zone, facilities are deterministically ordered by ID.
+// A destination with unknown capacity is included with CapacityKnown=false
+// (informational) but cannot be reserved. No destination is invented, ranked
+// by guessed safety, or substituted.
 func (ChoiceQuerier) Eligible(ctx context.Context, db DBTX, q ChoiceQuery, now time.Time) ([]Destination, error) {
 	dates := dateRange(q.StartDate, q.EndDate)
-	if len(dates) == 0 {
-		return nil, nil
-	}
-	// Facilities in the package's safe zones, joined to their zone status.
-	rows, err := db.QueryContext(ctx, `
-		SELECT f.facility_id, f.safe_zone_id, zv.capacity, zv.status
-		FROM facilities f
-		JOIN zone_versions zv ON zv.zone_id = f.safe_zone_id AND zv.package_id = f.package_id
-		WHERE f.package_id = $1
-		ORDER BY f.facility_id`, q.PackageID)
+	policyOrder, facZone, err := readPolicyOrderAndFacilityMap(ctx, db, q.PackageID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	if len(policyOrder) == 0 || len(facZone) == 0 {
+		// No server-permitted order or no facilities: no destinations.
+		// Never fabricate an alphabetical or guessed rank.
+		return nil, nil
+	}
+	if len(dates) == 0 {
+		// Browsing with no date range: every facility is reported with
+		// unknown capacity (informational); the calling handler decides
+		// whether the response should set `free = null`.
+		return browseEligibleByPolicyOrder(ctx, db, q.PackageID, policyOrder, facZone, now, q)
+	}
 
+	// Iterate in policy order. Each safe-zone ID contributes its facilities
+	// (sorted by ID) in the same group, all sharing the same rank. Zone
+	// status + capacity + party-fit are computed below; failing facilities
+	// are silently dropped (informational browsing was a no-op here).
 	var out []Destination
-	for rows.Next() {
-		var d Destination
-		var capNullable *int
-		var status *string
-		if err := rows.Scan(&d.FacilityID, &d.SafeZoneID, &capNullable, &status); err != nil {
-			return nil, err
-		}
-		// Zone must be open/published to be eligible (closed/full are not).
-		if status != nil && *status != "" && *status != "OPEN" && *status != "PUBLISHED" {
+	zoneFacs := make(map[string][]string)
+	for facID, szID := range facZone {
+		zoneFacs[szID] = append(zoneFacs[szID], facID)
+	}
+	for _, szID := range policyOrder {
+		facs := zoneFacs[szID]
+		if len(facs) == 0 {
 			continue
 		}
-		if capNullable == nil {
-			// Unknown capacity: informational only, never a promise.
-			d.CapacityKnown = false
-		} else if *capNullable <= 0 {
-			// Zero zone capacity: not eligible
-			continue
-		} else {
-			d.CapacityKnown = true
-			// Free across the whole interval: the minimum free over all dates.
-			free, ok, err := minFreeOverInterval(ctx, db, d.FacilityID, dates, q.PartySize)
+		sort.Strings(facs)
+		for _, facID := range facs {
+			d, ok, err := facilityDestination(ctx, db, q, facID, szID, dates, now)
 			if err != nil {
 				return nil, err
 			}
 			if !ok {
-				continue // some date lacks an inventory row or capacity: not eligible
+				continue
 			}
-			d.Free = free
+			out = append(out, d)
 		}
-		// Route gate.
-		verified, routeID, err := routeVerified(ctx, db, q.PackageID, d.SafeZoneID, now, q.RouteGateOpen)
-		if err != nil {
-			return nil, err
-		}
-		d.RouteVerified = verified
-		d.RouteID = routeID
-		out = append(out, d)
 	}
-	return out, rows.Err()
+	return out, nil
+}
+
+// browseEligibleByPolicyOrder returns every facility in the package that
+// sits in an OPEN/PUBLISHED zone with positive zone capacity, in
+// allocation_policy.order. CapacityKnown=false and Free=0 (informational).
+func browseEligibleByPolicyOrder(ctx context.Context, db DBTX, packageID string, policyOrder []string, facZone map[string]string, now time.Time, q ChoiceQuery) ([]Destination, error) {
+	zoneFacs := make(map[string][]string)
+	for facID, szID := range facZone {
+		zoneFacs[szID] = append(zoneFacs[szID], facID)
+	}
+	var out []Destination
+	for _, szID := range policyOrder {
+		facs := zoneFacs[szID]
+		if len(facs) == 0 {
+			continue
+		}
+		sort.Strings(facs)
+		for _, facID := range facs {
+			d, ok, err := facilityBrowseEntry(ctx, db, packageID, facID, szID, now)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
+// facilityDestination is one facility evaluated against the full query
+// (party + dates + route gate). Returns ok=false if the facility is not
+// eligible (closed/full/zero-capacity/missing-inventory/no-fit).
+func facilityDestination(ctx context.Context, db DBTX, q ChoiceQuery, facID, szID string, dates []time.Time, now time.Time) (Destination, bool, error) {
+	var capNullable *int
+	var status *string
+	if err := db.QueryRowContext(ctx, `
+		SELECT zv.capacity, zv.status
+		FROM zone_versions zv
+		WHERE zv.zone_id = $1 AND zv.package_id = $2`,
+		szID, q.PackageID).Scan(&capNullable, &status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Destination{}, false, nil
+		}
+		return Destination{}, false, err
+	}
+	if status != nil && *status != "" && *status != "OPEN" && *status != "PUBLISHED" {
+		return Destination{}, false, nil
+	}
+	d := Destination{FacilityID: facID, SafeZoneID: szID}
+	if capNullable == nil {
+		d.CapacityKnown = false
+	} else if *capNullable <= 0 {
+		return Destination{}, false, nil
+	} else {
+		d.CapacityKnown = true
+		free, ok, err := minFreeOverInterval(ctx, db, facID, dates, q.PartySize)
+		if err != nil {
+			return Destination{}, false, err
+		}
+		if !ok {
+			return Destination{}, false, nil
+		}
+		d.Free = free
+	}
+	verified, routeID, err := routeVerified(ctx, db, q.PackageID, szID, now, q.RouteGateOpen)
+	if err != nil {
+		return Destination{}, false, err
+	}
+	d.RouteVerified = verified
+	d.RouteID = routeID
+	return d, true, nil
+}
+
+// facilityBrowseEntry is the browsing (no party / no dates) evaluation of one
+// facility. Used when ChoiceQuery.StartDate/EndDate are zero / empty.
+func facilityBrowseEntry(ctx context.Context, db DBTX, packageID, facID, szID string, now time.Time) (Destination, bool, error) {
+	var capNullable *int
+	var status *string
+	if err := db.QueryRowContext(ctx, `
+		SELECT zv.capacity, zv.status
+		FROM zone_versions zv
+		WHERE zv.zone_id = $1 AND zv.package_id = $2`,
+		szID, packageID).Scan(&capNullable, &status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Destination{}, false, nil
+		}
+		return Destination{}, false, err
+	}
+	if status != nil && *status != "" && *status != "OPEN" && *status != "PUBLISHED" {
+		return Destination{}, false, nil
+	}
+	if capNullable != nil && *capNullable <= 0 {
+		return Destination{}, false, nil
+	}
+	d := Destination{
+		FacilityID:    facID,
+		SafeZoneID:    szID,
+		CapacityKnown: false,
+	}
+	verified, routeID, err := routeVerified(ctx, db, packageID, szID, now, false)
+	if err != nil {
+		return Destination{}, false, err
+	}
+	d.RouteVerified = verified
+	d.RouteID = routeID
+	return d, true, nil
 }
 
 // minFreeOverInterval returns the minimum free (capacity - held - occupied)

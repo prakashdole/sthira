@@ -47,11 +47,13 @@ func newStayServer(t *testing.T) (*Server, *store.Store) {
 // snapshotVersion). Reservation commit revalidation (Item B/C) requires the
 // source to be OPERATIONAL with a live authorization and the package body to
 // carry an authoritative allocation_policy; a bare DISCOVERED seed no longer
-// passes the commit gate.
+// passes the commit gate. The body also lists the single safe zone in
+// allocation_policy.order so the ChoiceQuerier (which reads order from the
+// body) can surface the seeded facility.
 func seedHTTPPackageFacility(t *testing.T, st *store.Store, capacity int, start, end time.Time) (string, string, int) {
 	t.Helper()
 	return seedHTTPPackageFacilityPolicy(t, st, capacity, start, end,
-		`{"allocation_policy":{"reservation_expiry_seconds":3600,"temporary_stay_min_days":1,"temporary_stay_max_days":14,"allow_transfers":true,"route_required":false}}`)
+		`{"safe_zones":[{"id":"SZ","status":"OPEN"}],"facilities":[{"id":"FAC-SEED","safe_zone_id":"SZ"}],"allocation_policy":{"order":["SZ"],"reservation_expiry_seconds":3600,"temporary_stay_min_days":1,"temporary_stay_max_days":14,"allow_transfers":true,"route_required":false}}`)
 }
 
 // seedHTTPPackageFacilityPolicy is seedHTTPPackageFacility with a caller-supplied
