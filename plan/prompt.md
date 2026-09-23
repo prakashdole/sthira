@@ -1,17 +1,17 @@
 # Sthira autonomous execution playbook
 
 Authored 2026-09-23 against `CLEAN` at `a12350bf5bc64261fe49e9c976972e45cc2168d0`.
-This is the current execution entry point. It is an instruction set, not a completion certificate.
+Extended 2026-09-23 by user request through P9, from documentation commit `2d04068`. This is the current execution entry point. It is an instruction set, not a completion certificate.
 
 ## 1. Objective, authority and reading boundary
 
-Finish the round-two demonstration first: actual selected models, a polished laptop/phone journey, understandable source provenance, and consent-based arrival assistance. Preserve and then complete remaining backend engineering. Do not restart P0–P7, translate the Python reference again, or spend the demo window chasing full production certification.
+Finish the round-two demonstration first: actual selected models, a polished laptop/phone journey, understandable source provenance, and consent-based arrival assistance. Preserve and then complete remaining backend engineering, P8 Android/iPhone clients and P9 whole-system readiness work. Do not restart P0–P7, translate the Python reference again, or spend the demo window chasing full production certification.
 
 User decisions: Go product backend; Python/native ML runtimes permitted; IndicConformer-600M-Multi ASR, Sarvam-30B middle model (~2.4B active non-embedding parameters), Indic Parler-TTS; Android+iPhone eventual launch; one million TOTAL users (peak mix to measure); immediate and 7–30-day temporary relocation; no hazard prediction/permanent resettlement. September 28–29 round two takes priority. Actual round-three readiness is evidence-dependent.
 
 The user requested one detailed playbook for models to execute without another reviewer between every step. Workers may continue to the next eligible task within their assigned lane after acceptance. A final integrated review remains necessary. More instructions cannot guarantee a model's correctness.
 
-Scope assumption, pending user correction: demo first, remaining production backend afterward. Parallelism is optional: one sequential executor, two normal lanes, or up to four non-overlapping active implementation lanes. This document does not provision workers automatically. User launch message selects lane/count; if none is specified, use sequential execution. Do not incur paid compute or spawn extra agents merely to consume credits.
+Accepted scope: demo first, remaining production backend afterward, then P8/P9 subject to their prerequisite gates. P10 cleanup and P11/P12 government activation/launch are excluded. Parallelism is optional: one sequential executor, two normal lanes, or up to four non-overlapping active implementation lanes. This document does not provision workers automatically. User launch message selects lane/count; if none is specified, use sequential execution. Do not incur paid compute or spawn extra agents merely to consume credits.
 
 **Current user overrides of older documents:** prototype frontend may proceed before Gate B. User now requests location tracking to help determine arrival. Implement the bounded opt-in foreground journey in R04; older blanket “no geofencing” text is superseded for this feature only. Automatic occupancy changes, involuntary/background surveillance, inferred welfare and AI approval remain prohibited. No approval to deploy, push, rewrite Git history, rent hardware or activate live government integrations is created by this file.
 
@@ -72,13 +72,30 @@ A worker slot includes a coordinator when it is actively implementing. Do not ha
 | B02 | Durable upgrade/replay and source/offline continuity | B01 | Backend lane |
 | B03 | Remaining security, deployment and recovery closure | R06, B01/B02 before final verification | Operations lane; code-independent tooling may run earlier |
 | B04 | Real language, load, cost and resource evidence | R02/R07; agreed hardware and budgets | Inference/performance lane; do not compete for same GPU with demo |
-| B05 | Backend release-candidate reconciliation | B01–B04 | Coordinator; final integrated checkpoint |
+| B05 | Backend release-candidate reconciliation | B01–B04 | Coordinator; Gate B checkpoint before P8 |
+| M00 | Two-platform technology proof and framework decision (P8) | B05 with Gate B accepted | Mobile coordinator first |
+| M01 | Mobile data/offline/session contract and reusable implementation (P8) | M00 | One shared-code owner |
+| M02 | Android complete citizen journey (P8) | M00; M01 integration contract for implementation, acceptance for final checks | Android lane |
+| M03 | iPhone complete citizen journey (P8) | M00; M01 integration contract for implementation, acceptance for final checks | iOS lane, parallel M02 |
+| M04 | Scoped operator workflow, privacy and notification integration (P8) | M00/B05 contracts | Operator lane, parallel mobile clients |
+| M05 | Integrated P8 acceptance | M01–M04 | Coordinator; both physical platforms required |
+| Q01 | Regional case/language/accessibility evidence inputs (P9) | R05/B04; preparation may overlap M-tasks | Scenario/content lane; external inputs required |
+| Q02 | Regional whole-system usability and failure drills (P9) | M05, Q01 | Drill lead; independent environment from Q03 |
+| Q03 | Integrated security, surge, recovery and upgrade assurance (P9) | M05, B03/B04 | Assurance lane; final reruns after fixes |
+| Q04 | Release-candidate evidence and P9 closure | Q02, Q03 | Coordinator; stop before P10 |
 
 **With one worker:** R00 → R01 → R02 → R03 → R04 → R05 as needed → R06 if needed → R07 → B01 → B02 → B03 → B04 → B05. A hardware-blocked R02 must not block implementation of R03/R04/R05/R06; it does block real-demo acceptance.
 
 **With two workers:** first R00; then worker A R01 → R05 → R06, worker B R02 → R03 → R04. UI can start after R02's interface correction even if real GPU proof waits. Integrate at task boundaries; R07 is serial. After demo, A B01→B02, B B03 preparation then B04; final B03 proof awaits B02; B05 serial.
 
 **With four workers:** R00 first. A R01, B R02, C R03→R04, D R05→R06. Integration is coordinator-owned, not a fifth simultaneous editor of shared files. After demo: A B01→B02; B B04; C may take a separately assigned scoped B03 code fix, D B03 ops. No overlapping B03 ownership; otherwise leave a slot unused. Do not invent extra features to fill slots.
+
+**P8/P9 continuation after B05:** M00 is serial and requires Gate B, not merely a completed B05 report. M01 first freezes the mobile contract; clients may build against that contract while its owner completes the implementation. Final M02/M03 acceptance requires integrated M01. A framework decision cannot be inferred from the word Kotlin or from the browser prototype.
+
+- One worker: M00 → M01 → M02 → M03 → M04 → M05 → Q01 → Q02 → Q03 → Q04. Prepare Q01 inputs earlier when useful.
+- Two workers: after M00 and M01 contract freeze, A owns M01/shared implementation then Android M02; B owns platform-specific iOS M03 then operator M04. B must not duplicate A's shared logic or edit shared UI simultaneously. Integrate M05; then A Q02, B Q03 on isolated resources after Q01 is ready; Q04 serial.
+- Four workers: M00 and M01 contract freeze first; A M01/shared implementation, B Android M02, C iOS M03, D operator M04/Q01 preparation. If the chosen framework puts both screens in shared source, assign that source to A and give B/C only distinct platform adapters/device work; parallel editing of the same shared screen is prohibited. M05 serial; Q02/Q03 can run independently after prerequisites. Reserve one owner for findings/integration rather than opening overlapping fix branches.
+- No Gate B, selected framework, required device, content review or staging access: record the precise blocked acceptance. Planning/input preparation may proceed; do not label simulator-only work or an incomplete backend as permission to pass P8/P9. Spending, public distribution, external testing and real field engagement still require their specific authorization.
 
 **Dependencies mean integrated interfaces, not optimistic handoff text.** A worker may implement against a frozen response fixture, labelled as such, but may not claim end-to-end acceptance before the actual dependency works.
 
@@ -256,7 +273,123 @@ Coordinator only after integrated B01–B04. Verify the exact combined revision,
 
 Create a concise final acceptance matrix in this ledger linking each requirement to real command/results/revision. Classify: ENGINEERING_VERIFIED, FAILED, BLOCKED_EXTERNAL, BLOCKED_HARDWARE, NOT_RUN; phase status remains separate. Gate B cannot pass by averaging completion or treating scanners/models as assumed. Carry O01/O03/O04/O05/O06/O07/O08/O09/O10/O11/O14/O15 as applicable; do not close them without named evidence.
 
-Deliver one integrated final-review handoff: base/head, individual commits, changed behavior, exact checks, mock-vs-real evidence, unresolved defects, required input and next eligible phase. The user will request the final reviewer once this work is ready. Do not automatically implement native mobile P8, launch P11/P12, push, publish or operate government APIs. Optional frontend framework decisions remain distinct from backend completion.
+Deliver an integrated backend checkpoint: base/head, individual commits, changed behavior, exact checks, mock-vs-real evidence, unresolved defects and Gate B verdict. If Gate B passes, the coordinator may continue M00–Q04 below without another planning prompt. A report labelled B05 complete with Gate B blocked does not unlock P8 implementation. Do not push, publish or operate government APIs. Framework selection remains a separate measured M00 decision.
+
+## 7A. P8 mobile delivery and P9 whole-system readiness
+
+This extension implements the existing P8/P9 requirements; it does not replace the backend or turn the round-two web prototype into a claimed native release. Read the P8/P9 historical acceptance sections as requirements, plus `plan/prd.md`, `plan/architecture.md`, `plan/tech-stack.md`, `plan/assurance.md` and relevant O-items. Do not replay their old implementation status. New mobile paths below are PROPOSED until M00 inventories current work and records actual chosen paths.
+
+### M00 — Prove the mobile stack on both platforms, then freeze the choice
+
+Prerequisite: B05 establishes Gate B acceptance. Owner: mobile coordinator. Inspect for Android/iOS/shared client projects added by teammates since this document; preserve them. Do not assume mobile code is absent because the 2026-09-23 inventory found no Gradle/Xcode/Flutter project. Reuse suitable existing work.
+
+Resolve O02/O13 with a compact evidence-driven decision: supported OS versions, physical 3 GB Android and lower-end supported iPhone, team maintenance skills, build/signing access, MapLibre/offline format compatibility and accessibility. Use the existing candidates (native Kotlin + Swift/SwiftUI, Kotlin Multiplatform with platform UI, or a justified alternative). Select the smallest credible candidate for a proof, not three full implementations. If it fails a required capability, document failure before trying another. A high-impact unresolved preference or platform constraint needs user input; routine library/API choices use installed/current primary documentation and existing conventions.
+
+Build a narrow proof on BOTH platforms: installed app opens offline, local map/resource loads from a permitted pack, microphone records supported upload audio, actual backend responds, native text/audio renders, screen reader can operate the main action. Prove background/foreground interruption behavior and permissions without claiming continuous background tracking. Include a small actual network reconnect and local storage recovery check. Do not download unauthorized maps or weights.
+
+Record app/package/download size, cold start, peak memory, storage, measured battery/thermal observations under a stated workload, accessibility results and device/OS. Separate simulator from physical measurements. Use current project budgets or record proposed budgets for owner acceptance before a pass claim. The 50 MiB regional pack budget does not imply a 50 MiB app budget. Choose framework/dependency versions from evidence and assign actual source roots (for example `mobile/android`, `mobile/ios`, optional shared root) and one owner per shared build file/lockfile.
+
+Acceptance: both platform proofs and supported build commands exist; selected framework/OS/map/storage/audio approach recorded in tech-stack/decisions; device/budget gaps explicitly blocked. No production dependency choice is justified solely by agent familiarity, few lines of code or a web screenshot. Freeze an M00 commit before app workers implement parallel screens.
+
+### M01 — Mobile persistence, offline verification and API/session boundary
+
+Owner: shared mobile foundation. Read existing P5 contracts and types in `backend/internal/offlinepkg/`, `offlineclient/`, `offlinedelivery/`, `offlinequeue/`, `offlineresources/`, public OpenAPI and actual session endpoints. Go client code is evidence of protocol behavior, not automatically linkable native UI code. Reuse a supported common library only where it fits the chosen stack. Otherwise implement thin platform-specific adapters against identical golden protocol fixtures; do not ship a Go runtime on phones without a justified decision.
+
+Freeze API/session, local package, media and journey interfaces BEFORE M02/M03 implement consumers. Define package/key bootstrap, version/freshness states, range downloads, local schema upgrades, queue states, errors and cancellation using existing contract semantics. Do not invent endpoints for login, recovery, deletion or notifications. Propose minimal missing contracts to the coordinator and wait for that contract decision while completing independent local logic. Shared UI/domain code has one owner; parallel platform wrappers may implement distinct native APIs only.
+
+Implement local UI/assets, selected language resources, bounded region cache, app-private persistent storage and OS keystore/keychain for credentials. Verify signatures/digests/bindings BEFORE coherent activation; malformed, mixed-jurisdiction, revoked or partially downloaded resources cannot replace a usable pack. Resume requires correct HTTP range/validator semantics; prevent traversal and decompression/size abuse. License and attribution stay with downloaded resources. No public OSM tile bulk-fetch fallback.
+
+Device time is untrusted: carry existing monotonic freshness semantics, restart UNVERIFIABLE state and clock-change behavior. Expired content can appear as labelled history, never active navigation. Preserve cancellation/supersession tombstones. Keep public cached packages separate from personal stays/tokens. Logout/account changes must not disclose the previous user's local state. Session expiry/recovery follows server semantics; no device-generated operator identity or silent account binding.
+
+Offline writes retain a durable pending/uncertain state with original actor/resource/payload/idempotency binding. Reconcile ambiguous success before retry or creating a new request; no locally confirmed capacity/arrival. Invalidated authority or changed stay policy requires renewed current validation. Preserve queue across process death/local DB upgrade, reject corruption safely, and do not silently discard outstanding commitments on logout without communicating their status. Server remains source of truth.
+
+Acceptance: platform implementations consume common good/bad signed vectors; corrupted/truncated/range-mismatched downloads rejected; restart/clock rollback/expiry/key revocation; low storage and interrupted activation preserve coherent state; account isolation; lost-response queue reconciles once against real Go+DB; app update migrates old local state without duplicate mutations. Contract fixtures do not replace actual Android/iOS integration acceptance in M02/M03. No live secrets in app assets or public fixtures.
+
+### M02 — Android complete citizen experience
+
+Owner Android platform surface after M00 and M01 contract freeze. Read selected client source, M01 interfaces, actual public endpoints and R03/R04 UX behavior. Reuse approved UI/shared components; no second backend or copied business-rule engine.
+
+Implement installed Android journey: choose supported language, speak/type/touch, resolve ambiguous location, show source-labelled incident/destination information, preview supplied route and non-map instructions, select/confirm stay and explicit arrival, cancel/depart/extend/transfer within current policy. Unknown capacity is not zero or guaranteed availability; full/conflict/expired snapshots explain and refresh choices without silent substitution. Handle transfer replacement IDs and persist/reconcile correct stay ownership. Touch path remains useful during model/map/audio failure. Display status/source freshness and synthetic mode consistently across screens and notifications.
+
+Use Android accessibility and lifecycle APIs: TalkBack labels and focus, large text without clipping, >=48 dp action targets, non-color-only hazards, optional reduced motion, microphone/location denial and revocation, audio focus/incoming calls/headset changes, process death and low memory. Network/permission operations are cancellable; obsolete model responses cannot overwrite the latest selection. No raw voice retained by default. Secure transport and app-private storage; do not disable certificate validation to make a demo work.
+
+Port R04 foreground tracking, accuracy/timestamp/boundary uncertainty, visible start/stop and explicit arrival confirmation. No implicit background location permission. If the app is suspended, show honest last-known status on return; notification permission does not authorize tracking. Dialler handoff requires explicit user action and a valid official/local contact; no automatic call or dispatch. Use approved media/captions where supplied; do not invent ISL content.
+
+Acceptance: build/install with the selected Gradle wrapper/toolchain and actual app variant; unit/protocol checks plus instrumented journey against real backend on the named 3 GB device. Cover cold offline boot with valid/expired/no pack, storage pressure, airplane mode, lost response, model outage, location/mic denial, TalkBack/large text, process death, app update, arrival replay and audio interruption. Record APK/AAB build hash and signing class; debug/emulator proof is not release/physical evidence. Store upload is excluded.
+
+### M03 — iPhone complete citizen experience
+
+Owner iOS platform surface, parallel with M02 only on disjoint files. Same functional scope and M01 semantics as Android: no omitted stay, offline, text/accessibility or arrival path because one platform is harder. Use selected shared UI/domain components where frozen by M00; platform-specific wrappers own iOS permission/audio/storage/lifecycle behavior.
+
+Implement native permission descriptions, VoiceOver, Dynamic Type, >=44 pt touch targets, accessible map alternatives, audio session/interruption handling and app-private files/Keychain. Treat suspension, screen lock, terminated process, cache eviction and denied permissions explicitly. Playback and upload formats must match actual backend contracts; iOS browser/prototype behavior is not evidence for native audio correctness. Preserve bounded cancellation and obsolete-response rejection.
+
+Use opt-in foreground location and manual arrival exactly as R04; no promise of indefinite background updates or silent location sharing. Respect platform transport security and signing; no broad transport bypass or embedded operator/model/government keys. Support safe upgrade/relaunch and pending write reconciliation, independent of whether iOS permits a particular background transfer mechanism. Cached expiry/revocation/freshness must agree with Android.
+
+Acceptance: list actual workspace/project and scheme from the generated project, then record exact `xcodebuild` build/test invocation and simulator destination; do not invent a scheme in advance. Build/install on the supported physical iPhone with authorized development signing. Run the M02 functional/failure matrix using VoiceOver/Dynamic Type and iOS-specific interruptions. Record build/archive identity, device/OS and unresolved entitlement/account requirements. A simulator build or Android success cannot close this task's physical evidence. App Store/TestFlight upload is excluded unless separately authorized.
+
+### M04 — Minimal operator workflow, privacy controls and notification integration
+
+Owner operator/integration lane. Read actual operator routes, grant/MFA verifier and source/publisher/stay workflows; current O10/O12/O14/O16 decisions. Choose one small operator surface (reuse web where appropriate), not a citizen-app admin mode or an unrelated dashboard platform. New root/route selected by coordinator. M01 shared/mobile code and Android/iOS project files remain their owners' responsibility.
+
+Build source status and scoped publish/revoke/quarantine/capacity-correction workflow using existing trusted endpoints. Display jurisdiction, provenance, version, current capacity and confirmation of consequential changes; distinguish audited correction from normal allocation. Handle conflict, supersession, expired grant and denial. Never mint an operator session from a checkbox, caller-supplied MFA assertion or frontend role. If real IdP O14 is unresolved, implement against a process-isolated test verifier for tests only; public/production issuance stays disabled. Record operational operator acceptance BLOCKED, not silently DONE.
+
+Privacy: implement visible journey/location consent, stop-sharing and honest arrival statuses; use minimum data and retention/deletion rules accepted under O10. If R04 remote location snapshots were selected, prove recipient/subject/jurisdiction authorization, bounded update rate, last-updated accuracy metadata, expiry and deletion. Otherwise explicitly state that remote continuous tracking is not implemented. No raw traces in telemetry, notifications or shared audit payloads. Privacy screens cannot claim deletion if backup/audit legal retention still applies; resolve and explain the actual policy.
+
+Notifications: choose transport with O12, account/entitlement/cost constraints and platform docs. Permission denial leaves core foreground use available. Payload carries minimal identifiers, not sensitive routes/precise location or a stale safety promise. On open, authenticate and fetch/revalidate current incident/stay before actionable display. Deduplicate and handle delayed/revoked notifications and untrusted deep links. APNs/FCM/provider credentials stay server-side; missing credentials are explicit NOT_RUN, not fabricated notification success. Do not guarantee delivery during disaster connectivity loss. Mobile owners implement their native registration/open handlers against the frozen contract.
+
+Acceptance: real backend with isolated authorized operator demonstrates publish→revoke/quarantine, audit attribution, cross-jurisdiction denial and correction conflicts; ordinary no-verifier server rejects issuance. Consent withdrawal stops updates; unauthorized recipient cannot read another user's location; stale/deleted snapshots cannot be replayed as current. Exercise notification denied/delayed/deep-link cases locally; real device push requires authorized provider setup and evidence. No live agency action or user messaging authorized by this task. Integrate only necessary contract changes through coordinator.
+
+### M05 — P8 integrated acceptance and client handoff
+
+Coordinator after M01–M04 integrated. Freeze exact API/model/data/client versions and build both platforms from recorded commands. Validate every exposed feature through actual client→Go→DB/model path; no fake gateway standing in for backend or provider permission. Cross-device/session tests must use owned synthetic accounts and include privacy/authorization boundaries. Test native rendering, offline boot and media on named physical devices, not just responsive browser dimensions.
+
+P8 matrix must include: all required citizen/stay/explicit arrival flows, foreground tracking limits, text/non-map alternatives, actual supported-language voice, safe cached package handling, uncertain-write reconciliation, both mobile screen readers/large text, process death/update, network/model/map failures, scoped operator controls and notification denial. Separate real provider tests from local injection. Compare actual transfer/storage/memory/startup behavior with M00 accepted budgets. Fix demonstrated regressions at their owner and rerun affected paths on the final candidate.
+
+Record ENGINEERING_VERIFIED versus missing device, IdP, translations/ISL, maps, notification credentials or distribution requirements. P8 acceptance cannot claim both-platform completion while a required platform/workflow is untested or blocked. Q01 preparation and isolated Q03 planning can continue, but P9 final drills/closure require this gate. Update the phase ledger once evidence warrants it; do not set Gate S, distribute publicly or start cleanup. No blanket deletion of the round-two frontend.
+
+### Q01 — Regional scenarios, languages and participant-ready drill inputs
+
+Owner scenario/content lane. Preparation may overlap P8 after R05/B04. Read `plan/source-register.md`, catalogue/opkg validators, existing scenario preparation tooling, actual language evaluation manifest and O01/O03/O05/O06/O07/O11. Reuse existing fixtures and provenance machinery; do not hand-author a competing catalogue format.
+
+Obtain the selected 10–15 states and 2–3 historical flood/landslide cases per state from the user/authorized curator. Record original official reference, historical date/location, jurisdiction and what each source actually establishes. Separate historical hazard evidence from synthetic present-day zones/routes/facility policy used for exercises. No fabricated approval, capacity, participant results or all-state coverage. Validate full catalogue, package links and multilingual place aliases before drill use. Unknown authority or reuse rights remain a blocker for those claims.
+
+For every claimed service language, obtain qualified review of transcription/intent outcomes, instructions, TTS intelligibility and ambiguity/disability needs. ISL requires reviewed signed media where required, not English text labelled as sign language. Record reviewers with permission and minimize personal data. Prepare tasks for immediate and temporary stay, same-name place, closure/transfer, offline interruption, caregiver/group use and explicit arrival. Include accessible alternatives and a facilitator stop rule: participants must not interpret exercise instructions as a real evacuation order.
+
+Do not contact people/officials, recruit children, record participants or send invitations without explicit user authorization. Prepare the scripts/consent materials independently; appropriately authorized supervised sessions and qualified review are separate required evidence. Missing people/content do not prevent scenario validator improvements, but do prevent invented drill results.
+
+Acceptance: catalogue validator passes required state/case counts on supplied evidence; language/reviewer matrix complete for claimed scope; rights/labels and task scripts verified. Partial one-case or synthetic-only preparations are marked partial. Deliver versioned manifests and compact references, not downloaded collections of raw unrelated source material or private participant data in Git.
+
+### Q02 — Real regional user journeys and controlled failure drills
+
+Prerequisites: M05 and Q01 accepted for the scope exercised. Owner drill lead; separate staging/database/device/GPU reservation from Q03. Use actual selected Android/iPhone builds, real backend and selected models, reviewed exercise packages and authorized participants. Do not perform a real evacuation or route people into danger; field movement requires separately approved safe exercise locations and supervision. Controlled desk/device simulations remain labelled simulations.
+
+Run facilitator scripts across claimed languages and representative low-literacy/older-adult/disability/caregiver cohorts. Child interactions, if included, require appropriate guardian/supervisor arrangements. Observe task success, confusion, assistance required, correction/retry, time to destination choice, TTS intelligibility and accessibility; report denominators and per-cohort results, not invented broad percentages. Do not retain unnecessary voice/location recordings.
+
+End-to-end drills: same-name village clarification; missing permissions; full/unknown facility; unavailable route; closure while viewing/travelling; 7–30 day policy limits; transfer failure without losing old stay; expiry racing arrival; lost response then restart/retry; revoked source and stale cached guidance; offline cold start; phone time changes; ASR/TTS/model/map/DB outage. Verify the citizen display and authoritative DB/audit result, not just an HTTP status. Location-supported arrival remains a suggestion and explicit confirmation; inaccurate/replayed location cannot mutate capacity.
+
+Acceptance: predetermined user-task criteria and safety invariants from PRD/assurance/M00 are met on both platforms, actual languages and stated cohorts; all critical misleading guidance or unauthorized mutations fixed and replayed. Lack of representative participants or any required language means limited evidence, not blanket P9 pass. File concise owner-assigned defects with reproductions; coordinate changes and refresh affected build hashes before final evidence. No need to repeat all unaffected suites.
+
+### Q03 — Whole-system security, load, recovery and rolling-upgrade proof
+
+Prerequisites: M05, B03/B04; may run alongside Q02 only with noncompeting owned infrastructure. Read the existing assurance/recovery/security scripts and M01 mobile storage/update design. Reuse measured B-stage evidence where unchanged; test the newly integrated mobile/operator surface and its effect on the whole system.
+
+Security: inspect release app packages for embedded secrets/debug endpoints; verify token storage, account separation, transport trust, deep links, file/cache import, location snapshots, notification access, signing/update integrity and revoked operator grants. Check exported Android components/iOS URL handlers and backup leakage with tools appropriate to the selected stack. Active scanners remain explicit authorized staging only; local tool self-checks are not a completed security exercise. Reproduce findings and fix at the owning layer, not through blanket allowlists.
+
+Reliability/performance: repeat representative end-to-end surge and long-lived mixes with real inference on an approved capped budget, including shared-village traffic and hot facilities. Inject owned node/DB/model loss, interrupted map download and source-update delay; observe fail-closed guidance and useful degraded interaction. Measure queue/admission, latency, error rates, memory/battery/thermal load, upstream fetch rate, costs and recovery against accepted O09 budgets. Do not run destructive fault injection against shared or live resources.
+
+Recovery/upgrade: restore backup and, where part of the recovery contract, PITR into a separate environment; verify data/audit/key continuity and declared RPO/RTO. Exercise supported rolling server release and old/new app/API/local-database coexistence, stale signed package/key handling, idempotency replay and rollback. Do not roll schema backward destructively or erase uncertain bookings to make rollback succeed. When old clients are unsupported, use explicit safe minimum-version behavior without stranding existing stay information.
+
+Acceptance: actual final-candidate evidence, no unresolved critical/high exploitable findings, conserved capacity and no unauthorized guidance/mutation in tested failure cases. Lower-risk residuals need accountable disposition; absent tooling/provider/load hardware remains NOT_RUN/BLOCKED. Record exactly which mobile/backend/model revisions each result covers. Q04 reruns affected checks if fixes land afterward; do not call Q02/Q03 on different code an integrated pass.
+
+### Q04 — Release-candidate packaging and final P9 handoff
+
+Coordinator after Q02/Q03, including integrated fixes. This is the final execution stop for this playbook. Reconcile P8/P9 matrices, runtime/model/data hashes and unresolved O-items with source and actual run evidence. Prepare reproducible Android/iOS release builds, dependency inventory, private signing steps, privacy/retention disclosure, support/on-call/incident escalation and rollback/runbooks. Signed local archive proof needs existing authorized accounts/keys; never create credentials, buy subscriptions, upload a public build or send user notifications without authorization. Distribution readiness is documented and exercised only within explicitly approved local/internal scope.
+
+Write one compact final handoff in the existing evidence location and link it from this ledger: implementation commits, final build identities, platform/language/case coverage, functional/accessibility/security/load/recovery evidence, all NOT_RUN/blocked items, residual risk owners, run commands and proposed next P10 scope. Preserve individual commits and the historical ledger. Do not include large logs, personal recordings, signing material, release binaries or model weights in Git.
+
+Acceptance: every required P9 item has actual pass evidence for the coherent release candidate or remains explicitly incomplete; no engineering gap is disguised as “only government APIs left.” P9 DONE requires its actual prerequisites, qualified reviews and device/drill evidence. If external data/rights/IdP/participants prevent closure, report engineering completion and the exact blocked acceptance separately; do not mark the phase DONE. Gate S remains provisional until P10 clean-artifact/retirement checks. P11 live-source activation and P12 public launch are still separate authorized stages.
+
+Stop here. Do not execute P10 deletion/cleanup, merge/push to main, publish apps, enable government integrations or claim operational deployment. Return the final-review handoff for the user to request one consolidated review.
 
 ## 8. Verification commands and ownership-safe execution
 
@@ -321,6 +454,8 @@ Frontend R03/R04: from `frontend/v2`, `npm ci` then `npm run build` with the exi
 
 Before each commit inspect `git diff --check`, `git diff --stat`, explicit changed files and staged diff; `git diff --name-only -- '*.txt'` must be empty for your changes. Do not stage everything blindly. No new full suite until changed code, new integration or unresolved failure justifies it. Documentation-only changes need link/path/scope checks, not the whole model/DB stack.
 
+For M/Q tasks, M00 must record the actual chosen toolchain, source roots, wrappers, Xcode schemes and build/test/install commands before dispatch. Use those exact commands from the selected project; do not invent Flutter/Gradle/Xcode tasks until that stack exists. Run shared protocol fixtures on both platforms, native unit/instrumented checks, then the stated real-device journeys. Simulator-only, unsigned/debug-only, local notification injection and mocked inference each have a separate evidence label. Credentials/signing keys stay out of command output and Git. No platform-specific command in this playbook authorizes external distribution.
+
 ## 9. Completion ledger and compact handoffs
 
 Task statuses below describe this NEW playbook, not whether an older P-phase exists. Coordinator updates rows as work happens. Worker reports go in one bounded `plan/evidence/execution-<ID>.md` each; do not duplicate this playbook or create nested progress frameworks.
@@ -339,7 +474,17 @@ Task statuses below describe this NEW playbook, not whether an older P-phase exi
 | B02 | NOT_STARTED | — | B01 dependency |
 | B03 | NOT_STARTED | — | Tools/attack authorization and runtime evidence required |
 | B04 | NOT_STARTED | — | Hardware/language/load budgets required |
-| B05 | NOT_STARTED | — | Final integrated evidence required |
+| B05 | NOT_STARTED | — | Backend Gate B checkpoint required |
+| M00 | NOT_STARTED | — | Gate B plus platform/device selection |
+| M01 | NOT_STARTED | — | M00; single shared-foundation owner |
+| M02 | NOT_STARTED | — | Android actual-device acceptance required |
+| M03 | NOT_STARTED | — | iPhone actual-device acceptance required |
+| M04 | NOT_STARTED | — | Operator/privacy/notification external decisions |
+| M05 | NOT_STARTED | — | Both platforms and required P8 workflows |
+| Q01 | NOT_STARTED | — | State/case/language/participant inputs |
+| Q02 | NOT_STARTED | — | M05/Q01; authorized real-device drills |
+| Q03 | NOT_STARTED | — | Integrated assurance and recovery evidence |
+| Q04 | NOT_STARTED | — | Final P9 handoff; stop before P10 |
 
 Handoff format (normally <=100 lines, no transcripts):
 
@@ -365,13 +510,13 @@ Record implementation commit IDs in a later evidence commit if needed; do not in
 - Ask user only for consequential missing input: selected demo case/language; approved hardware/artifact access/budget; required sharing/privacy policy; actual government/route/stay/IdP authority; conflicting edits; integration/push/deploy authorization not already granted. State what can continue without it.
 - Real-model access is required for a real-model demonstration. No approval, unavailable hardware, missing human language review or lost network is not permission to fabricate success.
 - Before and through round two: R07 is the visible goal, not closing every production gate. Backend B-work preserves the frozen demo and cannot absorb all UI/rehearsal time. No exact production completion date is guaranteed.
-- Stop at B05 with one honest final-review handoff. P8–P12 require their existing scoped acceptance, devices, official data and explicit operational authorization; they are not silently included in “finish backend.”
+- B05 is now an intermediate Gate B checkpoint. Continue M00–M05 (P8) and Q01–Q04 (P9) only when the listed prerequisites and authorizations are met. Stop at Q04 with one honest final-review handoff, or report a precise remaining blocked acceptance. P10 cleanup and P11/P12 activation/launch remain excluded.
 
 ---
 
 # Historical phase ledger
 
-The following original P0–P12 material is retained for evidence and long-term acceptance references. Dated execution instructions, former baselines, worker ownership and frontend/location restrictions are historical where superseded above. The R/B task table is the current work queue; the P-phase ledger below remains the phase-level evidence record and must not be reset or marked DONE merely because a new task passes.
+The following original P0–P12 material is retained for evidence and long-term acceptance references. Dated execution instructions, former baselines, worker ownership and frontend/location restrictions are historical where superseded above. The R/B/M/Q task table is the current work queue; the P-phase ledger below remains the phase-level evidence record and must not be reset or marked DONE merely because a new task passes.
 
 # Phase execution prompts and evidence ledger
 

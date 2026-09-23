@@ -2,7 +2,7 @@
 
 > **2026-09-21 priority override:** Round-two prototype/UI/real-model demo and pitch take priority through September 28–29. Read [round-two-demo.md](round-two-demo.md) first. Frontend prototype work may proceed before Gate B; production gates and the long-term roadmap remain intact.
 
-Current execution entry point: [prompt.md](prompt.md), updated 2026-09-23. Its R/B tasks prioritize the round-two demo and then remaining backend work; the P0–P12 roadmap below is retained. Go implementation exists; phase completion must be read from recorded evidence, not this original roadmap. Historical Python work is captured in [changes.md](changes.md).
+Current execution entry point: [prompt.md](prompt.md), updated 2026-09-23. Its R/B/M/Q tasks prioritize the round-two demo, remaining backend work, P8 mobile delivery and P9 whole-system readiness; the P0–P12 roadmap below is retained. Go implementation exists; phase completion must be read from recorded evidence, not this original roadmap. Historical Python work is captured in [changes.md](changes.md).
 
 | Phase | Deliverable | Verification gate |
 | --- | --- | --- |
@@ -19,6 +19,10 @@ Current execution entry point: [prompt.md](prompt.md), updated 2026-09-23. Its R
 | P10 | Retire obsolete files and verify the final artifact | Verified retirement and clean reproducible build; gate S |
 | P11 | Authorized government integration and shadow exercises | Authorized live shadow/field evidence |
 | P12 | Controlled launch and operational scale-out | Approved controlled pilot and measured expansion |
+
+## Current playbook scope
+
+`plan/prompt.md` now contains detailed execution tasks through P9: R-tasks for the demo, B-tasks through backend Gate B, M00–M05 for P8 and Q01–Q04 for P9. B05 is an intermediate checkpoint; Q04 is the final stop. Gate B still precedes P8 implementation. P9 requires actual both-platform, regional/language, security and recovery evidence; missing external approvals cannot be treated as a pass. P10 cleanup and P11/P12 operational activation/launch are not authorized by this extension.
 
 ## Sequencing
 
