@@ -23,6 +23,7 @@ import {
   transitionOnRevocation,
   DEFAULT_JOURNEY_OPTIONS,
 } from './journey';
+import { renderOperatorView } from './operator';
 
 type RuntimeState = 'checking' | 'demo' | 'blocked' | 'offline';
 type ChatMessage = { role: 'USER' | 'ASSISTANT'; text: string; audioB64?: string };
@@ -342,6 +343,16 @@ async function resolvePlace(query: string): Promise<void> {
 }
 
 function render() {
+  if (window.location.hash === '#operator') {
+    if (mapAnimationFrame !== null) cancelAnimationFrame(mapAnimationFrame);
+    mapAnimationFrame = null;
+    map?.remove();
+    map = null;
+    const app = document.querySelector<HTMLDivElement>('#app');
+    if (app) renderOperatorView(app);
+    return;
+  }
+
   const t = words[language];
   if (mapAnimationFrame !== null) cancelAnimationFrame(mapAnimationFrame);
   mapAnimationFrame = null;
@@ -365,6 +376,7 @@ function render() {
           <i></i><span>${runtimeCopy()}</span>
         </div>
         <div class="top-actions">
+          <a href="#operator" class="secondary-action" style="min-height: 2.25rem; padding: 0.25rem 0.6rem; font-size: var(--text-xs); text-decoration: none; border-radius: var(--radius-pill);" title="Operator Portal">Operator</a>
           <button class="voice-launch ${voiceListening ? 'is-listening' : ''}" type="button" data-action="voice-open" aria-expanded="${voiceOpen}">
             ${icons.mic}<span>${t.voice}</span>
           </button>
@@ -1371,6 +1383,10 @@ document.addEventListener('visibilitychange', () => {
   } else {
     tabInBackground = false;
   }
+  render();
+});
+
+window.addEventListener('hashchange', () => {
   render();
 });
 
