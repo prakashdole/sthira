@@ -96,29 +96,29 @@ type Finding struct {
 // inputs validate against existing schemas and the cross-checks pass. It
 // does not authorize publication.
 type Report struct {
-	Status             Status        `json:"status"`
-	CataloguePath      string        `json:"catalogue_path,omitempty"`
-	IndexPath          string        `json:"index_path,omitempty"`
-	ExerciseClock      string        `json:"exercise_clock,omitempty"`
-	StateCount         int           `json:"state_count"`
-	ScenarioCount      int           `json:"scenario_count"`
-	HistoricalCount    int           `json:"historical_count"`
-	States             []StateStatus `json:"states"`
-	MissingReferences  []string      `json:"missing_references,omitempty"`
-	SignatureStatus    string        `json:"signature_status"`
-	UnresolvedGates    []string      `json:"unresolved_gates,omitempty"`
-	Findings           []Finding     `json:"findings"`
+	Status            Status        `json:"status"`
+	CataloguePath     string        `json:"catalogue_path,omitempty"`
+	IndexPath         string        `json:"index_path,omitempty"`
+	ExerciseClock     string        `json:"exercise_clock,omitempty"`
+	StateCount        int           `json:"state_count"`
+	ScenarioCount     int           `json:"scenario_count"`
+	HistoricalCount   int           `json:"historical_count"`
+	States            []StateStatus `json:"states"`
+	MissingReferences []string      `json:"missing_references,omitempty"`
+	SignatureStatus   string        `json:"signature_status"`
+	UnresolvedGates   []string      `json:"unresolved_gates,omitempty"`
+	Findings          []Finding     `json:"findings"`
 }
 
 // StateStatus describes one state in the catalogue: whether it is supplied,
 // its declared languages, scenario counts, and any per-state gaps.
 type StateStatus struct {
-	StateCode       string   `json:"state_code"`
-	Name            string   `json:"name,omitempty"`
-	Scenarios       []string `json:"scenarios,omitempty"`
-	LanguagesClaimed []string `json:"languages_claimed,omitempty"`
+	StateCode          string   `json:"state_code"`
+	Name               string   `json:"name,omitempty"`
+	Scenarios          []string `json:"scenarios,omitempty"`
+	LanguagesClaimed   []string `json:"languages_claimed,omitempty"`
 	LanguagesEvidenced []string `json:"languages_evidenced,omitempty"`
-	LanguagesUnknown []string `json:"languages_unknown,omitempty"`
+	LanguagesUnknown   []string `json:"languages_unknown,omitempty"`
 }
 
 // LanguageStatus classifies a language per the existing catalogue and opkg
@@ -182,6 +182,8 @@ var (
 	ErrIO            = errors.New("scenario-prep IO failure")
 	ErrUsage         = errors.New("scenario-prep usage error")
 	ErrUnsafeLayout  = errors.New("scenario-prep unsafe workspace layout")
+	ErrUnsafeSymlink = errors.New("scenario-prep unsafe symlink")
+	ErrBoundedRead   = errors.New("scenario-prep file exceeds maximum allowed size")
 )
 
 // PrintableError formats an error with stable code so logs are greppable.

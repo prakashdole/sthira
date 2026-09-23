@@ -1,11 +1,13 @@
 package scenarioprep
 
 import (
+	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
+	"sthira/backend/internal/contracts"
 	"sthira/backend/internal/httpjson"
 )
 
@@ -36,8 +38,11 @@ var packageLimits = httpjson.Limits{MaxBytes: 4 << 20, MaxDepth: 32}
 
 // LoadIndex reads and strictly decodes an input index from disk.
 func LoadIndex(path string) (*InputIndex, error) {
-	body, err := os.ReadFile(path)
+	body, err := readBoundedFile(path, int64(indexLimits.MaxBytes))
 	if err != nil {
+		if errors.Is(err, ErrBoundedRead) {
+			return nil, wrap("parse index", &httpjson.FieldError{Code: contracts.ErrBodyTooLarge, Message: fmt.Sprintf("index file exceeds size limit of %d bytes", indexLimits.MaxBytes)})
+		}
 		return nil, wrap("load index", fmt.Errorf("%w: %v", ErrIO, err))
 	}
 	var idx InputIndex
@@ -84,7 +89,7 @@ func resolveReferences(workspace string, idx *InputIndex) (refs []ResolvedRefere
 		if prior, dup := seen[id]; dup {
 			findings = append(findings, Finding{
 				Code: CodeDuplicateScenarioInIndex, Severity: SeverityError,
-				Scope: "scenario:" + id,
+				Scope:  "scenario:" + id,
 				Detail: fmt.Sprintf("scenario %q is mapped twice: %q and %q", id, prior, rel),
 			})
 			continue
@@ -93,40 +98,32 @@ func resolveReferences(workspace string, idx *InputIndex) (refs []ResolvedRefere
 
 		abs, err := safeResolve(absWorkspace, rel)
 		if err != nil {
+			code := CodeUnsafeReferencePath
+			if errors.Is(err, ErrUnsafeSymlink) || strings.Contains(err.Error(), "symlink") {
+				code = CodeUnsafeSymlink
+			}
 			findings = append(findings, Finding{
-				Code: CodeUnsafeReferencePath, Severity: SeverityError,
-				Scope: "scenario:" + id,
+				Code: code, Severity: SeverityError,
+				Scope:  "scenario:" + id,
 				Detail: err.Error(),
 			})
 			continue
 		}
-		info, err := os.Lstat(abs)
+		body, err := readBoundedFile(abs, int64(packageLimits.MaxBytes))
 		if err != nil {
-			findings = append(findings, Finding{
-				Code: CodeMissingPackageFile, Severity: SeverityError,
-				Scope: "scenario:" + id,
-				Detail: fmt.Sprintf("package file %q: %v", rel, err),
-			})
-			continue
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			target, err := os.Readlink(abs)
-			if err != nil || !pathInside(target, absWorkspace) {
+			if errors.Is(err, ErrBoundedRead) {
 				findings = append(findings, Finding{
-					Code: CodeUnsafeSymlink, Severity: SeverityError,
-					Scope: "scenario:" + id,
-					Detail: fmt.Sprintf("package file %q is an unsafe symlink", rel),
+					Code: CodeMalformedPackageFile, Severity: SeverityError,
+					Scope:  "scenario:" + id,
+					Detail: fmt.Sprintf("package file %q exceeds size limit of %d bytes", rel, packageLimits.MaxBytes),
 				})
-				continue
+			} else {
+				findings = append(findings, Finding{
+					Code: CodeMissingPackageFile, Severity: SeverityError,
+					Scope:  "scenario:" + id,
+					Detail: fmt.Sprintf("package file %q: %v", rel, err),
+				})
 			}
-		}
-		body, err := os.ReadFile(abs)
-		if err != nil {
-			findings = append(findings, Finding{
-				Code: CodeMissingPackageFile, Severity: SeverityError,
-				Scope: "scenario:" + id,
-				Detail: fmt.Sprintf("package file %q: %v", rel, err),
-			})
 			continue
 		}
 		refs = append(refs, ResolvedReference{

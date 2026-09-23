@@ -225,9 +225,6 @@ func writeFileAtomic(path string, data []byte) error {
 }
 
 func fileExistsCheck(p string) bool {
-	info, err := os.Stat(p)
-	if err != nil {
-		return false
-	}
-	return info.IsDir()
+	_, err := os.Lstat(p)
+	return err == nil
 }
