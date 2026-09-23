@@ -10,20 +10,20 @@ import (
 type JourneyState string
 
 const (
-	StateNotStarted         JourneyState = "NOT_STARTED"
-	StateTracking           JourneyState = "TRACKING"
-	StateNearDestination   JourneyState = "NEAR_DESTINATION"
-	StateArrivalReported   JourneyState = "ARRIVAL_REPORTED"
-	StatePaused             JourneyState = "PAUSED"
+	StateNotStarted          JourneyState = "NOT_STARTED"
+	StateTracking            JourneyState = "TRACKING"
+	StateNearDestination     JourneyState = "NEAR_DESTINATION"
+	StateArrivalReported     JourneyState = "ARRIVAL_REPORTED"
+	StatePaused              JourneyState = "PAUSED"
 	StateLocationUnavailable JourneyState = "LOCATION_UNAVAILABLE"
-	StateRouteRevoked       JourneyState = "ROUTE_REVOKED"
+	StateRouteRevoked        JourneyState = "ROUTE_REVOKED"
 )
 
 type PositionReading struct {
-	Latitude          float64
-	Longitude         float64
-	AccuracyMeters    float64
-	TimestampEpochMs  int64
+	Latitude           float64
+	Longitude          float64
+	AccuracyMeters     float64
+	TimestampEpochMs   int64
 	MonotonicElapsedMs int64
 }
 

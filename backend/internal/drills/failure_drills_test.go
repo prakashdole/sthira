@@ -11,20 +11,20 @@ import (
 type JourneyState string
 
 const (
-	StateNotStarted         JourneyState = "NOT_STARTED"
-	StateTracking           JourneyState = "TRACKING"
-	StateNearDestination   JourneyState = "NEAR_DESTINATION"
-	StateArrivalReported   JourneyState = "ARRIVAL_REPORTED"
-	StatePaused             JourneyState = "PAUSED"
+	StateNotStarted          JourneyState = "NOT_STARTED"
+	StateTracking            JourneyState = "TRACKING"
+	StateNearDestination     JourneyState = "NEAR_DESTINATION"
+	StateArrivalReported     JourneyState = "ARRIVAL_REPORTED"
+	StatePaused              JourneyState = "PAUSED"
 	StateLocationUnavailable JourneyState = "LOCATION_UNAVAILABLE"
-	StateRouteRevoked       JourneyState = "ROUTE_REVOKED"
+	StateRouteRevoked        JourneyState = "ROUTE_REVOKED"
 )
 
 type PositionReading struct {
-	Latitude          float64
-	Longitude         float64
-	AccuracyMeters    float64
-	TimestampEpochMs  int64
+	Latitude           float64
+	Longitude          float64
+	AccuracyMeters     float64
+	TimestampEpochMs   int64
 	MonotonicElapsedMs int64
 }
 
@@ -44,7 +44,7 @@ type MockFacilityLedger struct {
 	mu           sync.Mutex
 	total        int
 	remaining    int
-	reservations map[string]int // reservationId -> partySize
+	reservations map[string]int    // reservationId -> partySize
 	statuses     map[string]string // reservationId -> "RESERVED" / "ARRIVED" / "DEPARTED" / "CANCELLED"
 	idempKeys    map[string]string // idempKey -> reservationId
 }

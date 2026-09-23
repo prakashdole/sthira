@@ -333,7 +333,7 @@ func exampleSyntheticPackage(datasetID, jurisdiction string) *opkg.Package {
 			{ID: "FAC-EX-01", SafeZone: "SZ-EX-01"},
 		},
 		Policy: opkg.AllocationPolicy{
-			Order:                   []string{"SZ-EX-01", "SZ-EX-02"},
+			Order:                    []string{"SZ-EX-01", "SZ-EX-02"},
 			ReservationExpirySeconds: &expiry,
 			AllowWalkIns:             &walkIns,
 		},
