@@ -10,7 +10,8 @@
 
 ### A. Android Citizen App (`mobile/android`)
 **Target Platforms**: Android 10+ (API 29+), tested against 3 GB RAM baseline (O02).  
-**Prerequisites**: OpenJDK 17+, Android SDK 34, Android NDK 26+.
+**Prerequisites**: OpenJDK 17+, Android SDK 34, Android NDK 26+.  
+*(Note per C00/C06: Gradle wrapper & root catalog setup are pending C06 native toolchain integration).*
 
 ```bash
 # Set reproducible environment variables
@@ -36,7 +37,8 @@ Artifact outputs:
 
 ### B. iOS Citizen App (`mobile/ios`)
 **Target Platforms**: iOS 16.0+, tested against iPhone 8 / SE (2nd/3rd gen) / 11 baseline (O02).  
-**Prerequisites**: macOS 14+, Xcode 16.0+, Swift 6.4.
+**Prerequisites**: macOS 14+, Xcode 16.0+, Swift 6.4.  
+*(Note per C00/C06: Xcode project file and scheme configuration are pending C06; Swift 6.4 syntax verified via swiftc).*
 
 ```bash
 # Navigate to iOS project directory

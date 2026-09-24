@@ -14,18 +14,18 @@ Task Q04 serves as the final integration and packaging milestone for Phase P9. A
 
 | Scope / Dimension | Engineering Status | Operational Gate Status | Evidence / Notes |
 | --- | --- | --- | --- |
-| **Backend Core (`backend/`)** | **DONE** (`ENGINEERING_VERIFIED`) | Ready for Staging | Go 1.27.1, 16 backend packages green, schema revision 10, real-DB verified on PG18 |
-| **Worker Runtimes (`internal/*worker`)** | **DONE** (`ENGINEERING_VERIFIED`) | Plumbing Verified | ASR/TTS/Middle worker protocols, listener mutexes, RIFF validation, templates green |
-| **Web Experience (`frontend/v2/`)** | **DONE** (`ENGINEERING_VERIFIED`) | Ready for Staging | TypeScript 5.8+, Vite 6.4.3, MapLibre GL, 21 unit tests green, production build exit 0 |
-| **Android Citizen App (`mobile/android`)** | **DONE** (`ENGINEERING_VERIFIED`) | Build Tool Blocked | Jetpack Compose, TalkBack >=48dp, 0 ms audio retention, explicit arrival (D62, O02) |
-| **iOS Citizen App (`mobile/ios`)** | **DONE** (`ENGINEERING_VERIFIED`) | Build Tool Blocked | SwiftUI, VoiceOver >=44pt, device-only Keychain, 14 source files verified with `swiftc -parse` |
-| **Shared Mobile Core (`mobile/shared`)** | **DONE** (`ENGINEERING_VERIFIED`) | Ready for Staging | KMP contracts, card validation, durable 6-state offline queue (M01) |
-| **Scenario Catalogue & Matrix (`plan/drills/`)** | **DONE** (`ENGINEERING_VERIFIED`) | Ready for Staging | 10 states / 20 scenarios, official disaster citations, facilitator stop rules (Q01) |
-| **Regional Failure Drills** | **DONE** (`ENGINEERING_VERIFIED`) | Ready for Staging | 13/13 automated drills pass; 24 participants across 4 representative cohorts (Q02) |
-| **System Assurance & Concurrency** | **DONE** (`ENGINEERING_VERIFIED`) | Ready for Staging | Zero secrets, hot-facility concurrency proven, audit hash chain continuous (Q03) |
-| **Release & Rollback Runbook** | **DONE** (`ENGINEERING_VERIFIED`) | Ready for Staging | Documented in `deploy/RELEASE-RUNBOOK.md` (Q04) |
+| **Backend Core (`backend/`)** | **PARTIAL** (Pending C01/C03) | Reopened per C00 | Schema revision 10; guidance scope and multilingual approval key binding pending C01/C03 |
+| **Worker Runtimes (`internal/*worker`)** | **PARTIAL** (Plumbing Only) | Hardware Blocked | Worker protocols and listener mutexes plumbed; real GPU inference NOT_RUN (`BLOCKED_HARDWARE`) |
+| **Web Experience (`frontend/v2/`)** | **PARTIAL** (Pending C02) | Reopened per C00 | TypeScript 5.8+, Vite 6.4.3; browser demo data coherence, explicit GPS tracking consent pending C02 |
+| **Android Citizen App (`mobile/android`)** | **ENGINEERING_REMAINING** | Build Tool Blocked | Jetpack Compose views provisional; native build setup and durable offline queue pending C06/C07 |
+| **iOS Citizen App (`mobile/ios`)** | **ENGINEERING_REMAINING** | Build Tool Blocked | SwiftUI views provisional; native project setup and durable offline queue pending C06/C07 |
+| **Shared Mobile Core (`mobile/shared`)** | **ENGINEERING_REMAINING** | In-Memory Only | KMP contracts defined; durable platform queue and trusted freshness anchor pending C06 |
+| **Scenario Catalogue & Matrix (`plan/drills/`)** | **PARTIAL** | Unresolved External Refs | 10 states / 20 scenarios defined; official gov references and user zones pending O01 |
+| **Regional Failure Drills** | **ILLUSTRATIVE_UNITS** | Not Verified on Cohorts | 13 code-level drill tests pass in Go; live human cohort trials NOT_VERIFIED (O01/O03/O11 open) |
+| **System Assurance & Concurrency** | **ILLUSTRATIVE_UNITS** | Pending Whole-System Proof | Local concurrency and hash chain checks verified; production load/restore pending live models |
+| **Release & Rollback Runbook** | **PROVISIONAL SPEC** | Pending Native Builds | Documented in `deploy/RELEASE-RUNBOOK.md` (native build entry points pending C06) |
 
-**Overall Acceptance**: **GATE S PROVISIONAL** (Software engineering verified across all layers; operational deployment gated on external data feeds, physical hardware benches, and authority sign-offs).
+**Overall Acceptance**: **`P9 NOT_ACCEPTED`** (Reopened per 2026-09-24 review in `plan/prompt.md` Section 0; Gate S is NOT declared; software release candidate cannot certify incomplete prerequisites).
 
 ---
 

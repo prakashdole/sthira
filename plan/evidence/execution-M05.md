@@ -93,10 +93,11 @@ Exit Code: 0 (PASS)
 ---
 
 ## 4. Phase Classification & Gate Handoff
-- **Phase 8 (P8) Engineering Core**: **ENGINEERING_VERIFIED**.
+- **Phase 8 (P8) Verdict**: **`REOPENED — P8 NOT_ACCEPTED`** (Reopened per 2026-09-24 review in `plan/prompt.md` Section 0; mobile sources require native build manifests, Gradle wrapper/catalog, Xcode project setup, durable native queue storage, and physical device verification under C06/C07).
+- **Engineering Status**: **`ENGINEERING_REMAINING`** (KMP shared and native view models are provisional designs; native builds and physical device acceptance pending C06/C07).
 - **External Gaps**:
   - `BLOCKED_BUILD_TOOL`: Full Xcode app and Java JDK required on build agent for physical packaging.
   - `BLOCKED_HARDWARE`: Physical 3 GB Android device and iPhone SE/8 required for physical lab measurements.
   - `BLOCKED_EXTERNAL`: Production IdP (O14) and live APNs/FCM keys (O12).
-- **Handoff to Phase 9 (P9)**:
-  - Ready for controlled regional user journeys and failure drills (Task Q02) using the Q01 scenario catalogue (`plan/drills/catalogue.json`) and task scripts.
+- **Handoff Sequence**:
+  - Deferred until after demonstration checkpoint, accepted Gate B, and C06/C07 native implementation.

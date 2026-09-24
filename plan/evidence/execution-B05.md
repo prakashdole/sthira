@@ -17,7 +17,8 @@ All prerequisite backend development packets (**B01**, **B02**, **B03**, and **B
 - **B04** (`0c96ac1`): Model evaluation framework (28/28 unit, 20/20 synthetic), microbenchmarks, k6 capacity load test (p95 3.64ms), hotspot concurrency handling (50 concurrent writes without overbooking).
 
 ### Gate B Formal Verdict
-- **Internal Software & Engineering Boundary**: **`ENGINEERING_VERIFIED`**
+- **Gate B Status**: **`REOPENED — Gate B NOT_ACCEPTED`** (Reopened per 2026-09-24 review in `plan/prompt.md` Section 0; R07 integrated demo, B01 multilingual key binding C03, and B03/B04 real-model/load prerequisites remain unresolved).
+- **Internal Software & Engineering Boundary**: **`ENGINEERING_REMAINING`** (Pending corrections C01–C05).
 - **Hardware-Dependent Paths** (GPU inference runtime): **`BLOCKED_HARDWARE`** (O03, O04)
 - **External Authority Paths** (live government agency contracts, IdP, map tiles, HSM): **`BLOCKED_EXTERNAL`** (O01, O05, O06, O07, O08, O09, O11)
 

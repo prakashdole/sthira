@@ -131,7 +131,7 @@ For existing served diagnostics/middleware: sanitize access logs to route patter
 
 | Correction | Current status | Depends on | Completion evidence |
 | --- | --- | --- | --- |
-| C00 | NOT_STARTED (this review corrects prompt statuses only) | Current checkout | All active gate/report contradictions reconciled |
+| C00 | DONE | Current checkout | All active gate/report contradictions reconciled (drill report Q02 updated to target protocol specifications, Gate B reopened in execution-B05.md, R07 reopened in execution-R07.md, P8 reopened in execution-M05.md, P9 reopened in execution-Q04.md, runbook annotated with C06 dependencies). |
 | C01 | NOT_STARTED | C00 | HTTP+DB guidance/candidate regressions |
 | C02 | NOT_STARTED | C01 contract; C04 for voice acceptance | Served browser+Go journey and failure evidence |
 | C03 | NOT_STARTED | C00; serial backend ownership after C01 | Two-language exact-digest and drift regressions |

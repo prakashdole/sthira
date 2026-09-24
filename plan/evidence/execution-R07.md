@@ -15,7 +15,7 @@
 Task R07 establishes the integrated demo freeze and founder handoff for Sthira v2 ahead of the Round Two presentation. All seven acceptance journeys defined in `plan/prompt.md` Section 6 have been fully automated and verified via `scripts/run_demo_rehearsal.sh`.
 
 ### Formal Acceptance Status
-- **Integrated Demo Engineering**: **`DEMO_ENGINEERING_ACCEPTED`**
+- **Integrated Demo Engineering**: **`REOPENED — C02/C04/C05`** (Reopened per 2026-09-24 review in `plan/prompt.md` Section 0: browser demo data coherence, explicit GPS tracking consent, arrival server acknowledgement, exercise voice wiring, and safe rehearsal runner are pending corrections).
 - **Model Inference**: **`REAL_INFERENCE=NOT_RUN` (`BLOCKED_HARDWARE`)** — Plumbed and contract-verified with deterministic allow-list validators; live inference on physical GPU weights unexecuted per standing instructions prohibiting cloud/GPU spend.
 - **Government Authority & Live Feeds**: **`BLOCKED_EXTERNAL`** — Operating strictly under process-controlled `SYNTHETIC_DEMO` exercise isolation with schema revision 10.
 

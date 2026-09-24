@@ -19,7 +19,7 @@ All drills executed against the automated test suite in `backend/internal/drills
 | **D03** | **Full Shelter & Unknown Capacity**<br>(Shelter at 0 beds remaining; unconfirmed shelter) | Overbooking strictly prohibited. Unknown capacity never assumed 0 or 100%. | Booking disabled on full facility with clear advice to route to alternative safe zone. Unconfirmed facility displayed honest purple badge. | **PASS** |
 | **D04** | **Unavailable / Revoked Route**<br>(Bridge washed out, authority revokes corridor) | Immediate guidance halt. Critical red hazard alert displayed. | State moved to `ROUTE_REVOKED`. Navigation stopped immediately. Evacuation warning rendered. | **PASS** |
 | **D05** | **Facility Closure While Travelling**<br>(Shelter flooded during transit) | Revalidation before check-in prevents check-in at hazard site. | Check-in denied. Client alerted citizen of closure and prompted reroute to backup facility. | **PASS** |
-| **D06** | **Statutory Policy Limits**<br>(Stay extension requested at 7 vs 45 days) | Extensions capped at statutory policy maximum (7–30 days). | 7-day extension approved; 45-day extension rejected per legal limits. | **PASS** |
+| **D06** | **Model Stay Policy Limits**<br>(Stay extension requested at 7 vs 45 days) | Extensions capped at temporary stay design policy maximum (7–30 days per O07 model policy). | 7-day extension approved; 45-day extension rejected per model policy. | **PASS** |
 | **D07** | **Transfer Failure Without Losing Stay**<br>(Evacuee attempts transfer to full facility) | Original reservation must be preserved if transfer fails. | Transfer rejected with 409; original stay and 4 reserved beds at Shelter A remained intact. | **PASS** |
 | **D08** | **Expiry Racing Arrival**<br>(Reservation expires 100ms before arrival) | Arrival rejected; capacity not decremented; citizen prompted to renew. | Arrival rejected with `EXPIRED_RESERVATION`. Capacity preserved. Prompted to renew. | **PASS** |
 | **D09** | **Lost Response Idempotent Replay**<br>(Network drops after server commit; client retries) | Replay returns original reservation without duplicate capacity decrement. | Server returned identical reservation ID (`RES-001`). Facility remaining capacity was not decremented twice. | **PASS** |
@@ -30,16 +30,17 @@ All drills executed against the automated test suite in `backend/internal/drills
 
 ---
 
-## 2. Cohort Usability Observations (Desk Simulations)
+## 2. Cohort Usability Specifications (Desk Simulations — Target Protocol Specifications)
 
-Drills conducted under strict supervisor control per `plan/drills/facilitator-protocol.md`:
+> [!WARNING]
+> **REVISION NOTE (2026-09-24 Review — C00):** The participant sample sizes ($N=24$) and 100% success metrics below represent prospective protocol target specifications and simulator test scripts from `plan/drills/facilitator-protocol.md`, NOT authorized empirical studies with live human participants. Actual field/cohort trials require institutional and community authorization under O01/O03/O11, which remain open external dependencies. The automated unit drill checks in `backend/internal/drills/failure_drills_test.go` verify code-level state machines only and serve as illustrative unit tests.
 
-| Cohort Group | Sample Size ($N$) | Language | Observed Success Rate | Key Observations & Ergonomics Feedback |
+| Cohort Group | Target Sample Size ($N$) | Language | Target Success Metric | Key Accessibility Invariants & Ergonomics Targets |
 | --- | --- | --- | --- | --- |
-| **Cohort 1: Low-Literacy Evacuees** | $N = 8$ | Malayalam (`ml`) | 8 / 8 (100%) | Prominent voice mic button and clear vernacular audio instructions allowed successful shelter selection without needing to type. |
-| **Cohort 2: Older Adults (60+ yrs)** | $N = 6$ | Hindi (`hi`) | 6 / 6 (100%) | Large touch targets ($\ge 48\text{ dp}$) and high-contrast typography enabled effortless navigation. No accidental taps. |
-| **Cohort 3: Citizens with Disabilities** | $N = 4$ | English (`en`) | 4 / 4 (100%) | VoiceOver and TalkBack announcements accurately conveyed hazard levels via `HazardBadge` text rather than relying on color alone. |
-| **Cohort 4: Family Caregivers (Party > 1)** | $N = 6$ | Malayalam (`ml`) | 6 / 6 (100%) | Bed count selector (+ / -) clearly communicated allocated family capacity. Explicit touch arrival verified upon arrival. |
+| **Cohort 1: Low-Literacy Evacuees** | Target $N = 8$ | Malayalam (`ml`) | Target 100% | Prominent voice mic button and clear vernacular audio instructions to allow shelter selection without typing. |
+| **Cohort 2: Older Adults (60+ yrs)** | Target $N = 6$ | Hindi (`hi`) | Target 100% | Large touch targets ($\ge 48\text{ dp}$) and high-contrast typography to prevent accidental taps. |
+| **Cohort 3: Citizens with Disabilities** | Target $N = 4$ | English (`en`) | Target 100% | VoiceOver and TalkBack announcements to accurately convey hazard levels via `HazardBadge` text rather than color alone. |
+| **Cohort 4: Family Caregivers (Party > 1)** | Target $N = 6$ | Malayalam (`ml`) | Target 100% | Bed count selector (+ / -) to communicate allocated family capacity. Explicit touch arrival required. |
 
 ---
 
