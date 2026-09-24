@@ -25,6 +25,12 @@ type Config struct {
 	MaxBodyBytes int64
 	// MaxJSONDepth bounds JSON nesting depth.
 	MaxJSONDepth int
+	// EnablePprof activates guarded /debug/pprof/* diagnostic endpoints.
+	EnablePprof bool
+	// PprofToken is the required secret token for accessing /debug/pprof/*.
+	PprofToken string
+	// EnableAccessLog enables structured request completion logging.
+	EnableAccessLog bool
 }
 
 // DefaultConfig returns conservative boundary defaults.

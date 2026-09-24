@@ -1132,4 +1132,55 @@ func (o *Orchestrator) validateProposal(out contracts.ModelOutput, sc contracts.
 // Sanity: this file is big; a guard compile-time check that we use
 // the helpers we imported.
 var _ = json.Valid
+
+// PipelineMetricsSnapshot exposes the orchestrator's low-cardinality pipeline
+// metrics snapshot for the /api/v3/observability/metrics endpoint. Returns
+// false when the recorder is the default NopMetrics (no snapshot available)
+// or the orchestrator is nil. The returned snapshot MUST NOT contain citizen
+// identifiers, transcripts, audio bytes, bearer tokens or session IDs.
+func (o *Orchestrator) PipelineMetricsSnapshot() (MetricsSnapshot, bool) {
+	if o == nil {
+		return MetricsSnapshot{}, false
+	}
+	if o.cfg.Metrics == nil {
+		return MetricsSnapshot{}, false
+	}
+	if s, ok := o.cfg.Metrics.(interface{ Snapshot() MetricsSnapshot }); ok {
+		return s.Snapshot(), true
+	}
+	return MetricsSnapshot{}, false
+}
+
+// WorkerHealthStages returns the per-stage worker health snapshot. Returns
+// nil when no orchestrator/workers are wired. Each row pairs the canonical
+// stage identifier with the last-known WorkerHealth (ready/warm flags,
+// supported languages). The values carry no request IDs, transcripts or
+// audio.
+type StageHealth struct {
+	Stage  Stage
+	Health contracts.WorkerHealth
+}
+
+// WorkerHealthStages returns the per-stage worker health snapshot. Returns
+// nil when no orchestrator/workers are wired. The returned slice contains one
+// row per pipeline stage (asr, middle, tts) when available; stages without a
+// recorded health are omitted.
+func (o *Orchestrator) WorkerHealthStages() []StageHealth {
+	if o == nil || o.cfg.Workers == nil {
+		return nil
+	}
+	out := make([]StageHealth, 0, 3)
+	for _, stage := range []Stage{StageASR, StageMiddle, StageTTS} {
+		h, ok := o.cfg.Workers.HealthSnapshot(stage)
+		if !ok {
+			continue
+		}
+		out = append(out, StageHealth{Stage: stage, Health: h})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 var _ = fmt.Sprintf

@@ -20,6 +20,7 @@ tags:
   - name: stay
   - name: operations
   - name: offline
+  - name: observability
 paths:
   /health/live:
     get:
@@ -550,6 +551,38 @@ paths:
         '499': { $ref: '#/components/responses/ErrorEnvelope' }
         '503': { $ref: '#/components/responses/ErrorEnvelope' }
         '504': { $ref: '#/components/responses/ErrorEnvelope' }
+  /observability/metrics:
+    get:
+      tags: [observability]
+      summary: Low-cardinality operational metrics snapshot
+      description: >-
+        Returns operational metadata suitable for a metrics scraper: server
+        start time, pipeline stage counts and timings (queue depth, queue
+        rejects, stale drops, worker ready/not-ready), DB connection-pool
+        statistics (when a durable store is wired) and worker health
+        summaries (when a voice orchestrator is wired). The endpoint NEVER
+        returns citizen identifiers, bearer tokens, GPS coordinates, audio
+        bytes, transcripts, or session IDs. Without a configured
+        STHIRA_PPROF_TOKEN the endpoint fails closed (503 DEPENDENCY_UNAVAILABLE);
+        with a configured token the request must include either the
+        X-Observability-Token header or an `Authorization: Bearer <token>`
+        header, otherwise it returns 401 UNAUTHORIZED.
+      parameters:
+        - in: header
+          name: X-Observability-Token
+          required: false
+          schema: { type: string }
+          description: Required when STHIRA_PPROF_TOKEN is configured; identical to the pprof secret.
+        - in: header
+          name: Authorization
+          required: false
+          schema: { type: string }
+          description: Alternative token carrier; `Bearer <token>` form.
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '401': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
 components:
   securitySchemes:
     bearerAuth:

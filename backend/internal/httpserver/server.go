@@ -76,11 +76,46 @@ type Server struct {
 	// voiceProcess is the handler for P6 voice pipeline routes.
 	// When nil, routes are registered in unavailable mode (fail closed 503).
 	voiceProcess *VoiceProcessHandler
+	// metrics exposes a low-cardinality pipeline snapshot for the
+	// observability endpoint. Nil means pipeline metrics are absent.
+	metrics PipelineMetricsSnapshotter
+	// workersHealthFn returns per-stage worker health summaries when wired.
+	// Nil means workers are absent from the observability snapshot.
+	workersHealthFn func() []WorkerHealthSummary
 }
 
 // WithVoiceProcess wires the voice process handler for the /api/v3/voice/{transcriptions,process,speech} routes.
 func WithVoiceProcess(h *VoiceProcessHandler) Option {
 	return func(s *Server) { s.voiceProcess = h }
+}
+
+// WithMetricsSnapshotter wires the pipeline metrics source for the
+// /api/v3/observability/metrics endpoint. Production passes the orchestrator's
+// *orchestration.Metrics; nil means the field stays absent from the snapshot.
+func WithMetricsSnapshotter(m PipelineMetricsSnapshotter) Option {
+	return func(s *Server) { s.metrics = m }
+}
+
+// WithWorkersHealth wires the function that returns per-stage worker health
+// summaries for the /api/v3/observability/metrics endpoint. Nil means the
+// workers field stays absent from the snapshot.
+func WithWorkersHealth(fn func() []WorkerHealthSummary) Option {
+	return func(s *Server) { s.workersHealthFn = fn }
+}
+
+// WithPprof enables diagnostic pprof endpoints guarded by the provided secret token.
+func WithPprof(token string) Option {
+	return func(s *Server) {
+		s.cfg.EnablePprof = true
+		s.cfg.PprofToken = token
+	}
+}
+
+// WithAccessLog enables structured, privacy-preserving request completion logging.
+func WithAccessLog(enable bool) Option {
+	return func(s *Server) {
+		s.cfg.EnableAccessLog = enable
+	}
 }
 
 // persistedResolver adapts the store's persisted context resolution to the
@@ -256,6 +291,9 @@ func New(cfg Config, opts ...Option) *Server {
 	// `crashtest` tag. Never present in production builds.
 	s.registerCrashHook(mux)
 
+	// Diagnostic pprof endpoints behind authentication token (when enabled).
+	s.registerPprofRoutes(mux)
+
 	// P6 voice pipeline routes (transcriptions, full pipeline process, speech synthesis).
 	// When no voice process handler is configured, incomplete model configuration
 	// stays unavailable: the routes are registered and enforce HTTP methods (returning 405
@@ -265,6 +303,10 @@ func New(cfg Config, opts ...Option) *Server {
 		voiceHandler = NewVoiceProcessHandler(nil, orchestration.DefaultLimits())
 	}
 	voiceHandler.RegisterVoiceRoutes(mux, s.withRequestID)
+
+	// Low-cardinality operational metrics endpoint (token-guarded via
+	// cfg.PprofToken). Without a configured token the handler fails closed.
+	mux.HandleFunc(observabilityRoute, s.withRequestID(s.handleObservability))
 
 	s.httpSrv = &http.Server{
 		Addr:              cfg.Addr,
@@ -373,11 +415,17 @@ func requestID(r *http.Request) string {
 	return "req-unknown"
 }
 
-// withRequestID assigns a request ID for correlation.
+// withRequestID assigns a request ID for correlation and logs access metrics when enabled.
 func (s *Server) withRequestID(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := context.WithValue(r.Context(), requestIDKey, newRequestID())
-		next(w, r.WithContext(ctx))
+		reqID := newRequestID()
+		ctx := context.WithValue(r.Context(), requestIDKey, reqID)
+		start := time.Now()
+		tw := newStatusTrackingResponseWriter(w)
+		next(tw, r.WithContext(ctx))
+		if s.cfg.EnableAccessLog {
+			s.logAccess(reqID, r.Method, r.URL.Path, tw.statusCode, time.Since(start), tw.bytesWritten)
+		}
 	}
 }
 

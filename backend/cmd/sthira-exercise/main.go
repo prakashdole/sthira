@@ -269,13 +269,22 @@ func main() {
 	}
 
 	cfg := httpserver.DefaultConfig(addr)
-	srv := httpserver.New(cfg,
+	opts := []httpserver.Option{
 		httpserver.WithLogger(logger),
 		httpserver.WithStore(st),
 		httpserver.WithProber(store.NewReadinessProber(st.DB(), store.SchemaRevision)),
 		httpserver.WithPersistedContextResolver(st),
 		httpserver.WithSyntheticExercise(httpserver.StaticSyntheticExercise(true)),
-	)
+	}
+	if os.Getenv("STHIRA_ENABLE_ACCESS_LOG") == "1" {
+		opts = append(opts, httpserver.WithAccessLog(true))
+		logger.Info("access log enabled (privacy-preserving structured logging)")
+	}
+	if pprofTok := os.Getenv("STHIRA_PPROF_TOKEN"); pprofTok != "" {
+		opts = append(opts, httpserver.WithPprof(pprofTok))
+		logger.Info("pprof + observability metrics endpoint enabled (token-guarded)")
+	}
+	srv := httpserver.New(cfg, opts...)
 	logger.Info("sthira-exercise listening (synthetic ON)", "addr", addr, "schema_revision", store.SchemaRevision)
 	if err := srv.Serve(ctx); err != nil {
 		logger.Error("server exited", "error", err)

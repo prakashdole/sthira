@@ -41,6 +41,8 @@ func TestServedRoutesMatchOpenAPI(t *testing.T) {
 		{"/api/v3/voice/transcriptions", http.MethodGet, http.StatusMethodNotAllowed},
 		{"/api/v3/voice/process", http.MethodGet, http.StatusMethodNotAllowed},
 		{"/api/v3/voice/speech", http.MethodGet, http.StatusMethodNotAllowed},
+		// Observability surface (token-guarded)
+		{"/api/v3/observability/metrics", http.MethodPost, http.StatusMethodNotAllowed},
 	}
 	srv := httptest.NewServer(newTestServer().Handler())
 	defer srv.Close()

@@ -158,7 +158,11 @@ func main() {
 			os.Exit(1)
 		}
 		voiceHandler := httpserver.NewVoiceProcessHandler(orch, orchestration.DefaultLimits())
-		opts = append(opts, httpserver.WithVoiceProcess(voiceHandler))
+		opts = append(opts,
+			httpserver.WithVoiceProcess(voiceHandler),
+			httpserver.WithMetricsSnapshotter(orchestratorSnapshotter{orch: orch}),
+			httpserver.WithWorkersHealth(workerHealthSummaries(orch)),
+		)
 		logger.Info("P6 voice orchestrator wired with private workers")
 	} else {
 		logger.Info("P6 voice workers not fully configured; voice pipeline stays unavailable (503)")
@@ -182,6 +186,22 @@ func main() {
 		logger.Warn("demo context enabled: static server-side snapshot resolver (non-operational)")
 	}
 
+	// Observability + diagnostics (opt-in, fail-closed default OFF):
+	//   STHIRA_ENABLE_ACCESS_LOG=1   enable structured request completion logging
+	//   STHIRA_PPROF_TOKEN=<secret> enable /debug/pprof/* and /api/v3/observability/metrics
+	//                                  (both endpoints require the same token)
+	// Both surfaces are designed for low-cardinality operational telemetry; the
+	// observability endpoint never includes citizen identifiers, bearer tokens,
+	// GPS coordinates, audio bytes, transcripts, or session IDs.
+	if os.Getenv("STHIRA_ENABLE_ACCESS_LOG") == "1" {
+		opts = append(opts, httpserver.WithAccessLog(true))
+		logger.Info("access log enabled (privacy-preserving structured logging)")
+	}
+	if pprofTok := os.Getenv("STHIRA_PPROF_TOKEN"); pprofTok != "" {
+		opts = append(opts, httpserver.WithPprof(pprofTok))
+		logger.Info("pprof + observability metrics endpoint enabled (token-guarded)")
+	}
+
 	srv := httpserver.New(cfg, opts...)
 
 	if err := srv.Serve(ctx); err != nil {
@@ -189,4 +209,46 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("server stopped cleanly")
+}
+
+// orchestratorSnapshotter adapts the orchestrator's metrics recorder to the
+// httpserver.PipelineMetricsSnapshotter interface. When the orchestrator's
+// recorder is the default NopMetrics (no snapshot available), Snapshot
+// returns the zero MetricsSnapshot; the observability handler still includes
+// the pipeline field with empty maps so consumers see consistent shape.
+type orchestratorSnapshotter struct {
+	orch *orchestration.Orchestrator
+}
+
+func (s orchestratorSnapshotter) Snapshot() orchestration.MetricsSnapshot {
+	if snap, ok := s.orch.PipelineMetricsSnapshot(); ok {
+		return snap
+	}
+	return orchestration.MetricsSnapshot{}
+}
+
+// workerHealthSummaries returns a function suitable for
+// httpserver.WithWorkersHealth that maps the orchestrator's per-stage worker
+// health into the low-cardinality summary rows exposed by the observability
+// endpoint. Only stage, ready/warm flags and supported languages are kept;
+// the rest of WorkerHealth (models, artifacts, queue, build revision) is
+// intentionally dropped because the summaries are public operational
+// telemetry, not artifact attestation.
+func workerHealthSummaries(orch *orchestration.Orchestrator) func() []httpserver.WorkerHealthSummary {
+	return func() []httpserver.WorkerHealthSummary {
+		stages := orch.WorkerHealthStages()
+		if len(stages) == 0 {
+			return nil
+		}
+		out := make([]httpserver.WorkerHealthSummary, 0, len(stages))
+		for _, s := range stages {
+			out = append(out, httpserver.WorkerHealthSummary{
+				Stage:     string(s.Stage),
+				Ready:     s.Health.Ready,
+				Warm:      s.Health.Warm,
+				Languages: append([]string(nil), s.Health.SupportedLanguages...),
+			})
+		}
+		return out
+	}
 }
