@@ -312,26 +312,27 @@ func New(cfg Config, opts ...Option) *Server {
 	// (s.rateLimit == nil) it is a transparent pass-through that adds
 	// only the cost of a single function call.
 	rateGuard := s.withRateLimit
+	clockGuard := s.withClockDriftGuard
 	mux.HandleFunc("/health/live", s.withRequestID(rateGuard(s.handleLive)))
 	mux.HandleFunc("/health/ready", s.withRequestID(rateGuard(s.handleReady)))
 	mux.HandleFunc("/api/v3/voice/commands", s.withRequestID(rateGuard(s.handleVoiceCommands)))
 
 	// P4 citizen destination/stay routes. Public reads need no session; writes
 	// and the private read path require a live citizen session (Bearer token).
-	mux.HandleFunc("/api/v3/sessions", s.withRequestID(rateGuard(s.handleCreateSession)))
-	mux.HandleFunc("/api/v3/places/resolve", s.withRequestID(rateGuard(s.handleResolvePlace)))
-	mux.HandleFunc("/api/v3/guidance/query", s.withRequestID(rateGuard(s.handleGuidanceQuery)))
-	mux.HandleFunc("/api/v3/reservations", s.withRequestID(s.withSession(rateGuard(s.handleCreateReservation))))
-	mux.HandleFunc("/api/v3/reservations/{id}", s.withRequestID(s.withSession(rateGuard(s.handleGetReservation))))
-	mux.HandleFunc("/api/v3/reservations/{id}/events", s.withRequestID(s.withSession(rateGuard(s.handleStayEvent))))
+	mux.HandleFunc("/api/v3/sessions", s.withRequestID(clockGuard(rateGuard(s.handleCreateSession))))
+	mux.HandleFunc("/api/v3/places/resolve", s.withRequestID(clockGuard(rateGuard(s.handleResolvePlace))))
+	mux.HandleFunc("/api/v3/guidance/query", s.withRequestID(clockGuard(rateGuard(s.handleGuidanceQuery))))
+	mux.HandleFunc("/api/v3/reservations", s.withRequestID(clockGuard(s.withSession(rateGuard(s.handleCreateReservation)))))
+	mux.HandleFunc("/api/v3/reservations/{id}", s.withRequestID(clockGuard(s.withSession(rateGuard(s.handleGetReservation)))))
+	mux.HandleFunc("/api/v3/reservations/{id}/events", s.withRequestID(clockGuard(s.withSession(rateGuard(s.handleStayEvent)))))
 
 	// P4 operator operations routes. Issuance is MFA-gated at the boundary;
 	// operational routes require a live OPERATOR session with verified MFA and
 	// are jurisdiction-scoped per handler.
-	mux.HandleFunc("/api/v3/operations/sessions", s.withRequestID(rateGuard(s.handleCreateOperatorSession)))
-	mux.HandleFunc("/api/v3/operations/sources/{id}/transitions", s.withRequestID(s.withOperator(rateGuard(s.handleSourceTransition))))
-	mux.HandleFunc("/api/v3/operations/sources/{id}/quarantine", s.withRequestID(s.withOperator(rateGuard(s.handleSourceQuarantine))))
-	mux.HandleFunc("/api/v3/operations/stays/{id}/corrections", s.withRequestID(s.withOperator(rateGuard(s.handleStayCorrection))))
+	mux.HandleFunc("/api/v3/operations/sessions", s.withRequestID(clockGuard(rateGuard(s.handleCreateOperatorSession))))
+	mux.HandleFunc("/api/v3/operations/sources/{id}/transitions", s.withRequestID(clockGuard(s.withOperator(rateGuard(s.handleSourceTransition)))))
+	mux.HandleFunc("/api/v3/operations/sources/{id}/quarantine", s.withRequestID(clockGuard(s.withOperator(rateGuard(s.handleSourceQuarantine)))))
+	mux.HandleFunc("/api/v3/operations/stays/{id}/corrections", s.withRequestID(clockGuard(s.withOperator(rateGuard(s.handleStayCorrection)))))
 
 	// P5 public offline delivery routes (manifest, card, and auxiliary resources).
 	pubSrc := s.pubSource

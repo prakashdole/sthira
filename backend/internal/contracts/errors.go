@@ -29,6 +29,7 @@ const (
 	ErrRateLimited           = "RATE_LIMITED"
 	ErrNotFound              = "NOT_FOUND"
 	ErrInternal              = "INTERNAL"
+	ErrClockDrift            = "CLOCK_DRIFT"
 
 	// P6 — voice pipeline and inference. Additive only; existing codes are
 	// unchanged. See plan/p6-contract.md.
