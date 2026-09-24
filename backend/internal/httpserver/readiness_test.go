@@ -22,15 +22,15 @@ func (p readyTestProber) Probe(ctx context.Context) error {
 }
 
 type readinessEnvelope struct {
-	Status       string                             `json:"status"`
-	Subsystems   map[string]httpserver.SubsystemHealth `json:"subsystems"`
-	Memory       httpserver.MemoryHealth             `json:"memory"`
+	Status     string                                `json:"status"`
+	Subsystems map[string]httpserver.SubsystemHealth `json:"subsystems"`
+	Memory     httpserver.MemoryHealth               `json:"memory"`
 }
 
 type readyResponse struct {
-	RequestID    string             `json:"request_id"`
-	Data         readinessEnvelope  `json:"data"`
-	Errors       []contracts.APIError `json:"errors"`
+	RequestID string               `json:"request_id"`
+	Data      readinessEnvelope    `json:"data"`
+	Errors    []contracts.APIError `json:"errors"`
 }
 
 func TestReadiness_BreakdownWhenReady(t *testing.T) {

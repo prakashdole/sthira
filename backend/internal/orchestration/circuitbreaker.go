@@ -86,11 +86,11 @@ func NewCircuitBreaker(name string, cfg CircuitBreakerConfig) *CircuitBreaker {
 // Execute wraps an upstream invocation with circuit protection.
 //
 // Invariants:
-// 1. In CLOSED: calls proceed normally. Consecutive failures >= FailureThreshold trip to OPEN.
-// 2. In OPEN: calls fail fast immediately with ErrCircuitOpen.
-// 3. After ResetTimeout expires: transitions to HALF_OPEN.
-// 4. In HALF_OPEN: admits a single concurrent probe. If the probe fails, trips immediately back to OPEN.
-//    If consecutive probes >= SuccessThreshold succeed, resets to CLOSED.
+//  1. In CLOSED: calls proceed normally. Consecutive failures >= FailureThreshold trip to OPEN.
+//  2. In OPEN: calls fail fast immediately with ErrCircuitOpen.
+//  3. After ResetTimeout expires: transitions to HALF_OPEN.
+//  4. In HALF_OPEN: admits a single concurrent probe. If the probe fails, trips immediately back to OPEN.
+//     If consecutive probes >= SuccessThreshold succeed, resets to CLOSED.
 func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() error) error {
 	if err := ctx.Err(); err != nil {
 		return err

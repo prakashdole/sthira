@@ -27,17 +27,17 @@ func WithAllowedOrigins(origins ...string) Option {
 // rules based on the configured AllowedOrigins.
 //
 // Invariants:
-// 1. If AllowedOrigins is empty, no CORS headers are emitted (strict same-origin isolation).
-// 2. Incoming Origin headers are matched strictly against the allow-list. Wildcard origins
-//    ("*") are rejected at configuration time to prevent data leakage in credentialed contexts.
-// 3. Preflight OPTIONS requests for allowed origins receive 204 No Content with
-//    Access-Control-Allow-Origin, Access-Control-Allow-Methods, Access-Control-Allow-Headers,
-//    Access-Control-Max-Age, and Access-Control-Expose-Headers.
-// 4. Preflight OPTIONS requests for disallowed origins receive HTTP 403 Forbidden.
-// 5. Standard cross-origin requests from allowed origins receive Access-Control-Allow-Origin
-//    and Vary: Origin. Standard requests from disallowed origins do not receive CORS headers.
-// 6. Requests without an Origin header (e.g., same-origin browser navigations, mobile native clients,
-//    curl) pass through unmodified.
+//  1. If AllowedOrigins is empty, no CORS headers are emitted (strict same-origin isolation).
+//  2. Incoming Origin headers are matched strictly against the allow-list. Wildcard origins
+//     ("*") are rejected at configuration time to prevent data leakage in credentialed contexts.
+//  3. Preflight OPTIONS requests for allowed origins receive 204 No Content with
+//     Access-Control-Allow-Origin, Access-Control-Allow-Methods, Access-Control-Allow-Headers,
+//     Access-Control-Max-Age, and Access-Control-Expose-Headers.
+//  4. Preflight OPTIONS requests for disallowed origins receive HTTP 403 Forbidden.
+//  5. Standard cross-origin requests from allowed origins receive Access-Control-Allow-Origin
+//     and Vary: Origin. Standard requests from disallowed origins do not receive CORS headers.
+//  6. Requests without an Origin header (e.g., same-origin browser navigations, mobile native clients,
+//     curl) pass through unmodified.
 func (s *Server) withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
