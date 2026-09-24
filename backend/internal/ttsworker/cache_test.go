@@ -131,10 +131,8 @@ func TestCodecWithdrawsMidServe(t *testing.T) {
 		}
 	}()
 	for i := 0; i < N; i++ {
-		if _, ok := c.Get(id); ok {
-			// A hit is OK as long as the version recorded into the
-			// entry precedes the broadcaster advance.
-		}
+		// Exercise concurrent reads while broadcaster advances.
+		_, _ = c.Get(id)
 	}
 	close(stop)
 	<-done

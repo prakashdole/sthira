@@ -136,7 +136,6 @@ func Prepare(workspace, indexPath string) (*Report, error) {
 		policy        bool
 		checksumOK    bool
 		jurisMatch    bool
-		hasEvent      bool
 		missingFields []string
 	}
 	perScenario := map[string]*scenStatus{}

@@ -73,7 +73,7 @@ func runReport(args []string) int {
 		printStderr("refusing to overwrite existing output directory %s", dst)
 		return 4
 	}
-	if err := os.MkdirAll(dst, 0o755); err != nil {
+	if err := os.MkdirAll(dst, 0o750); err != nil {
 		printStderr("mkdir %s: %v", dst, err)
 		return 4
 	}
@@ -199,7 +199,7 @@ func emptyDash(s string) string {
 // watching the destination.
 func writeFileAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(dir, ".scenario-prep-")
@@ -217,7 +217,7 @@ func writeFileAtomic(path string, data []byte) error {
 		cleanup()
 		return err
 	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
+	if err := os.Chmod(tmpName, 0o600); err != nil {
 		cleanup()
 		return err
 	}

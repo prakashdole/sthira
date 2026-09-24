@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 
 	"sthira/backend/internal/offlinepkg"
@@ -356,19 +354,3 @@ func (c *ProtocolClient) StorageDir() string {
 	}
 	return c.storage.root
 }
-
-// filesExists is a small helper for tests that need to assert "this file
-// is on disk now." Not part of the public API.
-func filesExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-// joinPath is filepath.Join wrapped so the rest of the package does not
-// import path/filepath everywhere.
-func joinPath(parts ...string) string {
-	return filepath.Join(parts...)
-}
-
-// errors is re-exported for the package. We deliberately shadow nothing.
-var _ = errors.New

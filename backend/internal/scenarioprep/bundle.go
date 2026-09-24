@@ -292,7 +292,7 @@ func relInsideWorkspace(workspace, path string) string {
 // directory and renaming. Ensures the destination directory exists.
 func copyFileAtomic(path string, body []byte) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("%w: mkdir %s: %v", ErrIO, path, err)
 	}
 	tmp, err := os.CreateTemp(dir, ".scenario-prep-")
@@ -310,7 +310,7 @@ func copyFileAtomic(path string, body []byte) error {
 		cleanup()
 		return fmt.Errorf("%w: close %s: %v", ErrIO, path, err)
 	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
+	if err := os.Chmod(tmpName, 0o600); err != nil {
 		cleanup()
 		return fmt.Errorf("%w: chmod %s: %v", ErrIO, path, err)
 	}

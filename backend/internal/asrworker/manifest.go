@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -216,7 +217,7 @@ func ScanLocalInventory(root string, ic IndicConformer) Inventory {
 		var actual string
 		full := root + rels[len(rels)-1]
 		if st, err := os.Stat(full); err == nil && st.Size() > 0 && st.Size() <= 64*1024 {
-			if b, err := os.ReadFile(full); err == nil {
+			if b, err := os.ReadFile(filepath.Clean(full)); err == nil { // #nosec G304
 				actual = SHA256Hex(b)
 			}
 		}

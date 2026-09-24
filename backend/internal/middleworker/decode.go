@@ -45,7 +45,8 @@ func decodeStrictProposal(content []byte) (Proposal, error) {
 	// enough here — the vLLM output is well-formed UTF-8 JSON and
 	// we do not want to import a streaming parser.
 	depth, end := 0, -1
-	for i, b := range trimmed {
+	for i := 0; i < len(trimmed); i++ {
+		b := trimmed[i]
 		switch b {
 		case '{':
 			depth++
@@ -58,16 +59,14 @@ func decodeStrictProposal(content []byte) (Proposal, error) {
 			// skip string contents (with escapes).
 			i++
 			for i < len(trimmed) {
-				switch trimmed[i] {
-				case '\\':
+				if trimmed[i] == '\\' {
 					i += 2
 					continue
-				case '"':
-					break
-				default:
-					i++
 				}
-				break
+				if trimmed[i] == '"' {
+					break
+				}
+				i++
 			}
 		}
 		if end != -1 {

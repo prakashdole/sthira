@@ -25,8 +25,6 @@ import (
 // orchestration.WorkerClient by composing three per-method hooks
 // and the Health signature.
 type Worker struct {
-	mu sync.Mutex
-
 	ready atomic.Bool
 
 	transcribeCalls atomic.Int64
@@ -61,7 +59,7 @@ func NewWorker() *Worker {
 // silenceWAV produces a canonical PCM 16-bit LE mono WAV holding
 // `seconds` of zeros at `rate`. The orchestrator's RIFF-header
 // validator requires PCM format=1, 16-bit, mono; this helper emits
-// exactly that.
+// #nosec G115 -- test helper generating bounded synthetic WAV audio
 func silenceWAV(rate int, seconds float64) []byte {
 	samples := int(float64(rate) * seconds)
 	dataLen := samples * 2
@@ -275,7 +273,6 @@ func (r *Resolver) SetRevalidateError(err error) {
 
 // Validator is the orchestrationtest fake VoiceValidator.
 type Validator struct {
-	mu         sync.Mutex
 	enforced   atomic.Int64
 	enforceErr error
 	shapeErr   error
@@ -383,9 +380,9 @@ func NewOrchestrator(asr, mid, tts *Worker, resolver *Resolver, validator *Valid
 	workers := orchestration.NewWorkers(asr, mid, tts)
 	// SnapshotHealth transitions the workers' internal ready state
 	// so the orchestrator's IsReady short-circuit returns true.
-	workers.SnapshotHealth(context.Background(), orchestration.StageASR)
-	workers.SnapshotHealth(context.Background(), orchestration.StageMiddle)
-	workers.SnapshotHealth(context.Background(), orchestration.StageTTS)
+	_, _ = workers.SnapshotHealth(context.Background(), orchestration.StageASR)    // #nosec G104
+	_, _ = workers.SnapshotHealth(context.Background(), orchestration.StageMiddle) // #nosec G104
+	_, _ = workers.SnapshotHealth(context.Background(), orchestration.StageTTS)    // #nosec G104
 	cfg := orchestration.PipelineConfig{
 		Limits:      orchestration.DefaultLimits(),
 		Workers:     workers,

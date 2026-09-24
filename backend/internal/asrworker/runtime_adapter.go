@@ -168,10 +168,7 @@ func (s *SubprocessRuntime) transcribeViaAdapter(demux *ipcDispatcher, ctx conte
 		Confidence: resp.Confidence,
 	}
 	for _, alt := range resp.Alternatives {
-		result.Alternatives = append(result.Alternatives, TranscriptAlternative{
-			Text:       alt.Text,
-			Confidence: alt.Confidence,
-		})
+		result.Alternatives = append(result.Alternatives, TranscriptAlternative(alt))
 	}
 	return result, nil
 }

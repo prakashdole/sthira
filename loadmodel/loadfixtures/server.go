@@ -495,12 +495,14 @@ func (s *Server) handleVoiceTranscriptions(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handleVoiceProcess(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		s.bumpVoiceErr()
 		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST only")
 		return
 	}
 	s.bumpRequest()
 	if !s.admitVoice() {
 		s.bumpQueueReject()
+		s.bumpVoiceErr()
 		writeError(w, http.StatusServiceUnavailable, "QUEUE_SATURATED", "voice queue full")
 		return
 	}
@@ -534,12 +536,14 @@ func (s *Server) handleVoiceProcess(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleVoiceSpeech(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		s.bumpVoiceErr()
 		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST only")
 		return
 	}
 	s.bumpRequest()
 	if !s.admitVoice() {
 		s.bumpQueueReject()
+		s.bumpVoiceErr()
 		writeError(w, http.StatusServiceUnavailable, "QUEUE_SATURATED", "voice queue full")
 		return
 	}
@@ -660,7 +664,7 @@ func newID(prefix string) string {
 	b := make([]byte, 8)
 	// Deterministic length; we don't need cryptographic strength here.
 	for i := range b {
-		b[i] = byte(time.Now().UnixNano() >> (i % 8))
+		b[i] = byte(time.Now().UnixNano() >> (i % 8)) // #nosec G115
 	}
 	return fmt.Sprintf("%s-%s", prefix, hex.EncodeToString(b))
 }

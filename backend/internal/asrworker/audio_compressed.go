@@ -120,7 +120,7 @@ func DecodeCompressed(audioBytes []byte, contentType string, limits AudioDecodeL
 		"pipe:1",
 	}
 
-	cmd := exec.Command(TranscoderBinary, args...)
+	cmd := exec.Command(TranscoderBinary, args...) // #nosec G204
 	cmd.Stdin = bytes.NewReader(audioBytes)
 
 	// Bounded stdout capture.

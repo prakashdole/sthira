@@ -257,7 +257,7 @@ func TestConform_Middle_RealWorkerServer_EnvelopeAndNesting(t *testing.T) {
 			resp, err := http.Post("http://"+strings.TrimPrefix(addr, "http://"),
 				"application/json", strings.NewReader(string(body)))
 			if err != nil {
-				http.Error(w, err.Error(), 502)
+				http.Error(w, err.Error(), http.StatusBadGateway)
 				return
 			}
 			defer resp.Body.Close()

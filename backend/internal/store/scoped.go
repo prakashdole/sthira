@@ -386,8 +386,6 @@ func readApprovedSpeechKeys(ctx context.Context, db DBTX, jurisdiction string, s
 	return out, approvedLangs, digests, nil
 }
 
-func isInMap(id string, m map[string]contracts.ZoneRef) bool { _, ok := m[id]; return ok }
-
 func isZoneID(id string, m map[string]contracts.ZoneRef) bool {
 	_, ok := m[id]
 	return ok

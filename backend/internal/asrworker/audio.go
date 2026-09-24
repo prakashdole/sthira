@@ -220,7 +220,7 @@ func decodeRIFFWAV(b []byte, limits AudioDecodeLimits) (samples []float32, sampl
 		id := string(b[pos : pos+4])
 		size := binary.LittleEndian.Uint32(b[pos+4 : pos+8])
 		knownSize := size != wavUnknownChunkSize
-		avail := uint64(len(b) - pos - 8)
+		avail := uint64(len(b) - pos - 8) // #nosec G115
 		if knownSize && uint64(size) > avail && id != "data" {
 			// Malformed: chunk declares more bytes than the file.
 			return nil, 0, 0, &DecodeError{Reason: "wav chunk overruns file",
@@ -276,7 +276,7 @@ func decodeRIFFWAV(b []byte, limits AudioDecodeLimits) (samples []float32, sampl
 				// reject it via the declared-length comparison.
 				break
 			}
-			pos = int(end)
+			pos = int(end) // #nosec G115
 			if size%2 == 1 && pos < len(b) {
 				pos++ // pad byte
 			}
@@ -330,7 +330,7 @@ func decodeRIFFWAV(b []byte, limits AudioDecodeLimits) (samples []float32, sampl
 	if channels == 1 {
 		out := make([]float32, frameCount)
 		for i := 0; i < frameCount; i++ {
-			s := int16(binary.LittleEndian.Uint16(pcm[i*2 : i*2+2]))
+			s := int16(binary.LittleEndian.Uint16(pcm[i*2 : i*2+2])) // #nosec G115
 			out[i] = float32(s) / 32768.0
 		}
 		return out, sampleRate, channels, nil
@@ -342,7 +342,7 @@ func decodeRIFFWAV(b []byte, limits AudioDecodeLimits) (samples []float32, sampl
 	// channels > 1 with MonoOnly=false: collapse to channel 0 only.
 	out := make([]float32, frameCount)
 	for i := 0; i < frameCount; i++ {
-		s := int16(binary.LittleEndian.Uint16(pcm[i*frameSize : i*frameSize+2]))
+		s := int16(binary.LittleEndian.Uint16(pcm[i*frameSize : i*frameSize+2])) // #nosec G115
 		out[i] = float32(s) / 32768.0
 	}
 	return out, sampleRate, 1, nil

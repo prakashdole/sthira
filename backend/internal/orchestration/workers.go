@@ -139,9 +139,6 @@ type Workers struct {
 	lastASR  contracts.WorkerHealth
 	lastMid  contracts.WorkerHealth
 	lastTTS  contracts.WorkerHealth
-	// errCount counts the cumulative number of dispatch-time errors
-	// (per worker). Used by the metrics layer.
-	errCount atomic.Uint64
 	// readyCount counts the cumulative number of successful
 	// ready-state transitions (used by tests).
 	readyCount atomic.Uint64

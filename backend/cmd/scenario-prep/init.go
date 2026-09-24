@@ -62,7 +62,7 @@ func runInit(args []string) int {
 		*ws = abs
 	}
 
-	if err := os.MkdirAll(*ws, 0o755); err != nil {
+	if err := os.MkdirAll(*ws, 0o750); err != nil {
 		printStderr("mkdir %s: %v", *ws, err)
 		return 4
 	}
@@ -82,13 +82,13 @@ func runInit(args []string) int {
 			printStderr("refusing to overwrite existing %s (use --force to override)", dst)
 			return 4
 		}
-		if err := os.WriteFile(dst, f.body, 0o644); err != nil {
+		if err := os.WriteFile(dst, f.body, 0o600); err != nil {
 			printStderr("write %s: %v", dst, err)
 			return 4
 		}
 	}
 	examplesDir := filepath.Join(*ws, "examples")
-	if err := os.MkdirAll(examplesDir, 0o755); err != nil {
+	if err := os.MkdirAll(examplesDir, 0o750); err != nil {
 		printStderr("mkdir examples: %v", err)
 		return 4
 	}
@@ -106,7 +106,7 @@ func runInit(args []string) int {
 		if _, err := os.Stat(dst); err == nil && !*force {
 			continue
 		}
-		if err := os.WriteFile(dst, e.body, 0o644); err != nil {
+		if err := os.WriteFile(dst, e.body, 0o600); err != nil {
 			printStderr("write %s: %v", dst, err)
 			return 4
 		}
@@ -144,7 +144,7 @@ func writeExamplePackage(path string, pkg *opkg.Package, force bool) error {
 		return err
 	}
 	body = append(body, '\n')
-	return os.WriteFile(path, body, 0o644)
+	return os.WriteFile(path, body, 0o600)
 }
 
 const readmeBody = `# Scenario preparation workspace (DRAFT)

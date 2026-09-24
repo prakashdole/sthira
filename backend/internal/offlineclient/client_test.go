@@ -915,6 +915,7 @@ func TestSync_NilContext(t *testing.T) {
 	c := newClient(t, ts.URL, t.TempDir(), clock)
 
 	// nil context should not panic
+	//lint:ignore SA1012 intentional test of nil context resilience
 	_, _ = c.Sync(nil, "KL")
 }
 

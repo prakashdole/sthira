@@ -48,13 +48,6 @@ func validPackage(t *testing.T, jurisdiction string) string {
 	return canonicalJSONOf(t, minimalPackageValue(jurisdiction))
 }
 
-func minimalPackage(jurisdiction string) any {
-	// Constructed in canonical_test_helper.go to avoid forcing this file
-	// to import the opkg package types (which would cause an import
-	// cycle when internal/scenarioprep tests want to call Prepare).
-	return minimalPackageValue(jurisdiction)
-}
-
 // TestRejectsUnknownScenario covers the cross-check that the index must
 // not reference scenario IDs not in the catalogue.
 func TestRejectsUnknownScenario(t *testing.T) {

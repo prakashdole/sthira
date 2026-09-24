@@ -614,7 +614,7 @@ func TestVoiceProcess_RealHTTP_CancellationDuringInference(t *testing.T) {
 	<-middleStarted
 	cancel() // Cancel request while middle worker is parked
 
-	_ = <-errCh
+	<-errCh
 
 	checkZeroConsequentialWrites(t, st)
 }

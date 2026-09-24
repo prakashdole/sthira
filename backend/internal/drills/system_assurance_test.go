@@ -208,11 +208,6 @@ func TestConcurrency_IdempotentReplayUnderLoad(t *testing.T) {
 
 func TestRollingUpgrade_ClientCoexistence(t *testing.T) {
 	// Simulates coexistence of older client (v2 API shape) and newer client (v3 API shape)
-	type LegacyV2Request struct {
-		VillageID string `json:"village_id"`
-		Beds      int    `json:"beds"`
-	}
-
 	type ModernV3Request struct {
 		FacilityID     string `json:"facility_id"`
 		IdempotencyKey string `json:"idempotency_key"`

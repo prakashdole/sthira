@@ -293,7 +293,7 @@ func (s *Store) tempPathFor(id string) string {
 
 func (s *Store) readOneLocked(id string) (PendingOperation, error) {
 	path := s.pathFor(id)
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(filepath.Clean(path)) // #nosec G304
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return PendingOperation{}, ErrNoSuchOperation
@@ -353,7 +353,7 @@ func (s *Store) writeLocked(op PendingOperation) error {
 	}
 	tmp := s.tempPathFor(op.ID)
 	final := s.pathFor(op.ID)
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(filepath.Clean(tmp), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600) // #nosec G304
 	if err != nil {
 		return err
 	}

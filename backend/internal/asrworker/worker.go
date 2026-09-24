@@ -423,7 +423,7 @@ func (w *Worker) isShutdown() bool {
 	// We use the warm flag as a proxy: once we tear down warm goes
 	// false permanently. A more explicit field is unnecessary; the
 	// lifecycle invariant is single-shot.
-	return w.ready == false && w.warm == false && w.completed.Load() > 0 && w.inv.LastScannedAt.IsZero()
+	return !w.ready && !w.warm && w.completed.Load() > 0 && w.inv.LastScannedAt.IsZero()
 }
 
 func (w *Worker) setReady(ready, warm bool) {

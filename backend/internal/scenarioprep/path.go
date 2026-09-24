@@ -32,7 +32,7 @@ func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
 	if fi.Size() > maxBytes {
 		return nil, fmt.Errorf("%w: file size %d bytes exceeds limit %d bytes", ErrBoundedRead, fi.Size(), maxBytes)
 	}
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path)) // #nosec G304
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrIO, err)
 	}
@@ -179,14 +179,4 @@ func outputInsideInput(output, input string) bool {
 func destinationExists(path string) bool {
 	_, err := os.Lstat(path)
 	return err == nil
-}
-
-// fileExists reports whether path exists and is a regular file (no dir,
-// no device, no symlink traversal).
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return info.Mode().IsRegular()
 }

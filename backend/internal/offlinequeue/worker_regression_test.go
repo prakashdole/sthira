@@ -2,7 +2,6 @@ package offlinequeue
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -63,10 +62,6 @@ func (d *scriptedDispatcher) PostJSON(_ context.Context, method, path, token str
 // reservation.create endpoint. Tests use it as the "known-good" baseline.
 func successfulReservationCreateBody() string {
 	return `{"request_id":"r1","schema_version":"3.0","generated_at":"2026-09-21T00:00:00Z","data_version":"PKG:1","source_status":"CURRENT","data":{"reservation_id":"RES-1","stay_id":"STAY-1"}}`
-}
-
-func successfulStayEventBody(eventType string) string {
-	return `{"request_id":"r1","schema_version":"3.0","generated_at":"2026-09-21T00:00:00Z","data_version":"PKG:1","source_status":"CURRENT","data":{"stay_id":"STAY-1","type":"` + eventType + `"}}`
 }
 
 // === Regressions ===
@@ -570,18 +565,6 @@ func TestSubmit_ReservationCreateWithoutStayIDNotCommitted(t *testing.T) {
 	if outcome != outcomePendingReconciliation {
 		t.Fatalf("outcome: got %v, want outcomePendingReconciliation", outcome)
 	}
-}
-
-// jsonMustMarshal is a tiny helper used by tests that need to embed known-good
-// or known-bad response bodies. It panics on error to keep the table-driven
-// bodies compact.
-func jsonMustMarshal(t *testing.T, v any) []byte {
-	t.Helper()
-	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	return b
 }
 
 func TestValidateSuccessEnvelope_StatusRules(t *testing.T) {

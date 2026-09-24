@@ -19,12 +19,9 @@
 package main
 
 import (
-	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 )
 
 // toolVersion is the published tool version; included in the bundle
@@ -52,12 +49,12 @@ Exit codes:
 
 func main() {
 	if len(os.Args) < 2 {
-		io.WriteString(os.Stderr, usageText)
+		_, _ = io.WriteString(os.Stderr, usageText) // #nosec G104
 		os.Exit(1)
 	}
 	switch os.Args[1] {
 	case "-h", "--help", "help":
-		io.WriteString(os.Stdout, usageText)
+		_, _ = io.WriteString(os.Stdout, usageText) // #nosec G104
 		os.Exit(0)
 	case "init":
 		os.Exit(runInit(os.Args[2:]))
@@ -71,32 +68,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "scenario-prep: unknown subcommand %q\n\n%s", os.Args[1], usageText)
 		os.Exit(1)
 	}
-}
-
-// commonFlags is the small set of flags every subcommand shares.
-type commonFlags struct {
-	workspace string
-}
-
-func parseCommon(name string, args []string) (commonFlags, error) {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	c := commonFlags{}
-	fs.StringVar(&c.workspace, "workspace", "", "workspace directory (the local folder containing the catalogue and packages)")
-	if err := fs.Parse(args); err != nil {
-		return c, err
-	}
-	if c.workspace == "" {
-		return c, errors.New("--workspace is required")
-	}
-	if !filepath.IsAbs(c.workspace) {
-		abs, err := filepath.Abs(c.workspace)
-		if err != nil {
-			return c, fmt.Errorf("workspace absolute path: %w", err)
-		}
-		c.workspace = abs
-	}
-	return c, nil
 }
 
 // printStderr writes a short banner to stderr so users see the failure

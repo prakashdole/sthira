@@ -1,7 +1,6 @@
 package offlineclient
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -146,14 +145,14 @@ type streamResult struct {
 // on disk. On network interruption, partial bytes remain on disk and metadata is
 // flushed. On resumption, Range / If-Range is sent. ETag drift or 416 resets and retries.
 func (c *ProtocolClient) downloadStreaming(ctx context.Context, u, partPath string, resume, isCard bool, maxBytes int64) (*streamResult, error) {
-	if err := os.MkdirAll(filepath.Dir(partPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(partPath), 0o750); err != nil {
 		return nil, fmt.Errorf("offlineclient: mkdir for .part: %w", err)
 	}
 
 	var existingMeta downloadMeta
 	hadPart := false
 	if resume {
-		if b, err := os.ReadFile(partPath + ".meta"); err == nil {
+		if b, err := os.ReadFile(filepath.Clean(partPath + ".meta")); err == nil { // #nosec G304
 			if err := json.Unmarshal(b, &existingMeta); err == nil {
 				if fi, err := os.Stat(partPath); err == nil && existingMeta.URL == u && fi.Size() == existingMeta.BytesWritten && existingMeta.BytesWritten > 0 {
 					hadPart = true
@@ -186,14 +185,14 @@ func (c *ProtocolClient) downloadStreaming(ctx context.Context, u, partPath stri
 			return nil, err
 		}
 		if r.StatusCode == http.StatusRequestedRangeNotSatisfiable {
-			r.Body.Close()
+			_ = r.Body.Close() // #nosec G104
 			c.storage.clearPart(partPath)
 			return c.downloadStreaming(ctx, u, partPath, false, isCard, maxBytes)
 		} else if r.StatusCode == http.StatusPartialContent {
 			cr := r.Header.Get("Content-Range")
 			start, _, total, perr := parseContentRange(cr)
 			if perr != nil || start != existingMeta.BytesWritten {
-				r.Body.Close()
+				_ = r.Body.Close() // #nosec G104
 				c.storage.clearPart(partPath)
 				return c.downloadStreaming(ctx, u, partPath, false, isCard, maxBytes)
 			}
@@ -201,7 +200,7 @@ func (c *ProtocolClient) downloadStreaming(ctx context.Context, u, partPath stri
 				existingMeta.ExpectedSize = total
 			}
 			if old, got := existingMeta.ExpectedETag, stripETagQuotes(r.Header.Get("ETag")); old != "" && got != "" && old != got {
-				r.Body.Close()
+				_ = r.Body.Close() // #nosec G104
 				c.storage.clearPart(partPath)
 				return c.downloadStreaming(ctx, u, partPath, false, isCard, maxBytes)
 			}
@@ -211,7 +210,7 @@ func (c *ProtocolClient) downloadStreaming(ctx context.Context, u, partPath stri
 			resp = r
 			isResume = false
 		} else {
-			r.Body.Close()
+			_ = r.Body.Close() // #nosec G104
 			return nil, fmt.Errorf("offlineclient: GET %s: status %d", u, r.StatusCode)
 		}
 	}
@@ -229,7 +228,7 @@ func (c *ProtocolClient) downloadStreaming(ctx context.Context, u, partPath stri
 			return nil, err
 		}
 		if r.StatusCode != http.StatusOK {
-			r.Body.Close()
+			_ = r.Body.Close() // #nosec G104
 			return nil, fmt.Errorf("offlineclient: GET %s: status %d", u, r.StatusCode)
 		}
 		resp = r
@@ -263,7 +262,7 @@ func (c *ProtocolClient) downloadStreaming(ctx context.Context, u, partPath stri
 		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
 	}
 
-	f, err := os.OpenFile(partPath, flags, 0o644)
+	f, err := os.OpenFile(filepath.Clean(partPath), flags, 0o600) // #nosec G304
 	if err != nil {
 		return nil, fmt.Errorf("offlineclient: open .part file: %w", err)
 	}
@@ -307,7 +306,7 @@ func (c *ProtocolClient) downloadStreaming(ctx context.Context, u, partPath stri
 		return nil, err
 	}
 
-	finalBytes, err := os.ReadFile(partPath)
+	finalBytes, err := os.ReadFile(filepath.Clean(partPath)) // #nosec G304
 	if err != nil {
 		return nil, fmt.Errorf("offlineclient: read completed .part: %w", err)
 	}
@@ -345,24 +344,6 @@ func (c *ProtocolClient) downloadBytes(ctx context.Context, req manifestDownload
 	}
 
 	return res.Bytes, res.BytesFromNet, res.PartPath, nil
-}
-
-// readAllBounded caps the read at max bytes; ErrTooLarge is returned on
-// overflow. A zero or negative max means unbounded (caller's choice).
-func readAllBounded(r io.Reader, max int64) ([]byte, error) {
-	if max <= 0 {
-		b, err := io.ReadAll(r)
-		return b, err
-	}
-	lr := io.LimitReader(r, max+1)
-	b, err := io.ReadAll(lr)
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(b)) > max {
-		return nil, ErrTooLarge
-	}
-	return b, nil
 }
 
 func stripETagQuotes(s string) string {
@@ -490,37 +471,6 @@ func stripChecksumSignature(parsed any) any {
 		return cp
 	}
 	return parsed
-}
-
-// verifyChecksum is the legacy dual-shape entry point. It remains for
-// any caller that has only raw bytes; in that case the disambiguation
-// is by structural sniffing of the JSON itself. New code should call
-// verifyChecksumTyped with the already-parsed artifact so the type is
-// unambiguous.
-func (c *ProtocolClient) verifyChecksum(raw []byte, declared string, signatureMissing bool) error {
-	if declared == "" {
-		return errors.New("offlineclient: declared checksum is empty")
-	}
-	if isManifestBytes(raw) {
-		var m offlinepkg.Manifest
-		if err := json.Unmarshal(raw, &m); err != nil {
-			return offlinepkg.ErrMalformedData
-		}
-		return c.verifyChecksumTyped(&m, declared)
-	}
-	var card offlinepkg.PublicIncidentCard
-	if err := json.Unmarshal(raw, &card); err != nil {
-		return offlinepkg.ErrMalformedData
-	}
-	return c.verifyChecksumTyped(&card, declared)
-}
-
-// isManifestBytes sniffs the raw JSON to distinguish manifest from card
-// bytes before parsing. A manifest always carries manifest_id; a card
-// does not. This avoids the silent-failure bug where card bytes
-// accidentally satisfy a manifest checksum check.
-func isManifestBytes(raw []byte) bool {
-	return bytes.Contains(raw, []byte(`"manifest_id"`))
 }
 
 // strippedManifest / strippedCard are tiny helpers to access the

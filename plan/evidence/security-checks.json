@@ -1,6 +1,271 @@
 {
-  "schema": "sthira.security-checks/1",
-  "timestamp": "2026-09-21T11:47:47Z",
-  "overall": "FAIL",
-  "records": []
+  "schema": "sthira.security-checks/2",
+  "timestamp": "2026-09-24T09:51:46Z",
+  "overall": "PASS",
+  "records": [
+    {
+      "module": "backend",
+      "tool": "go vet",
+      "status": "PASS",
+      "version": "go1.27.1",
+      "detail": "",
+      "timestamp": "2026-09-24T09:45:59Z"
+    },
+    {
+      "module": "backend",
+      "tool": "gofmt",
+      "status": "PASS",
+      "version": "go1.27.1",
+      "detail": "",
+      "timestamp": "2026-09-24T09:45:59Z"
+    },
+    {
+      "module": "backend",
+      "tool": "govulncheck",
+      "status": "PASS",
+      "version": "Go: go1.27.1 (/Users/apple/go/bin/govulncheck)",
+      "detail": "path=/Users/apple/go/bin/govulncheck",
+      "timestamp": "2026-09-24T09:46:01Z"
+    },
+    {
+      "module": "backend",
+      "tool": "gosec",
+      "status": "PASS",
+      "version": "Version: dev (/Users/apple/go/bin/gosec)",
+      "detail": "path=/Users/apple/go/bin/gosec",
+      "timestamp": "2026-09-24T09:46:02Z"
+    },
+    {
+      "module": "backend",
+      "tool": "staticcheck",
+      "status": "PASS",
+      "version": "staticcheck 2026.2.1 (0.8.1) (/Users/apple/go/bin/staticcheck)",
+      "detail": "path=/Users/apple/go/bin/staticcheck",
+      "timestamp": "2026-09-24T09:46:02Z"
+    },
+    {
+      "module": "asrworker",
+      "tool": "go vet",
+      "status": "PASS",
+      "version": "go1.27.1",
+      "detail": "",
+      "timestamp": "2026-09-24T09:46:02Z"
+    },
+    {
+      "module": "asrworker",
+      "tool": "gofmt",
+      "status": "PASS",
+      "version": "go1.27.1",
+      "detail": "",
+      "timestamp": "2026-09-24T09:46:02Z"
+    },
+    {
+      "module": "asrworker",
+      "tool": "govulncheck",
+      "status": "PASS",
+      "version": "Go: go1.27.1 (/Users/apple/go/bin/govulncheck)",
+      "detail": "path=/Users/apple/go/bin/govulncheck",
+      "timestamp": "2026-09-24T09:46:04Z"
+    },
+    {
+      "module": "asrworker",
+      "tool": "gosec",
+      "status": "PASS",
+      "version": "Version: dev (/Users/apple/go/bin/gosec)",
+      "detail": "path=/Users/apple/go/bin/gosec",
+      "timestamp": "2026-09-24T09:46:04Z"
+    },
+    {
+      "module": "asrworker",
+      "tool": "staticcheck",
+      "status": "PASS",
+      "version": "staticcheck 2026.2.1 (0.8.1) (/Users/apple/go/bin/staticcheck)",
+      "detail": "path=/Users/apple/go/bin/staticcheck",
+      "timestamp": "2026-09-24T09:46:04Z"
+    },
+    {
+      "module": "ttsworker",
+      "tool": "go vet",
+      "status": "PASS",
+      "version": "go1.27.1",
+      "detail": "",
+      "timestamp": "2026-09-24T09:46:04Z"
+    },
+    {
+      "module": "ttsworker",
+      "tool": "gofmt",
+      "status": "PASS",
+      "version": "go1.27.1",
+      "detail": "",
+      "timestamp": "2026-09-24T09:46:04Z"
+    },
+    {
+      "module": "ttsworker",
+      "tool": "govulncheck",
+      "status": "PASS",
+      "version": "Go: go1.27.1 (/Users/apple/go/bin/govulncheck)",
+      "detail": "path=/Users/apple/go/bin/govulncheck",
+      "timestamp": "2026-09-24T09:46:06Z"
+    },
+    {
+      "module": "ttsworker",
+      "tool": "gosec",
+      "status": "PASS",
+      "version": "Version: dev (/Users/apple/go/bin/gosec)",
+      "detail": "path=/Users/apple/go/bin/gosec",
+      "timestamp": "2026-09-24T09:46:06Z"
+    },
+    {
+      "module": "ttsworker",
+      "tool": "staticcheck",
+      "status": "PASS",
+      "version": "staticcheck 2026.2.1 (0.8.1) (/Users/apple/go/bin/staticcheck)",
+      "detail": "path=/Users/apple/go/bin/staticcheck",
+      "timestamp": "2026-09-24T09:46:06Z"
+    },
+    {
+      "module": "middleworker",
+      "tool": "go vet",
+      "status": "PASS",
+      "version": "go1.27.1",
+      "detail": "",
+      "timestamp": "2026-09-24T09:46:07Z"
+    },
+    {
+      "module": "middleworker",
+      "tool": "gofmt",
+      "status": "PASS",
+      "version": "go1.27.1",
+      "detail": "",
+      "timestamp": "2026-09-24T09:46:07Z"
+    },
+    {
+      "module": "middleworker",
+      "tool": "govulncheck",
+      "status": "PASS",
+      "version": "Go: go1.27.1 (/Users/apple/go/bin/govulncheck)",
+      "detail": "path=/Users/apple/go/bin/govulncheck",
+      "timestamp": "2026-09-24T09:46:08Z"
+    },
+    {
+      "module": "middleworker",
+      "tool": "gosec",
+      "status": "PASS",
+      "version": "Version: dev (/Users/apple/go/bin/gosec)",
+      "detail": "path=/Users/apple/go/bin/gosec",
+      "timestamp": "2026-09-24T09:46:08Z"
+    },
+    {
+      "module": "middleworker",
+      "tool": "staticcheck",
+      "status": "PASS",
+      "version": "staticcheck 2026.2.1 (0.8.1) (/Users/apple/go/bin/staticcheck)",
+      "detail": "path=/Users/apple/go/bin/staticcheck",
+      "timestamp": "2026-09-24T09:46:08Z"
+    },
+    {
+      "module": "eval",
+      "tool": "go vet",
+      "status": "PASS",
+      "version": "go1.27.1",
+      "detail": "",
+      "timestamp": "2026-09-24T09:46:09Z"
+    },
+    {
+      "module": "eval",
+      "tool": "gofmt",
+      "status": "PASS",
+      "version": "go1.27.1",
+      "detail": "",
+      "timestamp": "2026-09-24T09:46:09Z"
+    },
+    {
+      "module": "eval",
+      "tool": "govulncheck",
+      "status": "PASS",
+      "version": "Go: go1.27.1 (/Users/apple/go/bin/govulncheck)",
+      "detail": "path=/Users/apple/go/bin/govulncheck",
+      "timestamp": "2026-09-24T09:46:10Z"
+    },
+    {
+      "module": "eval",
+      "tool": "gosec",
+      "status": "PASS",
+      "version": "Version: dev (/Users/apple/go/bin/gosec)",
+      "detail": "path=/Users/apple/go/bin/gosec",
+      "timestamp": "2026-09-24T09:46:10Z"
+    },
+    {
+      "module": "eval",
+      "tool": "staticcheck",
+      "status": "PASS",
+      "version": "staticcheck 2026.2.1 (0.8.1) (/Users/apple/go/bin/staticcheck)",
+      "detail": "path=/Users/apple/go/bin/staticcheck",
+      "timestamp": "2026-09-24T09:46:11Z"
+    },
+    {
+      "module": "loadmodel",
+      "tool": "go vet",
+      "status": "PASS",
+      "version": "go1.27.1",
+      "detail": "",
+      "timestamp": "2026-09-24T09:46:11Z"
+    },
+    {
+      "module": "loadmodel",
+      "tool": "gofmt",
+      "status": "PASS",
+      "version": "go1.27.1",
+      "detail": "",
+      "timestamp": "2026-09-24T09:46:11Z"
+    },
+    {
+      "module": "loadmodel",
+      "tool": "govulncheck",
+      "status": "PASS",
+      "version": "Go: go1.27.1 (/Users/apple/go/bin/govulncheck)",
+      "detail": "path=/Users/apple/go/bin/govulncheck",
+      "timestamp": "2026-09-24T09:46:12Z"
+    },
+    {
+      "module": "loadmodel",
+      "tool": "gosec",
+      "status": "PASS",
+      "version": "Version: dev (/Users/apple/go/bin/gosec)",
+      "detail": "path=/Users/apple/go/bin/gosec",
+      "timestamp": "2026-09-24T09:46:12Z"
+    },
+    {
+      "module": "loadmodel",
+      "tool": "staticcheck",
+      "status": "PASS",
+      "version": "staticcheck 2026.2.1 (0.8.1) (/Users/apple/go/bin/staticcheck)",
+      "detail": "path=/Users/apple/go/bin/staticcheck",
+      "timestamp": "2026-09-24T09:46:13Z"
+    },
+    {
+      "module": "repo",
+      "tool": "gitleaks",
+      "status": "PASS",
+      "version": "gitleaks version version is set by build process (/Users/apple/go/bin/gitleaks)",
+      "detail": "path=/Users/apple/go/bin/gitleaks",
+      "timestamp": "2026-09-24T09:51:42Z"
+    },
+    {
+      "module": "repo",
+      "tool": "trivy",
+      "status": "PASS",
+      "version": "2026-09-24T15:21:42+05:30\tINFO\tLoaded\tfile_path=\"trivy.yaml\" (/opt/homebrew/bin/trivy)",
+      "detail": "rc0, no findings table entries; path=/opt/homebrew/bin/trivy",
+      "timestamp": "2026-09-24T09:51:46Z"
+    },
+    {
+      "module": "repo",
+      "tool": "spdx-validate",
+      "status": "PASS",
+      "version": "python3",
+      "detail": "validated 6 SBOM documents",
+      "timestamp": "2026-09-24T09:51:46Z"
+    }
+  ]
 }

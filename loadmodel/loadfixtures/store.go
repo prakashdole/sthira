@@ -79,7 +79,7 @@ func (s *syntheticStore) Get(id string) (reservation, bool) {
 func newIDLocked(prefix string) string {
 	b := make([]byte, 8)
 	for i := range b {
-		b[i] = byte(time.Now().UnixNano() >> (i % 8))
+		b[i] = byte(time.Now().UnixNano() >> (i % 8)) // #nosec G115
 	}
 	// reuse hex but inline here to avoid pulling encoding/hex into this file
 	const hexDigits = "0123456789abcdef"

@@ -73,14 +73,6 @@ func pipelineError(state contracts.PipelineState, status int, f StageFailure) *P
 	return &PipelineError{State: state, HTTPStatus: status, Failures: []StageFailure{f}}
 }
 
-// appendFailure adds another failure after the first one. Useful when
-// the pipeline has to surface both the originating stage and a
-// downstream consequence (e.g., a stale snapshot makes TTS moot).
-func (e *PipelineError) appendFailure(f StageFailure) *PipelineError {
-	e.Failures = append(e.Failures, f)
-	return e
-}
-
 // Limits defines the documented ceilings for the voice pipeline.
 // Per-stage deadlines add up to <= TotalDeadline; budgets below
 // the total leave headroom for context revalidation and audio

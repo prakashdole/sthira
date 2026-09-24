@@ -1,9 +1,6 @@
 package offlineresources
 
-import (
-	"fmt"
-	"sort"
-)
+import "sort"
 
 // DepGraph indexes a flat resource list by URI and ID, then exposes the
 // checks the contract requires:
@@ -283,12 +280,4 @@ func hasURIPrefix(a, b string) bool {
 		return false
 	}
 	return a[:len(b)] == b
-}
-
-// depSummary is a tiny helper used in tests and audit messages.
-func depSummary(rs []MissingDep) string {
-	if len(rs) == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%d missing", len(rs))
 }

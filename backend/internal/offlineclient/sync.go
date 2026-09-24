@@ -2,12 +2,10 @@ package offlineclient
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -454,13 +452,6 @@ func (c *ProtocolClient) cardNeedsFetchGen(activeManBytes, activeCardBytes []byt
 	return false, nil
 }
 
-func readFileIfExists(path string) ([]byte, error) {
-	if !filesExists(path) {
-		return nil, nil
-	}
-	return os.ReadFile(path)
-}
-
 // helper indirection for HTTP/Range downloads (real impl lives in transport.go).
 // The wrapper above is kept; the actual logic is in transport.go.
 
@@ -473,26 +464,6 @@ type manifestDownload struct {
 	Path             string
 	IsCard           bool
 	ExpectedCardDesc *offlinepkg.CriticalCardDescriptor
-}
-
-// validateAndCanonicalizeManifest / validateAndCanonicalizeCard are
-// inline helpers retained for callers in the Sync flow that want a
-// one-step parse. The deeper checks (checksum, signature, structural)
-// happen in transport.go.
-func parseManifestBytes(bytes []byte) (*offlinepkg.Manifest, error) {
-	var m offlinepkg.Manifest
-	if err := json.Unmarshal(bytes, &m); err != nil {
-		return nil, fmt.Errorf("offlineclient: parse manifest: %w", err)
-	}
-	return &m, nil
-}
-
-func parseCardBytes(bytes []byte) (*offlinepkg.PublicIncidentCard, error) {
-	var card offlinepkg.PublicIncidentCard
-	if err := json.Unmarshal(bytes, &card); err != nil {
-		return nil, fmt.Errorf("offlineclient: parse card: %w", err)
-	}
-	return &card, nil
 }
 
 // Suppress unused-import warnings while stubs are in place.

@@ -31,7 +31,6 @@ package offlineresources
 
 import (
 	"errors"
-	"fmt"
 	"regexp"
 
 	"sthira/backend/internal/offlinepkg"
@@ -243,6 +242,3 @@ func classify(t ResourceType, contentType string) (formatClass, bool) {
 	}
 	return 0, false
 }
-
-// labelFor is a tiny formatting helper used by tests and reason messages.
-func labelFor(id string) string { return fmt.Sprintf("resource %q", id) }

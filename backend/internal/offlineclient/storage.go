@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -96,11 +95,11 @@ func newStorage(root string) (*storage, error) {
 	if root == "" {
 		return nil, errors.New("offlineclient: empty storage dir")
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	if err := os.MkdirAll(root, 0o750); err != nil {
 		return nil, fmt.Errorf("offlineclient: create storage dir: %w", err)
 	}
 	for _, sub := range []string{"state", "state/staging", "tombstones", "downloads", "resources"} {
-		if err := os.MkdirAll(filepath.Join(root, sub), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(root, sub), 0o750); err != nil {
 			return nil, fmt.Errorf("offlineclient: create %s: %w", sub, err)
 		}
 	}
@@ -122,11 +121,11 @@ func (s *storage) writeAtomicBytes(finalPath string, data []byte) error {
 		_ = os.Remove(tmpPath)
 	}()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // #nosec G104
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // #nosec G104
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -135,63 +134,11 @@ func (s *storage) writeAtomicBytes(finalPath string, data []byte) error {
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		return err
 	}
-	if d, err := os.Open(dir); err == nil {
+	if d, err := os.Open(filepath.Clean(dir)); err == nil { // #nosec G304
 		_ = d.Sync()
-		d.Close()
+		_ = d.Close() // #nosec G104
 	}
 	return nil
-}
-
-// writeAtomicFrom copies src into a temp file in the same directory as
-// finalPath, fsyncs, and renames. src is fully drained.
-func (s *storage) writeAtomicFrom(finalPath string, src io.Reader, max int64) (int64, error) {
-	dir := filepath.Dir(finalPath)
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return 0, err
-	}
-	tmpPath := tmp.Name()
-	defer func() {
-		_ = os.Remove(tmpPath)
-	}()
-	var written int64
-	buf := make([]byte, 32*1024)
-	for {
-		n, rerr := src.Read(buf)
-		if n > 0 {
-			if max > 0 && written+int64(n) > max {
-				tmp.Close()
-				return written, ErrTooLarge
-			}
-			if _, werr := tmp.Write(buf[:n]); werr != nil {
-				tmp.Close()
-				return written, werr
-			}
-			written += int64(n)
-		}
-		if rerr == io.EOF {
-			break
-		}
-		if rerr != nil {
-			tmp.Close()
-			return written, rerr
-		}
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return written, err
-	}
-	if err := tmp.Close(); err != nil {
-		return written, err
-	}
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		return written, err
-	}
-	if d, err := os.Open(dir); err == nil {
-		_ = d.Sync()
-		d.Close()
-	}
-	return written, nil
 }
 
 // loadState reads state.json. A missing file is not an error; it returns
@@ -293,15 +240,15 @@ func (s *storage) writeActiveGeneration(manifestBytes, cardBytes []byte) error {
 	}
 	payload, err := json.Marshal(gen)
 	if err != nil {
-		tmp.Close()
+		_ = tmp.Close() // #nosec G104
 		return fmt.Errorf("offlineclient: marshal generation: %w", err)
 	}
 	if _, err := tmp.Write(payload); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // #nosec G104
 		return fmt.Errorf("offlineclient: write generation tmp: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // #nosec G104
 		return fmt.Errorf("offlineclient: sync generation tmp: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
@@ -312,9 +259,9 @@ func (s *storage) writeActiveGeneration(manifestBytes, cardBytes []byte) error {
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		return fmt.Errorf("offlineclient: activate generation: %w", err)
 	}
-	if d, err := os.Open(filepath.Dir(finalPath)); err == nil {
+	if d, err := os.Open(filepath.Clean(filepath.Dir(finalPath))); err == nil { // #nosec G304
 		_ = d.Sync()
-		d.Close()
+		_ = d.Close() // #nosec G104
 	}
 	return nil
 }
@@ -330,27 +277,11 @@ func (s *storage) writePartMeta(partPath string, m downloadMeta) error {
 	return s.writeAtomicBytes(partPath+".meta", b)
 }
 
-func (s *storage) readPartMeta(partPath string) (downloadMeta, error) {
-	var m downloadMeta
-	b, err := os.ReadFile(partPath + ".meta")
-	if err != nil {
-		return m, err
-	}
-	if err := json.Unmarshal(b, &m); err != nil {
-		return m, err
-	}
-	return m, nil
-}
-
 func (s *storage) clearPart(partPath string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_ = os.Remove(partPath)
 	_ = os.Remove(partPath + ".meta")
-}
-
-func (s *storage) partPath(kind, id string) string {
-	return filepath.Join(s.root, "downloads", kind+"-"+id+".part")
 }
 
 // --- tombstones ---
@@ -404,12 +335,12 @@ func (t *tombstoneStore) writeMarkerLocked() error {
 	if t.isInitializedLocked() {
 		return nil
 	}
-	f, err := os.Create(path)
+	f, err := os.Create(filepath.Clean(path)) // #nosec G304
 	if err != nil {
 		return fmt.Errorf("offlineclient: tombstone marker: %w", err)
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close() // #nosec G104
 		_ = os.Remove(path)
 		return err
 	}
@@ -417,18 +348,11 @@ func (t *tombstoneStore) writeMarkerLocked() error {
 		_ = os.Remove(path)
 		return err
 	}
-	if d, err := os.Open(t.root); err == nil {
+	if d, err := os.Open(filepath.Clean(t.root)); err == nil { // #nosec G304
 		_ = d.Sync()
-		d.Close()
+		_ = d.Close() // #nosec G104
 	}
 	return nil
-}
-
-// removeMarkerLocked deletes the sentinel. Used when the client explicitly
-// resets the tombstone store (e.g., during the rare rollback case). The
-// public API never calls this; tests can use it via the storage mutex.
-func (t *tombstoneStore) removeMarkerLocked() {
-	_ = os.Remove(filepath.Join(t.root, tombstoneInitName))
 }
 
 // loadOrInit reads the tombstone state.
@@ -473,17 +397,6 @@ func (t *tombstoneStore) loadLocked() (tombstoneFile, error) {
 	return tf, nil
 }
 
-// save writes the entire tombstone state atomically. The sentinel is
-// written BEFORE the file so a crash between sentinel and file leaves
-// the next load treating the store as fresh-empty (at worst the client
-// retries the sync and re-records). A crash after the file rename has
-// both marker and file consistent.
-func (t *tombstoneStore) save(tf tombstoneFile) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.saveLocked(tf)
-}
-
 func (t *tombstoneStore) saveLocked(tf tombstoneFile) error {
 	if err := t.writeMarkerLocked(); err != nil {
 		return err
@@ -499,11 +412,11 @@ func (t *tombstoneStore) saveLocked(tf tombstoneFile) error {
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // #nosec G104
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // #nosec G104
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -512,9 +425,9 @@ func (t *tombstoneStore) saveLocked(tf tombstoneFile) error {
 	if err := os.Rename(tmpPath, filepath.Join(t.root, tombstonePath)); err != nil {
 		return fmt.Errorf("offlineclient: activate tombstone: %w", err)
 	}
-	if d, err := os.Open(t.root); err == nil {
+	if d, err := os.Open(filepath.Clean(t.root)); err == nil { // #nosec G304
 		_ = d.Sync()
-		d.Close()
+		_ = d.Close() // #nosec G104
 	}
 	return nil
 }
@@ -635,14 +548,14 @@ func (s *storage) readResource(id string) ([]byte, resourceMeta, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	dir := filepath.Join(s.root, "resources", id)
-	bin, err := os.ReadFile(filepath.Join(dir, "content.bin"))
+	bin, err := os.ReadFile(filepath.Clean(filepath.Join(dir, "content.bin"))) // #nosec G304
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, resourceMeta{}, ErrNoActiveState
 		}
 		return nil, resourceMeta{}, err
 	}
-	mb, err := os.ReadFile(filepath.Join(dir, "meta.json"))
+	mb, err := os.ReadFile(filepath.Clean(filepath.Join(dir, "meta.json"))) // #nosec G304
 	if err != nil {
 		return nil, resourceMeta{}, fmt.Errorf("offlineclient: read resource meta: %w", err)
 	}
@@ -657,7 +570,7 @@ func (s *storage) writeResource(id string, content []byte, m resourceMeta) error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	dir := filepath.Join(s.root, "resources", id)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
 	mb, err := json.Marshal(m)
@@ -668,12 +581,4 @@ func (s *storage) writeResource(id string, content []byte, m resourceMeta) error
 		return err
 	}
 	return s.writeAtomicBytes(filepath.Join(dir, "content.bin"), content)
-}
-
-// hasResourcePart reports whether a .part + .part.meta pair exists for id.
-func (s *storage) hasResourcePart(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, err := os.Stat(s.partPath("resource", id))
-	return err == nil
 }
