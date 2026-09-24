@@ -24,6 +24,7 @@ import {
   DEFAULT_JOURNEY_OPTIONS,
 } from './journey';
 import { renderOperatorView } from './operator';
+import { triggerEmergencyDial, recordEmergencyAudit } from './emergency';
 
 type RuntimeState = 'checking' | 'demo' | 'blocked' | 'offline';
 type ChatMessage = { role: 'USER' | 'ASSISTANT'; text: string; audioB64?: string };
@@ -1364,7 +1365,23 @@ function bindInteractions() {
       if (!assistanceOpen) {
         e.preventDefault();
         assistanceOpen = true;
+        recordEmergencyAudit({
+          number: '112',
+          action: 'OPEN_SHEET',
+          isTrusted: e.isTrusted === true,
+          foreground: !document.hidden,
+          status: 'ALLOWED',
+        });
         render();
+      } else {
+        const result = triggerEmergencyDial({
+          number: '112',
+          event: e,
+          documentRef: document,
+        });
+        if (!result.success) {
+          e.preventDefault();
+        }
       }
     })
   );
