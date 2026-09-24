@@ -276,3 +276,45 @@ func stringIndex(s, sub string) int {
 	}
 	return -1
 }
+
+func TestRateLimiter_Stats(t *testing.T) {
+	rl := NewRateLimiter(10, 2, nil)
+	defer rl.Stop()
+
+	// Initial stats
+	st := rl.Stats()
+	if st.RPS != 10 || st.Burst != 2 {
+		t.Fatalf("unexpected initial config: rps=%f burst=%f", st.RPS, st.Burst)
+	}
+	if st.Allowed != 0 || st.Blocked != 0 || st.ActiveIPs != 0 {
+		t.Fatalf("unexpected initial counters: %+v", st)
+	}
+
+	// 2 requests allowed for ip1, 3rd blocked
+	if !rl.Allow("1.1.1.1") {
+		t.Fatalf("first request should be allowed")
+	}
+	if !rl.Allow("1.1.1.1") {
+		t.Fatalf("second request should be allowed")
+	}
+	if rl.Allow("1.1.1.1") {
+		t.Fatalf("3rd request should be blocked")
+	}
+
+	// 1 request allowed for ip2
+	if !rl.Allow("2.2.2.2") {
+		t.Fatalf("ip2 request should be allowed")
+	}
+
+	st = rl.Stats()
+	if st.Allowed != 3 {
+		t.Fatalf("expected 3 allowed, got %d", st.Allowed)
+	}
+	if st.Blocked != 1 {
+		t.Fatalf("expected 1 blocked, got %d", st.Blocked)
+	}
+	if st.ActiveIPs != 2 {
+		t.Fatalf("expected 2 active IPs, got %d", st.ActiveIPs)
+	}
+}
+

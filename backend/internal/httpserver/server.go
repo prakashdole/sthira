@@ -291,6 +291,13 @@ func New(cfg Config, opts ...Option) *Server {
 		o(s)
 	}
 
+	if s.rateLimit == nil && s.cfg.EnableRateLimit && s.cfg.RateLimitRPS > 0 && s.cfg.RateLimitBurst > 0 {
+		s.rateLimit = NewRateLimiter(s.cfg.RateLimitRPS, s.cfg.RateLimitBurst, nil)
+	}
+	if len(s.rateLimitBypass) == 0 && len(s.cfg.RateLimitBypass) > 0 {
+		s.rateLimitBypass = append(s.rateLimitBypass, s.cfg.RateLimitBypass...)
+	}
+
 	mux := http.NewServeMux()
 	// rateGuard wraps every handler; when rate limiting is disabled
 	// (s.rateLimit == nil) it is a transparent pass-through that adds
@@ -530,3 +537,14 @@ func (s *Server) jsonDecodeError(w http.ResponseWriter, r *http.Request, err err
 	}
 	s.writeError(w, r, http.StatusBadRequest, contracts.ErrMalformedJSON, "invalid request body", "", false)
 }
+
+// RateLimiterStats returns an instantaneous snapshot of rate limiter counters,
+// or nil if rate limiting is not configured.
+func (s *Server) RateLimiterStats() *RateLimiterStats {
+	if s.rateLimit == nil {
+		return nil
+	}
+	st := s.rateLimit.Stats()
+	return &st
+}
+

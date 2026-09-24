@@ -56,9 +56,31 @@ func (s *Server) handleObservability(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	uptime := int64(time.Since(s.startedAt).Seconds())
+	if uptime < 0 {
+		uptime = 0
+	}
+
 	data := map[string]any{
-		"started_at": s.startedAt.UTC().Format(time.RFC3339),
-		"now":        time.Now().UTC().Format(time.RFC3339),
+		"started_at":     s.startedAt.UTC().Format(time.RFC3339),
+		"now":            time.Now().UTC().Format(time.RFC3339),
+		"uptime_seconds": uptime,
+	}
+
+	if s.rateLimit != nil {
+		st := s.rateLimit.Stats()
+		data["rate_limiter"] = map[string]any{
+			"enabled":    true,
+			"rps":        st.RPS,
+			"burst":      st.Burst,
+			"active_ips": st.ActiveIPs,
+			"allowed":    st.Allowed,
+			"blocked":    st.Blocked,
+		}
+	} else {
+		data["rate_limiter"] = map[string]any{
+			"enabled": false,
+		}
 	}
 
 	if s.metrics != nil {

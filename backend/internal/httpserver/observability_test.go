@@ -382,3 +382,131 @@ func TestObservability_WorkersHealth_WhenWired(t *testing.T) {
 		t.Fatalf("unexpected languages: %+v", env.Data.Workers[0].Languages)
 	}
 }
+
+func TestObservability_UptimeAndRateLimiter_Disabled(t *testing.T) {
+	cfg := DefaultConfig("127.0.0.1:0")
+	srv := New(cfg, WithPprof("secret"))
+
+	if stats := srv.RateLimiterStats(); stats != nil {
+		t.Fatalf("expected nil RateLimiterStats when disabled, got %+v", stats)
+	}
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+observabilityRoute, nil)
+	req.Header.Set("X-Observability-Token", "secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	var env struct {
+		Data struct {
+			UptimeSeconds int64          `json:"uptime_seconds"`
+			RateLimiter   map[string]any `json:"rate_limiter"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if env.Data.UptimeSeconds < 0 {
+		t.Fatalf("expected non-negative uptime_seconds, got %d", env.Data.UptimeSeconds)
+	}
+	if enabled, _ := env.Data.RateLimiter["enabled"].(bool); enabled {
+		t.Fatalf("expected rate_limiter.enabled=false, got %v", env.Data.RateLimiter)
+	}
+}
+
+func TestObservability_RateLimiter_EnabledAndDiagnostics(t *testing.T) {
+	cfg := DefaultConfig("127.0.0.1:0")
+	srv := New(cfg,
+		WithPprof("secret"),
+		WithRateLimit(10, 2),
+		WithRateLimitBypass(observabilityRoute),
+	)
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// 2 allowed requests to health/live
+	resp1, _ := http.Get(ts.URL + "/health/live")
+	resp1.Body.Close()
+	resp2, _ := http.Get(ts.URL + "/health/live")
+	resp2.Body.Close()
+
+	// 3rd request is blocked with 429
+	resp3, _ := http.Get(ts.URL + "/health/live")
+	resp3.Body.Close()
+	if resp3.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", resp3.StatusCode)
+	}
+
+	// Verify server method
+	serverStats := srv.RateLimiterStats()
+	if serverStats == nil {
+		t.Fatalf("expected non-nil server RateLimiterStats")
+	}
+	if serverStats.Allowed < 2 || serverStats.Blocked < 1 {
+		t.Fatalf("unexpected server stats: %+v", serverStats)
+	}
+
+	// Request observability metrics
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+observabilityRoute, nil)
+	req.Header.Set("X-Observability-Token", "secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	var env struct {
+		Data struct {
+			RateLimiter struct {
+				Enabled   bool    `json:"enabled"`
+				RPS       float64 `json:"rps"`
+				Burst     float64 `json:"burst"`
+				ActiveIPs int     `json:"active_ips"`
+				Allowed   uint64  `json:"allowed"`
+				Blocked   uint64  `json:"blocked"`
+			} `json:"rate_limiter"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	rl := env.Data.RateLimiter
+	if !rl.Enabled {
+		t.Fatalf("expected rate_limiter.enabled=true")
+	}
+	if rl.RPS != 10 || rl.Burst != 2 {
+		t.Fatalf("expected rps=10 burst=2, got rps=%f burst=%f", rl.RPS, rl.Burst)
+	}
+	if rl.ActiveIPs < 1 {
+		t.Fatalf("expected active_ips >= 1, got %d", rl.ActiveIPs)
+	}
+	if rl.Allowed < 2 {
+		t.Fatalf("expected allowed >= 2, got %d", rl.Allowed)
+	}
+	if rl.Blocked < 1 {
+		t.Fatalf("expected blocked >= 1, got %d", rl.Blocked)
+	}
+
+	// Privacy assertion: body must NOT expose IP mapping or addresses
+	if strings.Contains(string(body), "127.0.0.1") {
+		t.Fatalf("PRIVACY VIOLATION: metrics response contains raw client IP: %s", body)
+	}
+}
+

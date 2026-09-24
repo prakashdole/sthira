@@ -20,13 +20,26 @@ import (
 // Stale entries are evicted on a slow ticker so a long-running server
 // under churn doesn't leak memory. Per-IP state is purely memory; restart
 // resets all buckets (acceptable for a soft limiter).
+// RateLimiterStats captures an instantaneous snapshot of limiter activity and configured limits.
+// It exposes only low-cardinality counts and configured numbers; no client IP addresses
+// or request identifiers are stored or returned.
+type RateLimiterStats struct {
+	RPS       float64 `json:"rps"`
+	Burst     float64 `json:"burst"`
+	ActiveIPs int     `json:"active_ips"`
+	Allowed   uint64  `json:"allowed"`
+	Blocked   uint64  `json:"blocked"`
+}
+
 type RateLimiter struct {
-	mu     sync.Mutex
-	rps    float64
-	burst  float64
-	now    func() time.Time
-	cur    map[string]*bucket
-	stopCh chan struct{}
+	mu      sync.Mutex
+	rps     float64
+	burst   float64
+	now     func() time.Time
+	cur     map[string]*bucket
+	stopCh  chan struct{}
+	allowed uint64
+	blocked uint64
 }
 
 // bucket holds the live token count and last-refill time for one IP.
@@ -68,17 +81,23 @@ func (r *RateLimiter) Stop() {
 // it must be rejected with HTTP 429. Empty IP is treated as "trusted"
 // and allowed (caller should validate r.RemoteAddr upstream).
 func (r *RateLimiter) Allow(ip string) bool {
+	if r == nil {
+		return true
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if ip == "" {
+		r.allowed++
 		return true
 	}
 	now := r.now()
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	b, ok := r.cur[ip]
 	if !ok {
 		// First request from this IP: fill the bucket and let one through.
 		b = &bucket{tokens: r.burst - 1, lastFill: now}
 		r.cur[ip] = b
+		r.allowed++
 		return true
 	}
 	// Refill: add tokens proportional to elapsed seconds, capped at burst.
@@ -91,10 +110,29 @@ func (r *RateLimiter) Allow(ip string) bool {
 		b.lastFill = now
 	}
 	if b.tokens < 1 {
+		r.blocked++
 		return false
 	}
 	b.tokens--
+	r.allowed++
 	return true
+}
+
+// Stats returns an instantaneous snapshot of limiter configuration and throughput counters.
+// Safe for concurrent access.
+func (r *RateLimiter) Stats() RateLimiterStats {
+	if r == nil {
+		return RateLimiterStats{}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return RateLimiterStats{
+		RPS:       r.rps,
+		Burst:     r.burst,
+		ActiveIPs: len(r.cur),
+		Allowed:   r.allowed,
+		Blocked:   r.blocked,
+	}
 }
 
 // janitor periodically drops IPs that haven't been seen in a while so the
