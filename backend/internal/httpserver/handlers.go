@@ -19,28 +19,21 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleReady reports dependency/source readiness. Without a prober, or when
-// the prober reports a blocker, it answers 503 with BLOCKED. It never reports
-// READY from configuration presence alone.
+// handleReady reports dependency/source readiness with structured subsystem breakdown.
+// Without a prober, or when dependencies report a blocker, it answers 503 with NOT_READY.
+// It never reports READY from configuration presence alone.
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	if !s.requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	if s.prober == nil {
+	report := s.CheckReadiness(r.Context())
+	if report.Status != "READY" {
+		s.logger.Warn("readiness check failed", "request_id", requestID(r), "summary", report.Summary())
 		s.writeError(w, r, http.StatusServiceUnavailable, contracts.ErrDataUnavailable,
-			"no readiness prober configured; dependencies unverified", "", true)
+			report.Summary(), "", true)
 		return
 	}
-	if err := s.prober.Probe(r.Context()); err != nil {
-		// Redact internals: log the real reason, return a generic blocker.
-		s.logger.Warn("readiness probe failed", "request_id", requestID(r), "reason", err.Error())
-		s.writeError(w, r, http.StatusServiceUnavailable, contracts.ErrDataUnavailable,
-			"dependencies not ready", "", true)
-		return
-	}
-	s.writeData(w, r, http.StatusOK, "none", contracts.FreshnessUnknown, map[string]any{
-		"status": "READY",
-	})
+	s.writeData(w, r, http.StatusOK, "none", contracts.FreshnessUnknown, report)
 }
 
 // voiceCommandRequest is the typed chat/transcript command body. The model
