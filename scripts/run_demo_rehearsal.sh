@@ -20,9 +20,26 @@ FRONTEND_DIR="$ROOT_DIR/frontend/v2"
 
 PORT="${STHIRA_PORT:-8080}"
 ADDR="127.0.0.1:$PORT"
-DB_NAME="${STHIRA_DEMO_DB:-sthira_demo_rehearsal}"
 ADMIN_DSN="${STHIRA_TEST_ADMIN_DSN:-postgres://localhost:5432/postgres?sslmode=disable}"
-DEMO_DSN="postgres://localhost:5432/${DB_NAME}?sslmode=disable"
+
+RUN_ID="$(date -u +%Y%m%dT%H%M%S)_$$_$(python3 -c 'import secrets;print(secrets.token_hex(3))' 2>/dev/null || echo "$$")"
+DEFAULT_DB="sthira_rehearsal_${RUN_ID}"
+DB_NAME="${STHIRA_DEMO_DB:-$DEFAULT_DB}"
+DB_NAME="$(printf %s "$DB_NAME" | tr "[:upper:]" "[:lower:]" | tr -cd "a-z0-9_")"
+DB_CREATED=0
+
+# Derive DEMO_DSN consistently from ADMIN_DSN
+DEMO_DSN="$(python3 -c '
+import sys, urllib.parse
+u = urllib.parse.urlparse(sys.argv[1])
+path = "/" + sys.argv[2]
+print(urllib.parse.urlunparse((u.scheme, u.netloc, path, u.params, u.query, u.fragment)))
+' "$ADMIN_DSN" "$DB_NAME")"
+
+TEMP_DIR="/tmp/sthira_rehearsal_${RUN_ID}"
+mkdir -p "$TEMP_DIR"
+EXERCISE_BIN="$TEMP_DIR/sthira-exercise"
+EXERCISE_LOG="$TEMP_DIR/sthira-exercise.log"
 
 SERVE_UI=0
 for arg in "$@"; do
@@ -34,18 +51,29 @@ for arg in "$@"; do
 done
 
 echo "======================================================================"
-echo "Sthira v2 — Integrated Demo Rehearsal (Task R07)"
+echo "Sthira v2 — Integrated Demo Rehearsal (Task R07 / C05 Safe Runner)"
 echo "Environment: Go $(go env GOVERSION), Host: $(uname -sm)"
 echo "Target Address: http://$ADDR"
+echo "Target Database: $DB_NAME"
 echo "======================================================================"
 
 EXERCISE_PID=""
 UI_PID=""
 
+proc_is_ours() {
+    local pid="$1"
+    local args
+    args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+    case "$args" in
+        *"$EXERCISE_BIN"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 cleanup() {
     echo ""
     echo ">> Cleaning up rehearsal processes..."
-    if [[ -n "$EXERCISE_PID" ]] && kill -0 "$EXERCISE_PID" 2>/dev/null; then
+    if [[ -n "$EXERCISE_PID" ]] && proc_is_ours "$EXERCISE_PID"; then
         kill "$EXERCISE_PID" 2>/dev/null || true
         wait "$EXERCISE_PID" 2>/dev/null || true
     fi
@@ -53,19 +81,31 @@ cleanup() {
         kill "$UI_PID" 2>/dev/null || true
         wait "$UI_PID" 2>/dev/null || true
     fi
-    if command -v psql >/dev/null 2>&1; then
-        psql "$ADMIN_DSN" -c "DROP DATABASE IF EXISTS ${DB_NAME};" >/dev/null 2>&1 || true
+    if [[ "$DB_CREATED" -eq 1 ]]; then
+        echo ">> Dropping owned rehearsal database ${DB_NAME}..."
+        psql "$ADMIN_DSN" -c "DROP DATABASE IF EXISTS \"${DB_NAME}\";" >/dev/null 2>&1 || true
     fi
+    rm -rf "$TEMP_DIR" 2>/dev/null || true
     echo ">> Cleanup complete."
 }
 trap cleanup EXIT INT TERM
 
 # ------------------------------------------------------------------------------
-# 0. Database Setup & Migration
+# 0. Database Setup & Migration (Resource-Safe C05)
 # ------------------------------------------------------------------------------
 echo ">> Step 0: Initializing rehearsal database ($DB_NAME)..."
-psql "$ADMIN_DSN" -c "DROP DATABASE IF EXISTS ${DB_NAME};" >/dev/null 2>&1 || true
-psql "$ADMIN_DSN" -c "CREATE DATABASE ${DB_NAME};" >/dev/null
+DB_EXISTS=$(psql "$ADMIN_DSN" -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}';" 2>/dev/null || true)
+if [[ "$DB_EXISTS" == "1" ]]; then
+    if [[ "${STHIRA_DEMO_REUSE:-0}" != "1" ]]; then
+        echo "ERROR: Database '${DB_NAME}' already exists. Refusing to DROP or overwrite existing database without STHIRA_DEMO_REUSE=1." >&2
+        exit 4
+    fi
+    echo "   Reusing existing database '${DB_NAME}' per STHIRA_DEMO_REUSE=1."
+else
+    echo "   Creating unique task-owned database \"${DB_NAME}\"..."
+    psql "$ADMIN_DSN" -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${DB_NAME}\";" >/dev/null
+    DB_CREATED=1
+fi
 
 MIG_DIR="$BACKEND_DIR/migrations"
 for f in $(ls -1 "$MIG_DIR"/*.sql | sort); do
@@ -78,12 +118,12 @@ echo "   Database migrated to SchemaRevision 10."
 # 1. Start cmd/sthira-exercise
 # ------------------------------------------------------------------------------
 echo ">> Step 1: Building and starting cmd/sthira-exercise..."
-(cd "$BACKEND_DIR" && go build -o "$ROOT_DIR/bin/sthira-exercise" ./cmd/sthira-exercise)
+(cd "$BACKEND_DIR" && go build -o "$EXERCISE_BIN" ./cmd/sthira-exercise)
 
 STHIRA_ADDR="$ADDR" \
 STHIRA_DATABASE_DSN="$DEMO_DSN" \
 STHIRA_EXERCISE_SEED="1" \
-"$ROOT_DIR/bin/sthira-exercise" > /tmp/sthira-exercise-rehearsal.log 2>&1 &
+"$EXERCISE_BIN" > "$EXERCISE_LOG" 2>&1 &
 EXERCISE_PID=$!
 
 echo "   Waiting for backend readiness on http://$ADDR/health/ready..."
@@ -98,7 +138,7 @@ done
 
 if [[ "$READY" -ne 1 ]]; then
     echo "ERROR: Backend failed to become ready within 6s. Logs:"
-    cat /tmp/sthira-exercise-rehearsal.log
+    cat "$EXERCISE_LOG"
     exit 1
 fi
 echo "   Backend READY and verified at SchemaRevision 10 with SYNTHETIC_DEMO seed."

@@ -6,11 +6,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	"sthira/backend/internal/contracts"
 	"sthira/backend/internal/httpserver"
+	"sthira/backend/internal/store"
 )
 
 type readyTestProber struct {
@@ -109,3 +111,94 @@ func TestReadiness_RedactionOfInternalProberError(t *testing.T) {
 		t.Fatalf("expected DATA_UNAVAILABLE error, got %+v", resp.Errors)
 	}
 }
+
+func TestReadiness_SchemaRevisionLiveDB(t *testing.T) {
+	dsn := os.Getenv("STHIRA_TEST_DSN")
+	if dsn == "" {
+		t.Skip("STHIRA_TEST_DSN not set; skipping live DB readiness check")
+	}
+	st, err := store.Open(dsn)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer st.Close()
+
+	srv := httpserver.New(
+		httpserver.DefaultConfig("127.0.0.1:0"),
+		httpserver.WithStore(st),
+		httpserver.WithProber(readyTestProber{err: nil}),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rec.Code)
+	}
+
+	var resp readyResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode readiness response: %v", err)
+	}
+
+	migSub, ok := resp.Data.Subsystems["migrations"]
+	if !ok || migSub.Status != httpserver.StatusReady {
+		t.Fatalf("expected migrations READY, got %+v", migSub)
+	}
+}
+
+func TestReadiness_SchemaRevisionMismatch(t *testing.T) {
+	dsn := os.Getenv("STHIRA_TEST_DSN")
+	if dsn == "" {
+		t.Skip("STHIRA_TEST_DSN not set; skipping live DB readiness check")
+	}
+	st, err := store.Open(dsn)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer st.Close()
+
+	// Roll back revision 10 to simulate an unmigrated DB
+	_, err = st.DB().Exec("DELETE FROM schema_migrations WHERE revision >= 10")
+	if err != nil {
+		t.Fatalf("failed to delete revision: %v", err)
+	}
+	defer func() {
+		_, _ = st.DB().Exec("INSERT INTO schema_migrations (revision) VALUES (10) ON CONFLICT DO NOTHING")
+	}()
+
+	srv := httpserver.New(
+		httpserver.DefaultConfig("127.0.0.1:0"),
+		httpserver.WithStore(st),
+		httpserver.WithProber(readyTestProber{err: nil}),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 Service Unavailable on schema mismatch, got %d", rec.Code)
+	}
+
+	var resp readyResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode readiness response: %v", err)
+	}
+
+	if len(resp.Errors) == 0 || resp.Errors[0].Code != contracts.ErrDataUnavailable {
+		t.Fatalf("expected DATA_UNAVAILABLE error, got %+v", resp.Errors)
+	}
+	if !strings.Contains(resp.Errors[0].Message, "migrations") {
+		t.Fatalf("expected message to mention migrations, got %q", resp.Errors[0].Message)
+	}
+
+	report := srv.CheckReadiness(context.Background())
+	migSub, ok := report.Subsystems["migrations"]
+	if !ok || migSub.Status != httpserver.StatusMismatch {
+		t.Fatalf("expected report migrations SCHEMA_MISMATCH, got %+v", migSub)
+	}
+}
+
+

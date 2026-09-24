@@ -121,17 +121,28 @@ func (s *Server) CheckReadiness(ctx context.Context) ReadinessReport {
 			Detail: "store not configured",
 		}
 	} else {
-		if store.SchemaRevision == 10 {
+		migCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		defer cancel()
+		var rev int
+		err := s.store.DB().QueryRowContext(migCtx,
+			`SELECT COALESCE(MAX(revision), 0) FROM schema_migrations`).Scan(&rev)
+		if err != nil {
 			subsystems["migrations"] = SubsystemHealth{
-				Status: StatusReady,
-				Detail: fmt.Sprintf("revision current (%d)", store.SchemaRevision),
-			}
-		} else {
-			subsystems["migrations"] = SubsystemHealth{
-				Status: StatusMismatch,
-				Detail: fmt.Sprintf("expected revision 10, got %d", store.SchemaRevision),
+				Status: StatusUnavailable,
+				Detail: "migration state unreadable",
 			}
 			allReady = false
+		} else if rev < store.SchemaRevision {
+			subsystems["migrations"] = SubsystemHealth{
+				Status: StatusMismatch,
+				Detail: fmt.Sprintf("schema at revision %d, expected %d", rev, store.SchemaRevision),
+			}
+			allReady = false
+		} else {
+			subsystems["migrations"] = SubsystemHealth{
+				Status: StatusReady,
+				Detail: fmt.Sprintf("revision current (%d)", rev),
+			}
 		}
 	}
 
