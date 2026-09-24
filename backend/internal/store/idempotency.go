@@ -20,11 +20,23 @@ var ErrPayloadConflict = errors.New("store: idempotency payload conflict")
 // ErrInProgress is returned when the same key is currently being processed.
 var ErrInProgress = errors.New("store: idempotency key in progress")
 
+// LegacyChecker verifies if an existing hash matches a legacy representation
+// and ensures that semantic values match without aliasing.
+type LegacyChecker func(ctx context.Context, db DBTX, existingHash string, storedResult []byte) (bool, error)
+
 // Begin claims a key for (scope, operation) with the given payload hash. It
 // returns replay=true with the stored result when the key already COMPLETED with
 // the same payload. It returns ErrPayloadConflict for a reused key with a
 // different payload, and ErrInProgress when a matching IN_PROGRESS row exists.
-func (IdempotencyStore) Begin(ctx context.Context, db DBTX, scope, operation, key, payloadHash string, expiresAt time.Time) (result []byte, replay bool, err error) {
+func (s IdempotencyStore) Begin(ctx context.Context, db DBTX, scope, operation, key, payloadHash string, expiresAt time.Time) (result []byte, replay bool, err error) {
+	return s.BeginWithCompat(ctx, db, scope, operation, key, payloadHash, nil, expiresAt)
+}
+
+// BeginWithCompat claims a key for (scope, operation). If an existing row has a
+// payload hash that differs from payloadHash, it invokes legacyChecker (if non-nil).
+// If legacyChecker approves the legacy hash and original semantics, replay proceeds
+// without error or duplicate allocation.
+func (IdempotencyStore) BeginWithCompat(ctx context.Context, db DBTX, scope, operation, key, payloadHash string, legacyChecker LegacyChecker, expiresAt time.Time) (result []byte, replay bool, err error) {
 	// Try to claim the key. RowsAffected==1 means we just inserted the
 	// IN_PROGRESS row, so the key is ours: return replay=false without reading
 	// back our own row (which would misread as a concurrent in-progress key).
@@ -51,7 +63,19 @@ func (IdempotencyStore) Begin(ctx context.Context, db DBTX, scope, operation, ke
 	if err := row.Scan(&existingHash, &state, &stored); err != nil {
 		return nil, false, err
 	}
-	if existingHash != payloadHash {
+
+	hashMatch := (existingHash == payloadHash)
+	if !hashMatch && legacyChecker != nil {
+		ok, checkErr := legacyChecker(ctx, db, existingHash, stored)
+		if checkErr != nil {
+			return nil, false, checkErr
+		}
+		if ok {
+			hashMatch = true
+		}
+	}
+
+	if !hashMatch {
 		return nil, false, ErrPayloadConflict
 	}
 	switch state {

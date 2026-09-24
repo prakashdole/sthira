@@ -256,6 +256,11 @@ func reservationPayloadHash(sessID string, req createReservationRequest) string 
 	return hex.EncodeToString(h[:])
 }
 
+func legacyReservationPayloadHash(sessID string, req createReservationRequest) string {
+	h := sha256.Sum256([]byte(sessID + "|" + req.FacilityID + "|" + req.PackageID + "|" + req.RouteID + "|" + req.StartDate + "|" + req.EndDate + "|" + req.IdemKey))
+	return hex.EncodeToString(h[:])
+}
+
 func (s *Server) handleCreateReservation(w http.ResponseWriter, r *http.Request) {
 	if !s.requireMethod(w, r, http.MethodPost) {
 		return
@@ -289,6 +294,40 @@ func (s *Server) handleCreateReservation(w http.ResponseWriter, r *http.Request)
 	is := store.IdempotencyStore{}
 	stays := store.NewStayStore(store.ChainAuditor{})
 	payloadHash := reservationPayloadHash(sess.SessionID, req)
+	legacyHash := legacyReservationPayloadHash(sess.SessionID, req)
+	legacyCheck := func(c context.Context, tx store.DBTX, existingHash string, storedResult []byte) (bool, error) {
+		if existingHash != legacyHash {
+			return false, nil
+		}
+		if len(storedResult) == 0 {
+			return false, store.ErrPayloadConflict
+		}
+		var out map[string]string
+		if err := json.Unmarshal(storedResult, &out); err != nil {
+			return false, store.ErrPayloadConflict
+		}
+		resID := out["reservation_id"]
+		if resID == "" {
+			return false, store.ErrPayloadConflict
+		}
+		// B02 bounded compatibility: an old request can replay only for the
+		// original authenticated actor/resource and equivalent validated original semantics.
+		// Discriminating fields (e.g. party_size, facility_id) cannot alias it.
+		var dbSessID, dbFacID string
+		var dbPartySize int
+		err := tx.QueryRowContext(c, `
+			SELECT session_id, facility_id, party_size
+			FROM reservations
+			WHERE reservation_id = $1`, resID).Scan(&dbSessID, &dbFacID, &dbPartySize)
+		if err != nil {
+			return false, store.ErrPayloadConflict
+		}
+		if dbSessID != sess.SessionID || dbFacID != req.FacilityID || dbPartySize != req.PartySize {
+			return false, store.ErrPayloadConflict
+		}
+		return true, nil
+	}
+
 	now := time.Now().UTC()
 	stayID := newID("STAY")
 	resID := newID("RES")
@@ -296,8 +335,8 @@ func (s *Server) handleCreateReservation(w http.ResponseWriter, r *http.Request)
 	var result []byte
 	var replay bool
 	err = s.store.InTx(ctx, func(tx store.DBTX) error {
-		// Idempotency: replay a completed key, conflict on a changed payload.
-		res, rep, err := is.Begin(ctx, tx, sess.SessionID, "reservation.create", req.IdemKey, payloadHash, now.Add(time.Hour))
+		// Idempotency: replay a completed key (canonical or legacy compatible), conflict on a changed payload.
+		res, rep, err := is.BeginWithCompat(ctx, tx, sess.SessionID, "reservation.create", req.IdemKey, payloadHash, legacyCheck, now.Add(time.Hour))
 		if err != nil {
 			return err
 		}
