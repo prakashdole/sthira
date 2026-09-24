@@ -90,6 +90,7 @@ type Server struct {
 	// trustForwardedFor, when true, uses X-Forwarded-For as the client IP
 	// for rate-limit decisions. Off by default.
 	trustForwardedFor bool
+	securityAuditor   *SecurityAuditor
 }
 
 // WithVoiceProcess wires the voice process handler for the /api/v3/voice/{transcriptions,process,speech} routes.
@@ -157,6 +158,11 @@ func WithRateLimitBypass(paths ...string) Option {
 // traffic; otherwise the limiter is trivially bypassable.
 func WithTrustForwardedFor(trust bool) Option {
 	return func(s *Server) { s.trustForwardedFor = trust }
+}
+
+// WithSecurityAuditor overrides the default in-memory security auditor.
+func WithSecurityAuditor(a *SecurityAuditor) Option {
+	return func(s *Server) { s.securityAuditor = a }
 }
 
 // persistedResolver adapts the store's persisted context resolution to the
@@ -296,6 +302,9 @@ func New(cfg Config, opts ...Option) *Server {
 	}
 	if len(s.rateLimitBypass) == 0 && len(s.cfg.RateLimitBypass) > 0 {
 		s.rateLimitBypass = append(s.rateLimitBypass, s.cfg.RateLimitBypass...)
+	}
+	if s.securityAuditor == nil {
+		s.securityAuditor = NewSecurityAuditor()
 	}
 
 	mux := http.NewServeMux()
@@ -546,4 +555,9 @@ func (s *Server) RateLimiterStats() *RateLimiterStats {
 	}
 	st := s.rateLimit.Stats()
 	return &st
+}
+
+// SecurityAuditor returns the server's security event auditor.
+func (s *Server) SecurityAuditor() *SecurityAuditor {
+	return s.securityAuditor
 }
