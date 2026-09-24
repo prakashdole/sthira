@@ -56,16 +56,18 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Body is optional; decode if present.
-	if r.ContentLength > 0 {
+	if r.ContentLength > 0 || r.Header.Get("Transfer-Encoding") == "chunked" {
 		body, err := s.readBoundedBody(w, r)
 		if err != nil {
 			s.jsonDecodeError(w, r, err)
 			return
 		}
-		var req createSessionRequest
-		if err := httpjson.DecodeStrict(body, &req, httpjson.Limits{MaxBytes: s.cfg.MaxBodyBytes, MaxDepth: s.cfg.MaxJSONDepth}); err != nil {
-			s.jsonDecodeError(w, r, err)
-			return
+		if len(body) > 0 {
+			var req createSessionRequest
+			if err := httpjson.DecodeStrict(body, &req, httpjson.Limits{MaxBytes: s.cfg.MaxBodyBytes, MaxDepth: s.cfg.MaxJSONDepth}); err != nil {
+				s.jsonDecodeError(w, r, err)
+				return
+			}
 		}
 	}
 	sessionID := newID("SES")
@@ -95,10 +97,6 @@ func (s *Server) handleResolvePlace(w http.ResponseWriter, r *http.Request) {
 	if !s.requireJSONContentType(w, r) {
 		return
 	}
-	if s.store == nil {
-		s.writeError(w, r, http.StatusServiceUnavailable, contracts.ErrDataUnavailable, "store unavailable", "", true)
-		return
-	}
 	body, err := s.readBoundedBody(w, r)
 	if err != nil {
 		s.jsonDecodeError(w, r, err)
@@ -107,6 +105,10 @@ func (s *Server) handleResolvePlace(w http.ResponseWriter, r *http.Request) {
 	var req resolvePlaceRequest
 	if err := httpjson.DecodeStrict(body, &req, httpjson.Limits{MaxBytes: s.cfg.MaxBodyBytes, MaxDepth: s.cfg.MaxJSONDepth}); err != nil {
 		s.jsonDecodeError(w, r, err)
+		return
+	}
+	if s.store == nil {
+		s.writeError(w, r, http.StatusServiceUnavailable, contracts.ErrDataUnavailable, "store unavailable", "", true)
 		return
 	}
 	cand, err := store.ResolvePlace(r.Context(), s.store.DB(), req.Jurisdiction, req.Query)
@@ -146,10 +148,6 @@ func (s *Server) handleGuidanceQuery(w http.ResponseWriter, r *http.Request) {
 	if !s.requireJSONContentType(w, r) {
 		return
 	}
-	if s.store == nil {
-		s.writeError(w, r, http.StatusServiceUnavailable, contracts.ErrDataUnavailable, "store unavailable", "", true)
-		return
-	}
 	body, err := s.readBoundedBody(w, r)
 	if err != nil {
 		s.jsonDecodeError(w, r, err)
@@ -158,6 +156,10 @@ func (s *Server) handleGuidanceQuery(w http.ResponseWriter, r *http.Request) {
 	var req guidanceQueryRequest
 	if err := httpjson.DecodeStrict(body, &req, httpjson.Limits{MaxBytes: s.cfg.MaxBodyBytes, MaxDepth: s.cfg.MaxJSONDepth}); err != nil {
 		s.jsonDecodeError(w, r, err)
+		return
+	}
+	if s.store == nil {
+		s.writeError(w, r, http.StatusServiceUnavailable, contracts.ErrDataUnavailable, "store unavailable", "", true)
 		return
 	}
 	start, err1 := time.Parse("2006-01-02", req.StartDate)
