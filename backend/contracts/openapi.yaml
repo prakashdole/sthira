@@ -82,8 +82,8 @@ paths:
       summary: Resolve a place by alias or admin ID
       description: >-
         Jurisdiction-aware resolution from known aliases/admin IDs. Multiple
-        candidates yield AMBIGUOUS_PLACE with candidate IDs; unknown yields
-        NOT_FOUND. No LLM geocode. Public.
+        candidates yield AMBIGUOUS_PLACE with candidate IDs in errors[0].details.candidates;
+        unknown yields NOT_FOUND. No LLM geocode. Public.
       requestBody:
         required: true
         content:
@@ -640,6 +640,28 @@ components:
         field: { type: string }
         correlation_id: { type: string }
         retryable: { type: boolean }
+        details:
+          type: object
+          description: Optional structured machine-readable error details (e.g. candidates on AMBIGUOUS_PLACE).
+          properties:
+            candidates:
+              type: array
+              description: Distinct place candidates returned on AMBIGUOUS_PLACE (HTTP 409).
+              items:
+                $ref: '#/components/schemas/PlaceCandidate'
+    PlaceCandidate:
+      type: object
+      required: [place_id, place_kind]
+      properties:
+        place_id:
+          type: string
+          description: Authoritative safe-zone, facility, or administrative identifier.
+        place_kind:
+          type: string
+          enum: [ZONE, FACILITY, ADMIN]
+        jurisdiction:
+          type: string
+          description: Jurisdiction this candidate belongs to.
     VoiceCommandRequest:
       type: object
       required: [request_id, data_version, jurisdiction, proposal]

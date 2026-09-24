@@ -122,6 +122,7 @@ func TestReadiness_SchemaRevisionLiveDB(t *testing.T) {
 		t.Fatalf("failed to open store: %v", err)
 	}
 	defer st.Close()
+	_, _ = st.DB().Exec("INSERT INTO schema_migrations (revision) VALUES (10) ON CONFLICT DO NOTHING")
 
 	srv := httpserver.New(
 		httpserver.DefaultConfig("127.0.0.1:0"),

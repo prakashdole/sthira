@@ -16,8 +16,9 @@ import (
 
 // PlaceCandidate is one resolved place.
 type PlaceCandidate struct {
-	PlaceID   string
-	PlaceKind string // ZONE | FACILITY | ADMIN
+	PlaceID      string `json:"place_id"`
+	PlaceKind    string `json:"place_kind"` // ZONE | FACILITY | ADMIN
+	Jurisdiction string `json:"jurisdiction,omitempty"`
 }
 
 // ErrPlaceNotFound is returned when no alias matches the query.
@@ -25,7 +26,7 @@ var ErrPlaceNotFound = errPlace("store: place not found")
 
 // ErrPlaceAmbiguous is returned when a query matches multiple distinct places.
 type AmbiguousPlaceError struct {
-	Candidates []PlaceCandidate
+	Candidates []PlaceCandidate `json:"candidates"`
 }
 
 func (e *AmbiguousPlaceError) Error() string { return "store: ambiguous place" }
@@ -42,7 +43,9 @@ func NormalizeLookupKey(s string) string {
 // ResolvePlace resolves lookupKey within jurisdiction. It returns exactly one
 // candidate, ErrPlaceNotFound, or *AmbiguousPlaceError with the distinct
 // candidate places. Distinct aliases mapping to the same place collapse to one
-// candidate (not ambiguous).
+// candidate (not ambiguous). Matching considers both the normalized lookup_key
+// and the lowercased place_id so a citizen selecting a specific candidate ID
+// resolves unambiguously.
 func ResolvePlace(ctx context.Context, db DBTX, jurisdiction, lookupKey string) (PlaceCandidate, error) {
 	key := NormalizeLookupKey(lookupKey)
 	if key == "" {
@@ -50,7 +53,7 @@ func ResolvePlace(ctx context.Context, db DBTX, jurisdiction, lookupKey string) 
 	}
 	rows, err := db.QueryContext(ctx, `
 		SELECT DISTINCT place_id, place_kind FROM place_aliases
-		WHERE jurisdiction = $1 AND lookup_key = $2
+		WHERE jurisdiction = $1 AND (lookup_key = $2 OR LOWER(place_id) = $2)
 		ORDER BY place_id`, jurisdiction, key)
 	if err != nil {
 		return PlaceCandidate{}, err
@@ -62,6 +65,7 @@ func ResolvePlace(ctx context.Context, db DBTX, jurisdiction, lookupKey string) 
 		if err := rows.Scan(&c.PlaceID, &c.PlaceKind); err != nil {
 			return PlaceCandidate{}, err
 		}
+		c.Jurisdiction = jurisdiction
 		cands = append(cands, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -73,6 +77,10 @@ func ResolvePlace(ctx context.Context, db DBTX, jurisdiction, lookupKey string) 
 	case 1:
 		return cands[0], nil
 	default:
+		// Bound candidates per contract
+		if len(cands) > 10 {
+			cands = cands[:10]
+		}
 		return PlaceCandidate{}, &AmbiguousPlaceError{Candidates: cands}
 	}
 }

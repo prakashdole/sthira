@@ -67,6 +67,7 @@ type APIError struct {
 	Field         string `json:"field,omitempty"`
 	CorrelationID string `json:"correlation_id"`
 	Retryable     bool   `json:"retryable"`
+	Details       any    `json:"details,omitempty"`
 }
 
 // Envelope is the single response wrapper for the /api/v3 boundary. Exactly

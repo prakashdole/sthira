@@ -55,9 +55,10 @@ func TestA3_LockOrderProbe(t *testing.T) {
 
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	keyID := "key-A3LOCK"
+	jur := "A3L-" + uid("X")
 	ts := offlinepkg.NewTrustStore(offlinepkg.TrustedKey{
 		KeyID: keyID, PublicKey: pub,
-		PermittedJurisdiction: "A3L",
+		PermittedJurisdiction: jur,
 		ValidFrom:             time.Now().Add(-time.Hour),
 		ValidUntil:            time.Now().Add(time.Hour),
 	})
@@ -65,12 +66,12 @@ func TestA3_LockOrderProbe(t *testing.T) {
 
 	srcID := "SRC-A3L-" + uid("X")
 	pkgID := "PKG-A3L-" + uid("X")
-	if err := seedSourcePackageForA3(t, st, srcID, pkgID, "A3L"); err != nil {
+	if err := seedSourcePackageForA3(t, st, srcID, pkgID, jur); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
-	_, rawM := buildSignedManifestForA3(t, priv, keyID, "A3L", pkgID, 1)
-	_, rawC := buildSignedCardForA3(t, priv, keyID, pkgID, "A3L", 1)
+	_, rawM := buildSignedManifestForA3(t, priv, keyID, jur, pkgID, 1)
+	_, rawC := buildSignedCardForA3(t, priv, keyID, pkgID, jur, 1)
 
 	var m1 offlinepkg.Manifest
 	_ = json.Unmarshal(rawM, &m1)
@@ -88,7 +89,7 @@ func TestA3_LockOrderProbe(t *testing.T) {
 	go func() {
 		done <- publisher.PublishCard(context.Background(), &PublishedCard{
 			PackageID: c1.PackageID, Version: c1.Version,
-			SourceID: srcID, RawJSON: rawC, Jurisdiction: "A3L",
+			SourceID: srcID, RawJSON: rawC, Jurisdiction: jur,
 			SourceStatus: "CURRENT",
 		})
 	}()

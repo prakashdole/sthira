@@ -446,6 +446,11 @@ func (s *Server) writeData(w http.ResponseWriter, r *http.Request, status int, d
 
 // writeError writes an error envelope with exactly Errors populated.
 func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, code, message, field string, retryable bool) {
+	s.writeErrorWithDetails(w, r, status, code, message, field, retryable, nil)
+}
+
+// writeErrorWithDetails writes an error envelope with Errors populated including optional details.
+func (s *Server) writeErrorWithDetails(w http.ResponseWriter, r *http.Request, status int, code, message, field string, retryable bool, details any) {
 	env := contracts.Envelope{
 		RequestID:     requestID(r),
 		SchemaVersion: contracts.SchemaVersionV3,
@@ -458,6 +463,7 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, 
 			Field:         field,
 			CorrelationID: requestID(r),
 			Retryable:     retryable,
+			Details:       details,
 		}},
 	}
 	s.writeEnvelope(w, status, env)

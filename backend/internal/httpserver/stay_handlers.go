@@ -115,7 +115,9 @@ func (s *Server) handleResolvePlace(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var amb *store.AmbiguousPlaceError
 		if errors.As(err, &amb) {
-			s.writeError(w, r, http.StatusConflict, contracts.ErrAmbiguousPlace, "multiple places match; choose a candidate", "query", true)
+			s.writeErrorWithDetails(w, r, http.StatusConflict, contracts.ErrAmbiguousPlace, "multiple places match; choose a candidate", "query", true, map[string]any{
+				"candidates": amb.Candidates,
+			})
 			return
 		}
 		if errors.Is(err, store.ErrPlaceNotFound) {
@@ -168,6 +170,10 @@ func (s *Server) handleGuidanceQuery(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, http.StatusBadRequest, contracts.ErrInvalidValue, "invalid party size or date range", "start_date", false)
 		return
 	}
+	if end.After(start.AddDate(0, 0, store.MaxChoiceDays)) {
+		s.writeError(w, r, http.StatusBadRequest, contracts.ErrInvalidValue, "requested date range exceeds maximum policy duration of 30 days", "end_date", false)
+		return
+	}
 	// Route authority (O05) is open: the operational route gate is CLOSED in production.
 	// Synthetic routes are ONLY available via isolated server test/exercise configuration,
 	// never via request headers or body fields.
@@ -179,8 +185,16 @@ func (s *Server) handleGuidanceQuery(w http.ResponseWriter, r *http.Request) {
 		EndDate:       end,
 		RouteGateOpen: s.allowSynthetic(),
 	}
-	dests, err := store.ChoiceQuerier{}.Eligible(r.Context(), s.store.DB(), q, time.Now().UTC())
+	dests, freshness, err := store.ChoiceQuerier{}.EligibleWithStatus(r.Context(), s.store.DB(), q, time.Now().UTC())
 	if err != nil {
+		if errors.Is(err, store.ErrDateRangeExceeded) {
+			s.writeError(w, r, http.StatusBadRequest, contracts.ErrInvalidValue, err.Error(), "end_date", false)
+			return
+		}
+		if errors.Is(err, store.ErrNoScopedContext) || errors.Is(err, store.ErrNotFound) {
+			s.writeError(w, r, http.StatusNotFound, contracts.ErrNotFound, "package not found", "package_id", false)
+			return
+		}
 		s.writeError(w, r, http.StatusInternalServerError, contracts.ErrInternal, "eligibility query failed", "", true)
 		return
 	}
@@ -202,7 +216,7 @@ func (s *Server) handleGuidanceQuery(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, item)
 	}
-	s.writeData(w, r, http.StatusOK, req.PackageID, contracts.FreshnessUnknown, map[string]any{
+	s.writeData(w, r, http.StatusOK, req.PackageID, freshness, map[string]any{
 		"destinations": items,
 		"route_gate":   s.allowSynthetic(),
 	})
