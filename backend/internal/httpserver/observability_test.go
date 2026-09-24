@@ -509,4 +509,3 @@ func TestObservability_RateLimiter_EnabledAndDiagnostics(t *testing.T) {
 		t.Fatalf("PRIVACY VIOLATION: metrics response contains raw client IP: %s", body)
 	}
 }
-

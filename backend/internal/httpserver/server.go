@@ -547,4 +547,3 @@ func (s *Server) RateLimiterStats() *RateLimiterStats {
 	st := s.rateLimit.Stats()
 	return &st
 }
-

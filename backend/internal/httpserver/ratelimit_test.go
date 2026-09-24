@@ -317,4 +317,3 @@ func TestRateLimiter_Stats(t *testing.T) {
 		t.Fatalf("expected 2 active IPs, got %d", st.ActiveIPs)
 	}
 }
-
