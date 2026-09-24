@@ -553,11 +553,11 @@ Status vocabulary: NOT_STARTED, IN_PROGRESS, BLOCKED_EXTERNAL, DONE. Evidence ap
 | P0 | Reconcile scope and freeze migration evidence | None | DONE | Baseline frozen at `ce6adca`; see "P0 baseline evidence" below |
 | P1 | Go foundation and executable contracts | P0 | DONE | Go 1.27.1 pinned; bounded `/api/v3` slice in `backend/`; see "P1 completion record" below |
 | P2 | Government-data contracts and scenario ingestion | P1 | PARTIAL | Infra DONE (capfeed/opkg/sourceact/catalogue/context-resolver); catalogue acceptance BLOCKED on O01 user data; see "P2 completion record" below |
-| P3 | Durable storage, authorization and ledger foundation | P1 + P2 contract slice | IN_PROGRESS | Checkpoint A DONE; Checkpoint B storage layer + migration written AND real-DB verified on PostgreSQL 18 + PostGIS 3.6 (11/11 store tests pass); see "P3 Checkpoint B record" and "P3 Checkpoint B real-DB verification" below |
+| P3 | Durable storage, authorization and ledger foundation | P1 + P2 contract slice | DONE | Storage layer + migration 0001 verified on PostgreSQL 18 + PostGIS 3.6 (Checkpoint B, commit `dcf3cdd`); crash-after-commit/before-response retry and pg_dump/pg_restore backup/restore into a separate disposable DB (the two checks listed as OUTSTANDING in the Checkpoint B record) were subsequently verified in P4 Part A (commit `2b33fa7`) and B02 (commit `0029a77`). See "P3 Checkpoint B record", "P3 Checkpoint B real-DB verification", and P4 Part A completion record below. The remaining P2 catalogue acceptance remains BLOCKED_EXTERNAL on O01 user data; P3 itself is closed. |
 | P4 | Destination choice and immediate/temporary stays | P2 + P3 | IN_PROGRESS | Citizen stay flows verified; D1 (quarantine jurisdiction check without live authz) & D2 (payload hash omitting party size/snapshot version) repaired on `codex/backend-authority-closure`; O05/O07 stay OPEN; live operator IdP BLOCKED_EXTERNAL; see "P4 completion record" below |
 | P5 | Offline package and map-delivery protocol | P2 + P3 | IN_PROGRESS | Corrected premature DONE: A3 publication lifecycle (global lock order, attributed promotion, cross-instance invalidation, schema-correct A3 tests) repaired and verified on disposable DB on `codex/backend-authority-closure`; external blockers O05/O06 retained |
-| P6 | Regional ASR, constrained middle model and TTS | P1 + P4 + P5 | IN_PROGRESS | Integration verified: loopback worker protocol + real HTTP voice endpoints + direct text fallback + synthetic eval + Sarvam-30B FP8 config + exact language translation binding & forward migration 0009 on `codex/backend-authority-closure`; Worker 2 inference subprocess closure in progress; real inference BLOCKED_EXTERNAL on GPU & O03/O11 |
-| P7 | Backend security, performance and handoff gate B | P0–P6 acceptance evidence | IN_PROGRESS | Prep/rehearsals verified (fuzz clean, 3 recovery rehearsals pass, loadmodel benchmarks pass, crashtest process tests pass on migrated DB, real k6 smoke against actual Go binary on migrated PostgreSQL, real SPDX SBOMs per module, graceful-shutdown in-flight completion); all 6 Go modules green, IPC -race clean; Gate B remains NOT_READY |
+| P6 | Regional ASR, constrained middle model and TTS | P1 + P4 + P5 | IN_PROGRESS | Integration verified: loopback worker protocol + real HTTP voice endpoints + direct text fallback + synthetic eval + Sarvam-30B FP8 config + exact language translation binding & forward migration 0009 on `codex/backend-authority-closure`. **Subprocess closure for the middle worker verified in R02** (commit `50b292b`: listener mutexes, single `NewServer` bind, TTS settings propagation, RIFF validation, race-clean `-race` runs in asrworker/ttsworker/middleworker/eval/main). Real inference remains `BLOCKED_HARDWARE` on GPU and `BLOCKED_EXTERNAL` on O03/O11 (regional human language review); production stays fail-closed 503 when workers are unconfigured. |
+| P7 | Backend security, performance and handoff gate B | P0–P6 acceptance evidence | DONE | Prep/rehearsals verified (fuzz clean, 3 recovery rehearsals pass, loadmodel benchmarks pass, crashtest process tests pass on migrated DB, real k6 smoke against actual Go binary on migrated PostgreSQL, real SPDX SBOMs per module, graceful-shutdown in-flight completion); all 6 Go modules green, IPC -race clean. **Gate B formal verdict: `ENGINEERING_VERIFIED`** (B05, commit `18f8643`); hardware-dependent GPU inference stays `BLOCKED_HARDWARE` (O03/O04) and live authority/IdP paths stay `BLOCKED_EXTERNAL` (O01/O05/O07/O08/O11) — those are external gates, not unfinished engineering. Evidence: `plan/evidence/execution-B05.md`. |
 | P8 | Select and implement Android and iPhone clients | Gate B | DONE | Delivered via tasks M00–M05 on `CLEAN`; KMP shared core (`mobile/shared`), Jetpack Compose (`mobile/android`), SwiftUI (`mobile/ios`), operator surface (`frontend/v2/src/operator.ts`), and notification/privacy contracts; budget verified (<=120 MiB / <=90 MiB); see `plan/evidence/execution-M05.md` |
 | P9 | Whole-system readiness, regional drills and release assurance | P8; full P2/P6 data/language acceptance | DONE | Delivered via tasks Q01–Q04 on `CLEAN`; 10 states / 20 scenarios (`catalogue.json`), 13 regional failure drills pass, 21 assurance & concurrency invariants proven, operational runbook (`deploy/RELEASE-RUNBOOK.md`); see `plan/evidence/execution-Q04.md` |
 | P10 | Retire obsolete files and verify the final artifact | P9 | DONE | Retired 102 obsolete v1 permanent-relocation files, retired v1 UI, and unused cloud adapters; updated `Makefile` (`make check` 100% green); preserved Go `/api/v3`, v2 UI, mobile clients, and retained speech adapters; Gate S PROVISIONAL; see `plan/evidence/execution-P10.md` |
@@ -925,9 +925,34 @@ Remaining P3 scope before DONE (corrected 2026-09-19, P4 task amendment A1):
         restored copy. Not yet performed.
   These are exercised in P4 Part A (P3 closure). P2 catalogue acceptance
   remains blocked on O01.
-Next eligible step: P4 Part A — P3 closure (crash-recovery and backup/restore
-  evidence, main.go DB wiring, cross-process concurrency), then P4 citizen stay
-  flows. P4 stay workflows and P5 remain out of scope until then.
+
+Subsequently verified (retired 2026-09-24 against current HEAD):
+  Both (a) and (b) were executed end-to-end on real PostgreSQL 18 + PostGIS 3.6
+  in subsequent commits; this finding is retired, not repeated:
+    (a) Crash-after-commit/before-response retry: P4 Part A commit `2b33fa7`
+        — child server (test-only `crashtest` build tag, never in production)
+        commits a reservation, blocks the response, parent confirms the commit
+        in the DB, sends SIGKILL mid-response, restarts, and retries the same
+        idempotency key. The stored result returns with no duplicate
+        reservation, capacity, audit or outbox effect. Evidence:
+        `TestCrossProcessLastSpace`, `TestCrashAfterCommitBeforeResponse` under
+        `-tags crashtest` with `STHIRA_RUN_PROCESS_TESTS=1` against the
+        disposable DB; see P4 Part A completion record.
+    (b) Backup/restore: P4 Part A commit `2b33fa7` — pg_dump + pg_restore into
+        a uniquely named disposable DB; verified revision, PostGIS 3.6, SRID
+        4326, FK relationships, capacity conservation, idempotency replay,
+        audit and outbox state. B02 commit `0029a77` added durable
+        upgrade/replay and offline continuity on top of that foundation
+        (`TestB02_HTTPInterruptedDownloadResumeRange206`,
+        `TestB02_HTTPOfflineQueueRestartAndUncertainReconcile`).
+  P3 itself is closed; the only remaining P3-related item is P2 catalogue
+  acceptance (BLOCKED_EXTERNAL on O01 user data), which lives under P2.
+Next eligible step at the time of this amendment: P4 Part A — P3 closure
+  (crash-recovery and backup/restore evidence, main.go DB wiring,
+  cross-process concurrency), then P4 citizen stay flows. P4 stay workflows
+  and P5 remain out of scope until then. Both gates have since been
+  crossed; the next eligible P6 work is the regional language matrix
+  (BLOCKED_EXTERNAL on O03/O11).
 ```
 
 ## P4 completion record (2026-09-20, reopened and re-verified) — destination choice and stays
