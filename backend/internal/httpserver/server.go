@@ -354,7 +354,7 @@ func New(cfg Config, opts ...Option) *Server {
 
 	s.httpSrv = &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           mux,
+		Handler:           s.withSecurityHeaders(mux),
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,
