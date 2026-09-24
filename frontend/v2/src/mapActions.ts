@@ -1,5 +1,5 @@
 import type { Map } from 'maplibre-gl';
-import scenario from './scenario.json';
+import scenario from './scenario.json' with { type: 'json' };
 
 export type Layer = 'RED_ZONES' | 'SAFE_ZONES' | 'ROUTES' | 'MY_LOCATION';
 export type Panel = 'ALERT_DETAILS' | 'SAFE_ZONE_DETAILS' | 'ROUTE_GUIDANCE' | 'CAPACITY_DETAILS' | 'EMERGENCY_CALL_CONFIRMATION' | 'DEMO_INFORMATION';
