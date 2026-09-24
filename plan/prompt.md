@@ -132,7 +132,7 @@ For existing served diagnostics/middleware: sanitize access logs to route patter
 | Correction | Current status | Depends on | Completion evidence |
 | --- | --- | --- | --- |
 | C00 | DONE | Current checkout | All active gate/report contradictions reconciled (drill report Q02 updated to target protocol specifications, Gate B reopened in execution-B05.md, R07 reopened in execution-R07.md, P8 reopened in execution-M05.md, P9 reopened in execution-Q04.md, runbook annotated with C06 dependencies). |
-| C01 | NOT_STARTED | C00 | HTTP+DB guidance/candidate regressions |
+| C01 | DONE | C00 | Commit `b8cb55c`: HTTP+DB guidance authority/scope lifecycle checks (package jurisdiction, expiry, supersession, source OPERATIONAL status, authorization scope/expiry) and bounded ambiguous place candidate resolution via APIError.Details; verified with 5 store integration tests and 2 HTTP integration tests against PostgreSQL 18.6. |
 | C02 | NOT_STARTED | C01 contract; C04 for voice acceptance | Served browser+Go journey and failure evidence |
 | C03 | NOT_STARTED | C00; serial backend ownership after C01 | Two-language exact-digest and drift regressions |
 | C04 | NOT_STARTED | C03; C01/C02 for integrated demo | PLUMBING_ONLY and REAL_INFERENCE separately |
