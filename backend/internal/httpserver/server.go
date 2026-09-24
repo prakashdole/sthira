@@ -82,6 +82,14 @@ type Server struct {
 	// workersHealthFn returns per-stage worker health summaries when wired.
 	// Nil means workers are absent from the observability snapshot.
 	workersHealthFn func() []WorkerHealthSummary
+	// rateLimit is the per-IP token-bucket limiter. Nil means the middleware
+	// is a no-op (default: OFF; opt in via WithRateLimit).
+	rateLimit *RateLimiter
+	// rateLimitBypass lists URL paths that skip the rate-limit check.
+	rateLimitBypass []string
+	// trustForwardedFor, when true, uses X-Forwarded-For as the client IP
+	// for rate-limit decisions. Off by default.
+	trustForwardedFor bool
 }
 
 // WithVoiceProcess wires the voice process handler for the /api/v3/voice/{transcriptions,process,speech} routes.
@@ -116,6 +124,39 @@ func WithAccessLog(enable bool) Option {
 	return func(s *Server) {
 		s.cfg.EnableAccessLog = enable
 	}
+}
+
+// WithRateLimit wires a per-remote-IP token-bucket limiter with the
+// given steady-state refill rate (tokens/sec) and burst capacity. Both
+// must be strictly positive. Pass nil to disable. Bypass paths are
+// supplied via WithRateLimitBypass; trust of X-Forwarded-For via
+// WithTrustForwardedFor. The limiter is fail-closed OFF when this
+// option is not applied.
+func WithRateLimit(rps, burst float64) Option {
+	return func(s *Server) {
+		if rps <= 0 || burst <= 0 {
+			return
+		}
+		s.rateLimit = NewRateLimiter(rps, burst, nil)
+		s.cfg.RateLimitRPS = rps
+		s.cfg.RateLimitBurst = burst
+		s.cfg.EnableRateLimit = true
+	}
+}
+
+// WithRateLimitBypass lists exact-match URL paths that skip the
+// rate-limit check. By default the bypass list is empty; callers
+// should add liveness, readiness, pprof, and the observability path.
+func WithRateLimitBypass(paths ...string) Option {
+	return func(s *Server) { s.rateLimitBypass = append(s.rateLimitBypass, paths...) }
+}
+
+// WithTrustForwardedFor controls whether X-Forwarded-For is treated as
+// the authoritative client IP for rate-limit decisions. Only enable
+// behind a known reverse proxy that strips the header from external
+// traffic; otherwise the limiter is trivially bypassable.
+func WithTrustForwardedFor(trust bool) Option {
+	return func(s *Server) { s.trustForwardedFor = trust }
 }
 
 // persistedResolver adapts the store's persisted context resolution to the
@@ -251,26 +292,30 @@ func New(cfg Config, opts ...Option) *Server {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health/live", s.withRequestID(s.handleLive))
-	mux.HandleFunc("/health/ready", s.withRequestID(s.handleReady))
-	mux.HandleFunc("/api/v3/voice/commands", s.withRequestID(s.handleVoiceCommands))
+	// rateGuard wraps every handler; when rate limiting is disabled
+	// (s.rateLimit == nil) it is a transparent pass-through that adds
+	// only the cost of a single function call.
+	rateGuard := s.withRateLimit
+	mux.HandleFunc("/health/live", s.withRequestID(rateGuard(s.handleLive)))
+	mux.HandleFunc("/health/ready", s.withRequestID(rateGuard(s.handleReady)))
+	mux.HandleFunc("/api/v3/voice/commands", s.withRequestID(rateGuard(s.handleVoiceCommands)))
 
 	// P4 citizen destination/stay routes. Public reads need no session; writes
 	// and the private read path require a live citizen session (Bearer token).
-	mux.HandleFunc("/api/v3/sessions", s.withRequestID(s.handleCreateSession))
-	mux.HandleFunc("/api/v3/places/resolve", s.withRequestID(s.handleResolvePlace))
-	mux.HandleFunc("/api/v3/guidance/query", s.withRequestID(s.handleGuidanceQuery))
-	mux.HandleFunc("/api/v3/reservations", s.withRequestID(s.withSession(s.handleCreateReservation)))
-	mux.HandleFunc("/api/v3/reservations/{id}", s.withRequestID(s.withSession(s.handleGetReservation)))
-	mux.HandleFunc("/api/v3/reservations/{id}/events", s.withRequestID(s.withSession(s.handleStayEvent)))
+	mux.HandleFunc("/api/v3/sessions", s.withRequestID(rateGuard(s.handleCreateSession)))
+	mux.HandleFunc("/api/v3/places/resolve", s.withRequestID(rateGuard(s.handleResolvePlace)))
+	mux.HandleFunc("/api/v3/guidance/query", s.withRequestID(rateGuard(s.handleGuidanceQuery)))
+	mux.HandleFunc("/api/v3/reservations", s.withRequestID(s.withSession(rateGuard(s.handleCreateReservation))))
+	mux.HandleFunc("/api/v3/reservations/{id}", s.withRequestID(s.withSession(rateGuard(s.handleGetReservation))))
+	mux.HandleFunc("/api/v3/reservations/{id}/events", s.withRequestID(s.withSession(rateGuard(s.handleStayEvent))))
 
 	// P4 operator operations routes. Issuance is MFA-gated at the boundary;
 	// operational routes require a live OPERATOR session with verified MFA and
 	// are jurisdiction-scoped per handler.
-	mux.HandleFunc("/api/v3/operations/sessions", s.withRequestID(s.handleCreateOperatorSession))
-	mux.HandleFunc("/api/v3/operations/sources/{id}/transitions", s.withRequestID(s.withOperator(s.handleSourceTransition)))
-	mux.HandleFunc("/api/v3/operations/sources/{id}/quarantine", s.withRequestID(s.withOperator(s.handleSourceQuarantine)))
-	mux.HandleFunc("/api/v3/operations/stays/{id}/corrections", s.withRequestID(s.withOperator(s.handleStayCorrection)))
+	mux.HandleFunc("/api/v3/operations/sessions", s.withRequestID(rateGuard(s.handleCreateOperatorSession)))
+	mux.HandleFunc("/api/v3/operations/sources/{id}/transitions", s.withRequestID(s.withOperator(rateGuard(s.handleSourceTransition))))
+	mux.HandleFunc("/api/v3/operations/sources/{id}/quarantine", s.withRequestID(s.withOperator(rateGuard(s.handleSourceQuarantine))))
+	mux.HandleFunc("/api/v3/operations/stays/{id}/corrections", s.withRequestID(s.withOperator(rateGuard(s.handleStayCorrection))))
 
 	// P5 public offline delivery routes (manifest, card, and auxiliary resources).
 	pubSrc := s.pubSource
@@ -296,8 +341,7 @@ func New(cfg Config, opts ...Option) *Server {
 
 	// P6 voice pipeline routes (transcriptions, full pipeline process, speech synthesis).
 	// When no voice process handler is configured, incomplete model configuration
-	// stays unavailable: the routes are registered and enforce HTTP methods (returning 405
-	// on non-POST), while returning 503 (MODEL_UNAVAILABLE) on requests.
+	// stays unavailable (fail closed 503).
 	voiceHandler := s.voiceProcess
 	if voiceHandler == nil {
 		voiceHandler = NewVoiceProcessHandler(nil, orchestration.DefaultLimits())
@@ -335,6 +379,9 @@ func (s *Server) Serve(ctx context.Context) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
+		if s.rateLimit != nil {
+			s.rateLimit.Stop()
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.cfg.ShutdownTimeout)
 		defer cancel()
 		s.logger.Info("shutting down", "timeout", s.cfg.ShutdownTimeout)

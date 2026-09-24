@@ -31,6 +31,22 @@ type Config struct {
 	PprofToken string
 	// EnableAccessLog enables structured request completion logging.
 	EnableAccessLog bool
+	// EnableRateLimit activates the per-remote-IP token-bucket limiter. The
+	// limiter is fail-closed OFF when nil; once set, the configured rps/burst
+	// shape applies to every non-bypass route.
+	EnableRateLimit bool
+	// RateLimitRPS is the steady-state refill rate in tokens per second.
+	RateLimitRPS float64
+	// RateLimitBurst is the maximum bucket size (and the maximum number of
+	// requests allowed in a single instant from one IP).
+	RateLimitBurst float64
+	// RateLimitBypass lists URL paths that skip rate-limit checks
+	// (e.g. /health/live, /debug/pprof/, /api/v3/observability/metrics).
+	RateLimitBypass []string
+	// TrustForwardedFor controls whether X-Forwarded-For is used as the
+	// client IP. Only enable behind a known reverse proxy that strips
+	// client-supplied headers; otherwise this is a header-injection bypass.
+	TrustForwardedFor bool
 }
 
 // DefaultConfig returns conservative boundary defaults.
