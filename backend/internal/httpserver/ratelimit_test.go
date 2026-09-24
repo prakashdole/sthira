@@ -98,7 +98,7 @@ func TestRateLimiter_EvictStale(t *testing.T) {
 }
 
 func TestRateLimiter_Allow_ConcurrentSameIP(t *testing.T) {
-	rl := NewRateLimiter(1000, 100, nil)
+	rl := NewRateLimiter(1, 100, nil)
 	defer rl.Stop()
 	var allowed, blocked int64
 	var wg sync.WaitGroup

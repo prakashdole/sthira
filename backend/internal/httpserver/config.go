@@ -47,6 +47,9 @@ type Config struct {
 	// client IP. Only enable behind a known reverse proxy that strips
 	// client-supplied headers; otherwise this is a header-injection bypass.
 	TrustForwardedFor bool
+	// AllowedOrigins defines explicit allowed Cross-Origin Resource Sharing (CORS) origins.
+	// Empty means CORS is disabled / strictly isolated. Wildcard "*" is never permitted.
+	AllowedOrigins []string
 }
 
 // DefaultConfig returns conservative boundary defaults.

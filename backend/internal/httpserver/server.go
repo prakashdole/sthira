@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"sthira/backend/internal/contracts"
@@ -91,6 +92,7 @@ type Server struct {
 	// for rate-limit decisions. Off by default.
 	trustForwardedFor bool
 	securityAuditor   *SecurityAuditor
+	allowedOrigins    []string
 }
 
 // WithVoiceProcess wires the voice process handler for the /api/v3/voice/{transcriptions,process,speech} routes.
@@ -306,6 +308,14 @@ func New(cfg Config, opts ...Option) *Server {
 	if s.securityAuditor == nil {
 		s.securityAuditor = NewSecurityAuditor()
 	}
+	if len(s.allowedOrigins) == 0 && len(s.cfg.AllowedOrigins) > 0 {
+		for _, o := range s.cfg.AllowedOrigins {
+			trimmed := strings.TrimSpace(o)
+			if trimmed != "" && trimmed != "*" {
+				s.allowedOrigins = append(s.allowedOrigins, trimmed)
+			}
+		}
+	}
 
 	mux := http.NewServeMux()
 	// rateGuard wraps every handler; when rate limiting is disabled
@@ -371,7 +381,7 @@ func New(cfg Config, opts ...Option) *Server {
 
 	s.httpSrv = &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           s.withSecurityHeaders(mux),
+		Handler:           s.withSecurityHeaders(s.withCORS(mux)),
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,
