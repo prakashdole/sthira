@@ -52,6 +52,9 @@ export const words = {
     simStale: 'Stale GPS (40 m, 45s old)',
     simRevoke: 'Revoke route',
     simReset: 'Reset / Live GPS',
+    illustrativeNotice: 'Illustrative preview — Non-reservable until verified by authority',
+    noDestinations: 'No authorized evacuation destinations are currently available for this area.',
+    tapToPlay: 'Tap to listen to audio',
   },
   ML: {
     brandHome: 'സ്തിര ഹോം', tagline: 'അടിയന്തര മാർഗനിർദേശം', chooseLanguage: 'ഭാഷ തിരഞ്ഞെടുക്കുക',
@@ -104,6 +107,9 @@ export const words = {
     simStale: 'പഴയ ജിപിഎസ് (40 മീ, 45 സെക്കൻഡ് മുൻപ്)',
     simRevoke: 'വഴി റദ്ദാക്കുക',
     simReset: 'റീസെറ്റ് / തത്സമയ ജിപിഎസ്',
+    illustrativeNotice: 'ചിത്രീകരണ മാതൃക — അധികൃത സ്ഥിരീകരണം ലഭിക്കുന്നത് വരെ ബുക്ക് ചെയ്യാനാവില്ല',
+    noDestinations: 'ഈ പ്രദേശത്ത് നിലവിൽ അംഗീകൃത ഒഴിപ്പിക്കൽ കേന്ദ്രങ്ങൾ ലഭ്യമല്ല.',
+    tapToPlay: 'ഓഡിയോ കേൾക്കാൻ ടാപ്പ് ചെയ്യുക',
   },
   HI: {
     brandHome: 'स्थिर होम', tagline: 'आपात मार्गदर्शन', chooseLanguage: 'भाषा चुनें',
@@ -156,5 +162,8 @@ export const words = {
     simStale: 'पुराना जीपीएस (40 मी, 45 सेकंड पुराना)',
     simRevoke: 'मार्ग रद्द करें',
     simReset: 'रीसेट / लाइव जीपीएस',
+    illustrativeNotice: 'उदाहरणात्मक पूर्वावलोकन — प्राधिकारी द्वारा सत्यापित होने तक अनुपलब्ध',
+    noDestinations: 'इस क्षेत्र के लिए वर्तमान में कोई अधिकृत निकासी गंतव्य उपलब्ध नहीं हैं।',
+    tapToPlay: 'ऑडियो सुनने के लिए टैप करें',
   },
 } as const;

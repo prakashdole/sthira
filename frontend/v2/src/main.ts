@@ -17,6 +17,7 @@ import {
   type PositionReading,
   type DestinationTarget,
   type ProximityEvaluation,
+  computeDistanceMeters,
   evaluateProximity,
   transitionOnPosition,
   transitionOnArrival,
@@ -39,6 +40,8 @@ type DestinationChoice = {
   route_verified: boolean;
   distance_km?: number;
   duration_minutes?: number;
+  is_illustrative?: boolean;
+  coordinates?: [number, number];
 };
 
 const icons: Record<string, string> = {
@@ -72,9 +75,25 @@ let chatError = '';
 let chatSuggestions: string[] = [...words.EN.suggestions];
 let chatMessages: ChatMessage[] = [{ role: 'ASSISTANT', text: words.EN.welcome }];
 
-// State for Go /api/v3 session and guidance integration
-const JURISDICTION = 'IN-KL';
-const PACKAGE_ID = 'PKG-EXERCISE-01';
+// Bounded exercise configuration matching cmd/sthira-exercise
+const EXERCISE_CONFIG = {
+  jurisdiction: 'DEMO-EXERCISE',
+  package_id: 'PKGDEMO-1',
+  facility_id: 'FACDEMO-1',
+  safe_zone_id: 'SZDEMO-1',
+  route_id: 'RTDEMO-1',
+  snapshot_version: 1,
+};
+const JURISDICTION = EXERCISE_CONFIG.jurisdiction;
+const PACKAGE_ID = EXERCISE_CONFIG.package_id;
+
+function getTodayYMD(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+function getTomorrowYMD(): string {
+  return new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
+}
+
 let sessionToken: string | null = sessionStorage.getItem('sthira_session_token');
 let sessionId: string = sessionStorage.getItem('sthira_session_id') || ('SES-' + Math.random().toString(36).slice(2, 10));
 let activeReservationId: string | null = sessionStorage.getItem('sthira_reservation_id');
@@ -88,22 +107,32 @@ let assistanceOpen = false;
 let partySize = 1;
 let arrivalSuccess = false;
 let arrivalRecordedAt: string | null = null;
+let arrivalPending = false;
+let arrivalError = '';
+let reservationPending = false;
+let reservationError = '';
+
+let isIllustrativePreview = true;
+let guidanceStatus: 'PENDING' | 'LOADED' | 'EMPTY' | 'ERROR' = 'PENDING';
+let guidanceFreshness = 'UNKNOWN';
+let guidanceErrorMessage = '';
 
 let ambiguousPlaces: AmbiguousCandidate[] = [];
 let availableDestinations: DestinationChoice[] = [
   {
-    facility_id: 'FAC-DEMO-01',
-    safe_zone_id: 'SZ-DEMO-01',
-    facility_name: 'Demo Community Hall',
-    capacity_known: true,
-    free: 45,
-    route_id: 'ROUTE-DEMO-01',
-    route_verified: true,
-    distance_km: 2.8,
-    duration_minutes: 35,
+    facility_id: EXERCISE_CONFIG.facility_id,
+    safe_zone_id: EXERCISE_CONFIG.safe_zone_id,
+    facility_name: 'Demo Safe Facility (SZDEMO-1)',
+    capacity_known: false,
+    free: null,
+    route_id: EXERCISE_CONFIG.route_id,
+    route_verified: false,
+    distance_km: undefined,
+    duration_minutes: undefined,
+    is_illustrative: true,
   },
 ];
-let selectedDestination: DestinationChoice = availableDestinations[0]!;
+let selectedDestination: DestinationChoice | null = availableDestinations[0]!;
 
 // R04: Consent-based foreground journey tracking state
 let journeyState: JourneyState = 'NOT_STARTED';
@@ -118,8 +147,8 @@ let locationErrorMessage = '';
 
 function getDestinationTarget(): DestinationTarget {
   return {
-    id: selectedDestination.facility_id,
-    name: selectedDestination.facility_name,
+    id: selectedDestination ? selectedDestination.facility_id : EXERCISE_CONFIG.facility_id,
+    name: selectedDestination ? selectedDestination.facility_name : 'Safe Shelter',
     longitude: mapData.shelter[0],
     latitude: mapData.shelter[1],
   };
@@ -218,8 +247,46 @@ function authHeaders(): Record<string, string> {
   return headers;
 }
 
+async function reconcileStayState(): Promise<void> {
+  const savedStayId = sessionStorage.getItem('sthira_stay_id');
+  if (!savedStayId) return;
+
+  try {
+    const res = await fetch(`/api/v3/reservations/${encodeURIComponent(savedStayId)}`, {
+      method: 'GET',
+      headers: authHeaders(),
+    });
+    if (res.ok) {
+      const body = await res.json() as { data?: { stay_id?: string; state?: string; facility_id?: string } };
+      if (body.data) {
+        activeStayId = body.data.stay_id || savedStayId;
+        if (body.data.state === 'ARRIVED') {
+          journeyState = 'ARRIVAL_REPORTED';
+          arrivalSuccess = true;
+          routeStarted = true;
+        } else if (body.data.state === 'CONFIRMED') {
+          routeStarted = true;
+        } else if (body.data.state === 'CANCELLED' || body.data.state === 'REVOKED') {
+          journeyState = 'ROUTE_REVOKED';
+        }
+        render();
+      }
+    } else if (res.status === 404 || res.status === 401 || res.status === 403) {
+      sessionStorage.removeItem('sthira_stay_id');
+      sessionStorage.removeItem('sthira_reservation_id');
+      activeStayId = null;
+      activeReservationId = null;
+    }
+  } catch {
+    // Session optional for public preview reads; fallback gracefully
+  }
+}
+
 async function initSession(): Promise<void> {
-  if (sessionToken) return;
+  if (sessionToken) {
+    await reconcileStayState();
+    return;
+  }
   try {
     const res = await fetch('/api/v3/sessions', {
       method: 'POST',
@@ -236,6 +303,7 @@ async function initSession(): Promise<void> {
         sessionId = data.data.session_id;
         sessionStorage.setItem('sthira_session_id', sessionId);
       }
+      await reconcileStayState();
     }
   } catch {
     // Session optional for public preview reads; fallback gracefully
@@ -267,7 +335,21 @@ async function checkRuntime(): Promise<void> {
   render();
 }
 
+function destinationDistanceText(d: DestinationChoice | null): { kmText: string; durationText: string } {
+  if (!d) return { kmText: '—', durationText: '—' };
+  if (d.is_illustrative) return { kmText: '2.8 km (est.)', durationText: '35 min' };
+  if (currentPosition) {
+    const distM = computeDistanceMeters(currentPosition.longitude, currentPosition.latitude, mapData.shelter[0], mapData.shelter[1]);
+    const km = (distM / 1000).toFixed(1);
+    const mins = Math.max(1, Math.round(distM / 80));
+    return { kmText: `${km} km`, durationText: `${mins} min` };
+  }
+  return { kmText: '—', durationText: '—' };
+}
+
 async function queryGuidanceDestinations(): Promise<void> {
+  guidanceStatus = 'PENDING';
+  guidanceErrorMessage = '';
   try {
     const res = await fetch('/api/v3/guidance/query', {
       method: 'POST',
@@ -276,12 +358,13 @@ async function queryGuidanceDestinations(): Promise<void> {
         jurisdiction: JURISDICTION,
         package_id: PACKAGE_ID,
         party_size: partySize,
-        start_date: '2026-09-12',
-        end_date: '2026-09-13',
+        start_date: getTodayYMD(),
+        end_date: getTomorrowYMD(),
       }),
     });
     if (res.ok) {
-      const result = await res.json() as {
+      const envelope = await res.json() as {
+        status?: string;
         data?: {
           destinations?: Array<{
             facility_id: string;
@@ -291,26 +374,59 @@ async function queryGuidanceDestinations(): Promise<void> {
             route_id?: string;
             route_verified: boolean;
           }>;
+          package_id?: string;
+          jurisdiction?: string;
+        };
+        metadata?: {
+          freshness?: string;
         };
       };
-      if (result.data?.destinations && result.data.destinations.length > 0) {
-        availableDestinations = result.data.destinations.map((d, index) => ({
+      guidanceFreshness = envelope.metadata?.freshness || 'CURRENT';
+      const dests = envelope.data?.destinations;
+      if (dests && dests.length > 0) {
+        availableDestinations = dests.map((d) => ({
           facility_id: d.facility_id,
           safe_zone_id: d.safe_zone_id,
-          facility_name: d.facility_id === 'FAC-DEMO-01' ? 'Demo Community Hall' : `Shelter ${d.facility_id}`,
+          facility_name: d.facility_id === EXERCISE_CONFIG.facility_id ? 'Demo Safe Facility (SZDEMO-1)' : `Shelter ${d.facility_id}`,
           capacity_known: d.capacity_known,
           free: d.free,
-          route_id: d.route_id || 'ROUTE-DEMO-01',
+          route_id: d.route_id || EXERCISE_CONFIG.route_id,
           route_verified: d.route_verified,
-          distance_km: 2.8 + index * 1.2,
-          duration_minutes: 35 + index * 15,
+          distance_km: currentPosition ? Math.round(computeDistanceMeters(currentPosition.longitude, currentPosition.latitude, mapData.shelter[0], mapData.shelter[1]) / 100) / 10 : undefined,
+          duration_minutes: undefined,
+          is_illustrative: false,
         }));
         selectedDestination = availableDestinations[0]!;
+        isIllustrativePreview = false;
+        guidanceStatus = 'LOADED';
+      } else {
+        availableDestinations = [];
+        selectedDestination = null;
+        isIllustrativePreview = false;
+        guidanceStatus = 'EMPTY';
       }
+    } else {
+      isIllustrativePreview = false;
+      guidanceStatus = 'ERROR';
+      availableDestinations = [];
+      selectedDestination = null;
+      guidanceErrorMessage = `Authority returned HTTP ${res.status}. Guidance unavailable.`;
     }
   } catch {
-    // Keep synthetic fallback
+    isIllustrativePreview = false;
+    guidanceStatus = 'ERROR';
+    availableDestinations = [];
+    selectedDestination = null;
+    guidanceErrorMessage = 'Network error: could not connect to guidance service.';
   }
+  render();
+}
+
+async function selectCandidatePlace(candId: string) {
+  ambiguousPlaces = [];
+  chatMessages.push({ role: 'USER', text: `Selected location: ${candId}` });
+  render();
+  await resolvePlace(candId);
 }
 
 async function resolvePlace(query: string): Promise<void> {
@@ -326,20 +442,29 @@ async function resolvePlace(query: string): Promise<void> {
       const candidates = errData.errors?.[0]?.details?.candidates;
       if (candidates && candidates.length > 0) {
         ambiguousPlaces = candidates;
+        chatMessages.push({ role: 'ASSISTANT', text: `Multiple locations match "${query}". Please choose one:` });
         render();
         return;
       }
     }
     if (res.ok) {
       ambiguousPlaces = [];
-      const data = await res.json() as { data?: { place_id: string } };
+      const data = await res.json() as { data?: { place_id: string; place_kind: string } };
       if (data.data?.place_id) {
-        chatMessages.push({ role: 'ASSISTANT', text: `Resolved location: ${data.data.place_id}` });
+        const pId = data.data.place_id;
+        chatMessages.push({ role: 'ASSISTANT', text: `Resolved location: ${pId} (${data.data.place_kind || 'place'})` });
+        // Bound candidate selection to next guidance lookup
+        await queryGuidanceDestinations();
         render();
       }
+    } else if (res.status === 404) {
+      ambiguousPlaces = [];
+      chatMessages.push({ role: 'ASSISTANT', text: `Location "${query}" not found in jurisdiction ${JURISDICTION}.` });
+      render();
     }
   } catch {
-    // Fail gracefully
+    chatMessages.push({ role: 'ASSISTANT', text: `Place lookup failed for "${query}".` });
+    render();
   }
 }
 
@@ -360,10 +485,12 @@ function render() {
   map?.remove();
   document.documentElement.lang = language === 'ML' ? 'ml' : language === 'HI' ? 'hi' : 'en';
 
-  const destinationCapacityText = selectedDestination.capacity_known
-    ? (selectedDestination.free !== null && selectedDestination.free > 0
-        ? `${selectedDestination.free} spaces available`
-        : t.capacityFull)
+  const destinationCapacityText = selectedDestination
+    ? (selectedDestination.capacity_known
+        ? (selectedDestination.free !== null && selectedDestination.free > 0
+            ? `${selectedDestination.free} spaces available`
+            : t.capacityFull)
+        : t.capacityUnknown)
     : t.capacityUnknown;
 
   document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
@@ -440,17 +567,46 @@ function render() {
             </div>
           ` : ''}
 
-          <article class="destination">
-            <div>
-              <span class="destination-label">${t.destinationLabel}</span>
-              <h2>${escapeHtml(selectedDestination.facility_name)}</h2>
-              <p>${destinationCapacityText}</p>
+          ${isIllustrativePreview ? `
+            <div class="illustrative-banner" role="status">
+              <span>${t.illustrativeNotice}</span>
             </div>
-            <div class="distance">
-              <strong>${selectedDestination.distance_km ?? 2.8} km</strong>
-              <span>${selectedDestination.duration_minutes ?? 35} min</span>
+          ` : ''}
+
+          ${guidanceStatus === 'EMPTY' ? `
+            <div class="warning-banner" role="status">
+              <span>${t.noDestinations}</span>
             </div>
-          </article>
+          ` : ''}
+
+          ${guidanceStatus === 'ERROR' ? `
+            <div class="warning-banner" role="alert">
+              <span>${escapeHtml(guidanceErrorMessage)}</span>
+            </div>
+          ` : ''}
+
+          ${selectedDestination ? `
+            <article class="destination">
+              <div>
+                <span class="destination-label">${t.destinationLabel}</span>
+                <h2>${escapeHtml(selectedDestination.facility_name)}</h2>
+                <p>${destinationCapacityText}</p>
+                ${availableDestinations.length > 1 ? `
+                  <div style="display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap;">
+                    ${availableDestinations.map(d => `
+                      <button class="secondary-action ${d.facility_id === selectedDestination?.facility_id ? 'is-active' : ''}" style="font-size: 0.72rem; min-height: 1.8rem;" type="button" data-select-facility="${escapeHtml(d.facility_id)}">
+                        ${escapeHtml(d.facility_name)}
+                      </button>
+                    `).join('')}
+                  </div>
+                ` : ''}
+              </div>
+              <div class="distance">
+                <strong>${destinationDistanceText(selectedDestination).kmText}</strong>
+                <span>${destinationDistanceText(selectedDestination).durationText}</span>
+              </div>
+            </article>
+          ` : ''}
 
           <div class="journey-tracker" aria-label="${t.journeyTracking}">
             <div class="journey-header">
@@ -468,9 +624,14 @@ function render() {
             ${simulationActive ? `<small style="color: var(--color-danger); font-size: 0.72rem;">[Simulation: ${escapeHtml(simulationNote)}]</small>` : ''}
           </div>
 
-          <button class="primary-action ${routeStarted ? 'is-success' : ''}" data-testid="start-route" type="button" data-action="route">
-            ${icons.route}<span>${routeStarted ? t.routeActive : t.startRoute}</span>${icons.arrow}
+          <button class="primary-action ${routeStarted ? 'is-success' : ''}" data-testid="start-route" type="button" data-action="route" ${(!selectedDestination || isIllustrativePreview) ? 'disabled title="Awaiting verified server guidance"' : ''}>
+            ${icons.route}<span>${reservationPending ? 'Reserving...' : routeStarted ? t.routeActive : t.startRoute}</span>${icons.arrow}
           </button>
+          ${reservationError ? `
+            <div class="warning-banner" role="alert" style="margin-top: 4px;">
+              <span>${escapeHtml(reservationError)}</span>
+            </div>
+          ` : ''}
 
           <ol class="instructions">
             <li><span>1</span><p><strong>${t.instruction1Title}</strong> ${t.instruction1Body}</p></li>
@@ -497,7 +658,7 @@ function render() {
           </div>
 
           <button class="arrival-action" data-testid="arrival-confirmation" type="button" data-action="arrival-open">
-            ${arrivalRecordedAt ? t.arrivalRecorded : t.arrived}
+            ${arrivalSuccess ? t.arrivalRecorded : arrivalPending ? 'Confirming...' : t.arrived}
           </button>
 
           <a class="rescue-action" data-testid="call-112" href="tel:112">
@@ -546,9 +707,16 @@ function render() {
             `<article class="chat-message chat-message--${message.role.toLowerCase()}">
               <span>${message.role === 'USER' ? t.you : 'Sthira'}</span>
               <p>${escapeHtml(message.text)}</p>
-              ${message.role === 'ASSISTANT' ? `<button type="button" data-speak-message="${index}" aria-label="${t.readAloud}">${icons.volume}<span>${t.listen}</span></button>` : ''}
+              ${message.role === 'ASSISTANT' && message.audioB64 ? `<button type="button" data-speak-message="${index}" aria-label="${t.readAloud}">${icons.volume}<span>${t.listen}</span></button>` : ''}
             </article>`
           ).join('')}
+          ${autoplayBlockedAudio ? `
+            <div style="padding: 4px 8px;">
+              <button class="tap-play-button" type="button" data-action="tap-play-audio">
+                ${icons.volume} <span>${t.tapToPlay}</span>
+              </button>
+            </div>
+          ` : ''}
           ${chatPending ? `<div class="chat-thinking"><i></i><i></i><i></i><span>${t.checkingExercise}</span></div>` : ''}
         </div>
         ${chatError ? `<p class="chat-error" role="alert">${escapeHtml(chatError)}</p>` : ''}
@@ -590,9 +758,10 @@ function render() {
           </div>
           <p>${t.demoNotice}</p>
           <dl>
-            <div><dt>${t.authorityFormat}</dt><dd>NDMA SACHET / CAP (Go /api/v3)</dd></div>
-            <div><dt>${t.issued}</dt><dd>11 Sep 2026, 4:00 PM</dd></div>
-            <div><dt>${t.expires}</dt><dd>11 Sep 2026, 6:00 PM</dd></div>
+            <div><dt>${t.authorityFormat}</dt><dd>NDMA SACHET / CAP (Source: SRCDEMO-1)</dd></div>
+            <div><dt>Package ID</dt><dd>${PACKAGE_ID} (Jurisdiction: ${JURISDICTION})</dd></div>
+            <div><dt>Freshness State</dt><dd>${guidanceFreshness}</dd></div>
+            <div><dt>Valid Dates</dt><dd>${getTodayYMD()} to ${getTomorrowYMD()}</dd></div>
             <div><dt>${t.backend}</dt><dd>${runtimeCopy()}</dd></div>
           </dl>
         </dialog>
@@ -613,8 +782,15 @@ function render() {
               <strong>${partySize} ${partySize === 1 ? t.person : t.people}</strong>
               <button type="button" data-action="party-plus" aria-label="${t.increaseParty}">+</button>
             </div>
+            ${arrivalError ? `
+              <div class="warning-banner" role="alert" style="margin-top: 8px;">
+                <span>${escapeHtml(arrivalError)}</span>
+              </div>
+            ` : ''}
             <div class="modal-actions">
-              <button class="primary-action" type="button" data-action="arrival-yes">${t.weArrived}</button>
+              <button class="primary-action" type="button" data-action="arrival-yes" ${arrivalPending ? 'disabled' : ''}>
+                ${arrivalPending ? 'Confirming...' : t.weArrived}
+              </button>
               <button class="secondary-action" type="button" data-action="arrival-no">${t.needHelp}</button>
             </div>
           `}
@@ -821,15 +997,100 @@ function speakText(text: string) {
   window.speechSynthesis.speak(u);
 }
 
-function playAudioB64(b64: string, fallbackText?: string) {
-  try {
-    const audio = new Audio(`data:audio/wav;base64,${b64}`);
-    audio.play().catch(() => {
-      if (fallbackText) speakText(fallbackText);
-    });
-  } catch {
-    if (fallbackText) speakText(fallbackText);
+function formatSpeechKeyText(key: string, lang: Language): string {
+  const templates: Record<string, Record<Language, string>> = {
+    clarify_place: {
+      EN: 'Multiple locations match your request. Please select a location from the options.',
+      ML: 'ഒന്നിലധികം സ്ഥലങ്ങൾ പൊരുത്തപ്പെടുന്നു. ഓപ്ഷനുകളിൽ നിന്ന് സ്ഥലം തിരഞ്ഞെടുക്കുക.',
+      HI: 'एकाधिक स्थान मेल खाते हैं। कृपया विकल्पों में से एक स्थान चुनें।',
+    },
+    destination_options: {
+      EN: 'Authorized destination options are displayed on screen.',
+      ML: 'അംഗീകൃത ലക്ഷ്യസ്ഥാന ഓപ്ഷനുകൾ സ്ക്രീനിൽ കാണിച്ചിരിക്കുന്നു.',
+      HI: 'अधिकृत गंतव्य विकल्प स्क्रीन पर प्रदर्शित हैं।',
+    },
+    verified_route_unavailable: {
+      EN: 'Verified route unavailable for this location. Follow emergency guidance.',
+      ML: 'ഈ സ്ഥലത്തേക്ക് പരിശോധിച്ച വഴി ലഭ്യമല്ല. അടിയന്തര നിർദ്ദേശങ്ങൾ പാലിക്കുക.',
+      HI: 'इस स्थान के लिए सत्यापित मार्ग उपलब्ध नहीं है। आपातकालीन मार्गदर्शन का पालन करें।',
+    },
+    repeat_template: {
+      EN: 'Repeating evacuation guidance instructions.',
+      ML: 'ഒഴിപ്പിക്കൽ മാർഗ്ഗനിർദ്ദേശങ്ങൾ ആവർത്തിക്കുന്നു.',
+      HI: 'निकासी मार्गदर्शन दोहराया जा रहा है।',
+    },
+    clarify_audio_unclear: {
+      EN: 'Audio unclear. Please repeat or use touch controls.',
+      ML: 'ശബ്ദം വ്യക്തമല്ല. വീണ്ടും പറയുകയോ ബട്ടണുകൾ ഉപയോഗിക്കുകയോ ചെയ്യുക.',
+      HI: 'ऑडियो स्पष्ट नहीं है। कृपया दोहराएं या ऑन-स्क्रीन नियंत्रणों का उपयोग करें।',
+    },
+    go_to_safe_zone: {
+      EN: 'Move to the designated safe zone along the approved route.',
+      ML: 'അംഗീകൃത വഴിയിലൂടെ നിശ്ചയിച്ച സുരക്ഷിത മേഖലയിലേക്ക് മാറുക.',
+      HI: 'स्वीकृत मार्ग से निर्दिष्ट सुरक्षित क्षेत्र की ओर बढ़ें।',
+    },
+  };
+  return templates[key]?.[lang] || `Official guidance: [${key}]`;
+}
+
+let autoplayBlockedAudio: { audio: HTMLAudioElement; b64: string } | null = null;
+
+async function verifyAndPlayAudio(audioInfo: {
+  audio_b64: string;
+  content_type?: string;
+  byte_size?: number;
+  checksum_sha256?: string;
+}): Promise<{ success: boolean; autoplayBlocked: boolean; error?: string }> {
+  if (!audioInfo.audio_b64) return { success: false, autoplayBlocked: false, error: 'No audio data' };
+
+  if (audioInfo.content_type && !audioInfo.content_type.startsWith('audio/')) {
+    return { success: false, autoplayBlocked: false, error: 'Invalid audio content-type: ' + audioInfo.content_type };
   }
+
+  let binaryStr: string;
+  try {
+    binaryStr = atob(audioInfo.audio_b64);
+  } catch {
+    return { success: false, autoplayBlocked: false, error: 'Corrupted audio base64' };
+  }
+  const byteLen = binaryStr.length;
+  if (audioInfo.byte_size && Math.abs(byteLen - audioInfo.byte_size) > 4) {
+    return { success: false, autoplayBlocked: false, error: `Audio byte size mismatch: expected ${audioInfo.byte_size}, got ${byteLen}` };
+  }
+  if (byteLen > 768 * 1024) {
+    return { success: false, autoplayBlocked: false, error: 'Audio exceeds maximum size ceiling' };
+  }
+
+  if (audioInfo.checksum_sha256 && window.crypto?.subtle) {
+    const uint8 = new Uint8Array(byteLen);
+    for (let i = 0; i < byteLen; i++) uint8[i] = binaryStr.charCodeAt(i);
+    const hashBuf = await window.crypto.subtle.digest('SHA-256', uint8);
+    const hashHex = Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+    if (hashHex.toLowerCase() !== audioInfo.checksum_sha256.toLowerCase()) {
+      return { success: false, autoplayBlocked: false, error: 'Audio checksum mismatch (integrity failure)' };
+    }
+  }
+
+  return new Promise((resolve) => {
+    try {
+      const mime = audioInfo.content_type || 'audio/wav';
+      const audio = new Audio(`data:${mime};base64,${audioInfo.audio_b64}`);
+      audio.play().then(() => {
+        autoplayBlockedAudio = null;
+        resolve({ success: true, autoplayBlocked: false });
+      }).catch((err: Error) => {
+        if (err.name === 'NotAllowedError') {
+          autoplayBlockedAudio = { audio, b64: audioInfo.audio_b64 };
+          render();
+          resolve({ success: false, autoplayBlocked: true, error: 'Autoplay blocked by browser policy. Tap to play.' });
+        } else {
+          resolve({ success: false, autoplayBlocked: false, error: err.message });
+        }
+      });
+    } catch (e: any) {
+      resolve({ success: false, autoplayBlocked: false, error: e?.message || 'Audio playback error' });
+    }
+  });
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -859,10 +1120,12 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
     });
 
     if (!res.ok) {
-      // If voice model worker is unavailable (503), fall back gracefully to text commands
       if (res.status === 503 || res.status === 504) {
-        if (input.kind === 'transcript') {
-          await fallbackTextCommand(input.text);
+        // If voice/middle model is unavailable, provide usable touch/text lookup via places API
+        if (input.kind === 'transcript' && input.text.trim()) {
+          chatPending = false;
+          render();
+          await resolvePlace(input.text.trim());
           return;
         }
         throw new Error('MODEL_UNAVAILABLE');
@@ -874,17 +1137,22 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
       data?: {
         validated_proposal?: unknown;
         template?: { speech_key?: string };
-        audio?: { audio_b64?: string };
+        audio?: {
+          audio_b64?: string;
+          content_type?: string;
+          byte_size?: number;
+          checksum_sha256?: string;
+        };
         state?: string;
       };
     };
 
     const out = envelope.data;
     const replyText = out?.template?.speech_key
-      ? (scenario.instruction[language === 'ML' ? 'ML' : 'EN'] || words[language].summary)
+      ? formatSpeechKeyText(out.template.speech_key, language)
       : words[language].responseReady;
 
-    chatMessages.push({ role: 'ASSISTANT', text: replyText });
+    chatMessages.push({ role: 'ASSISTANT', text: replyText, audioB64: out?.audio?.audio_b64 });
     voiceFeedbackKey = 'responseReady';
 
     // Execute validated map action if proposal is present
@@ -902,11 +1170,17 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
       });
     }
 
-    // Play synthesized audio if returned
+    // Play verified synthesized audio if returned
     if (out?.audio?.audio_b64) {
-      playAudioB64(out.audio.audio_b64, replyText);
-    } else {
-      speakText(replyText);
+      const playRes = await verifyAndPlayAudio({
+        audio_b64: out.audio.audio_b64,
+        content_type: out.audio.content_type,
+        byte_size: out.audio.byte_size,
+        checksum_sha256: out.audio.checksum_sha256,
+      });
+      if (!playRes.success && !playRes.autoplayBlocked) {
+        chatError = `Audio verification notice: ${playRes.error}`;
+      }
     }
 
     chatPending = false;
@@ -917,34 +1191,6 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
     voiceFeedbackKey = 'backendUnavailable';
     render();
   }
-}
-
-async function fallbackTextCommand(text: string) {
-  try {
-    const res = await fetch('/api/v3/voice/commands', {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({
-        request_id: 'req-' + Math.random().toString(36).slice(2, 10),
-        data_version: '3.0',
-        jurisdiction: JURISDICTION,
-        proposal: {
-          schema_version: '1.0',
-          status: 'OK',
-          actions: [{ type: 'RECENTER', view_id: 'DEMO_OVERVIEW' }],
-        },
-      }),
-    });
-    if (res.ok) {
-      chatMessages.push({ role: 'ASSISTANT', text: words[language].responseReady });
-    } else {
-      chatMessages.push({ role: 'ASSISTANT', text: words[language].summary });
-    }
-  } catch {
-    chatMessages.push({ role: 'ASSISTANT', text: words[language].summary });
-  }
-  chatPending = false;
-  render();
 }
 
 async function toggleLocalRecording() {
@@ -1008,6 +1254,9 @@ function startTracking() {
 
   geolocationWatchId = navigator.geolocation.watchPosition(
     (pos) => {
+      if (document.hidden || journeyState === 'PAUSED' || journeyState === 'NOT_STARTED') {
+        return;
+      }
       const reading: PositionReading = {
         longitude: pos.coords.longitude,
         latitude: pos.coords.latitude,
@@ -1098,32 +1347,41 @@ function revokeRoute() {
 }
 
 async function startRouteReservation() {
+  if (!selectedDestination || isIllustrativePreview) {
+    reservationError = 'Cannot reserve route for illustrative preview. Waiting for authorized operational guidance.';
+    render();
+    return;
+  }
+
   routeStarted = true;
   directionsOpen = true;
-  if (journeyState === 'NOT_STARTED') {
-    startTracking();
-  }
+  reservationPending = true;
+  reservationError = '';
   render();
   focusRoute();
 
   // Create explicit reservation on Go backend if session is initialized
   try {
     await initSession();
+    const pendingKey = sessionStorage.getItem('pending_reservation_idem') || ('idem-' + Math.random().toString(36).slice(2, 10));
+    sessionStorage.setItem('pending_reservation_idem', pendingKey);
+
     const res = await fetch('/api/v3/reservations', {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({
         facility_id: selectedDestination.facility_id,
         package_id: PACKAGE_ID,
-        route_id: selectedDestination.route_id || 'ROUTE-DEMO-01',
+        route_id: selectedDestination.route_id || EXERCISE_CONFIG.route_id,
         party_size: partySize,
-        start_date: '2026-09-12',
-        end_date: '2026-09-13',
-        idempotency_key: 'idem-' + Math.random().toString(36).slice(2, 10),
-        snapshot_version: 1,
+        start_date: getTodayYMD(),
+        end_date: getTomorrowYMD(),
+        idempotency_key: pendingKey,
+        snapshot_version: EXERCISE_CONFIG.snapshot_version,
       }),
     });
     if (res.ok) {
+      sessionStorage.removeItem('pending_reservation_idem');
       const data = await res.json() as { data?: { reservation_id?: string; stay_id?: string } };
       if (data.data?.reservation_id) {
         activeReservationId = data.data.reservation_id;
@@ -1133,9 +1391,19 @@ async function startRouteReservation() {
         activeStayId = data.data.stay_id;
         sessionStorage.setItem('sthira_stay_id', activeStayId);
       }
+      reservationPending = false;
+      reservationError = '';
+      render();
+    } else {
+      const errJson = await res.json().catch(() => null);
+      reservationError = errJson?.error?.message || errJson?.message || `Reservation failed (${res.status})`;
+      reservationPending = false;
+      render();
     }
   } catch {
-    // Keep local route state active
+    reservationError = 'Network error while requesting reservation.';
+    reservationPending = false;
+    render();
   }
 }
 
@@ -1147,32 +1415,59 @@ async function confirmArrival() {
     return;
   }
 
-  journeyState = 'ARRIVAL_REPORTED';
-  arrivalSuccess = true;
-  arrivalRecordedAt = new Date().toLocaleTimeString();
-  stopTracking();
+  arrivalPending = true;
+  arrivalError = '';
   render();
 
-  // Send explicit ARRIVE event to Go backend if reservation exists
-  if (activeReservationId || activeStayId) {
-    const id = activeReservationId || activeStayId;
+  // If active stay exists on backend, arrival requires explicit server acknowledgment
+  if (activeStayId) {
+    const idemKey = sessionStorage.getItem('pending_arrival_idem') || ('arrive-' + Math.random().toString(36).slice(2, 10));
+    sessionStorage.setItem('pending_arrival_idem', idemKey);
+
     try {
-      await fetch(`/api/v3/reservations/${id}/events`, {
+      const res = await fetch(`/api/v3/reservations/${encodeURIComponent(activeStayId)}/events`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({
           type: 'ARRIVE',
-          idempotency_key: 'arrive-' + Math.random().toString(36).slice(2, 10),
-          party_size: partySize,
-          payload: {
-            proximity_verified: lastProximityEval?.isNear ?? false,
-            accuracy_meters: currentPosition?.accuracyMeters ?? null,
-            timestamp: new Date().toISOString(),
-          },
+          idempotency_key: idemKey,
         }),
       });
+
+      if (res.ok) {
+        sessionStorage.removeItem('pending_arrival_idem');
+        journeyState = 'ARRIVAL_REPORTED';
+        arrivalSuccess = true;
+        arrivalRecordedAt = new Date().toLocaleTimeString();
+        arrivalPending = false;
+        arrivalError = '';
+        stopTracking();
+        render();
+      } else {
+        const errJson = await res.json().catch(() => null);
+        arrivalError = errJson?.error?.message || errJson?.message || `Server rejected arrival (${res.status})`;
+        arrivalPending = false;
+        render();
+      }
     } catch {
-      // Local arrival confirmation retained
+      arrivalError = 'Network error while reporting arrival. Please try again.';
+      arrivalPending = false;
+      render();
+    }
+  } else {
+    // Fail-closed if backend session active but no stay_id; if illustrative preview, allow local state change
+    if (isIllustrativePreview) {
+      journeyState = 'ARRIVAL_REPORTED';
+      arrivalSuccess = true;
+      arrivalRecordedAt = new Date().toLocaleTimeString();
+      arrivalPending = false;
+      arrivalError = '';
+      stopTracking();
+      render();
+    } else {
+      arrivalError = 'No verified stay reservation found. Please select an authorized route first.';
+      arrivalPending = false;
+      render();
     }
   }
 }
@@ -1223,8 +1518,34 @@ function bindInteractions() {
     b.addEventListener('click', () => {
       const message = chatMessages[Number(b.dataset.speakMessage)];
       if (message) {
-        if (message.audioB64) playAudioB64(message.audioB64, message.text);
-        else speakText(message.text);
+        if (message.audioB64) {
+          void verifyAndPlayAudio({ audio_b64: message.audioB64 });
+        } else {
+          speakText(message.text);
+        }
+      }
+    })
+  );
+
+  document.querySelector<HTMLButtonElement>('[data-action="tap-play-audio"]')?.addEventListener('click', () => {
+    if (autoplayBlockedAudio) {
+      const { audio } = autoplayBlockedAudio;
+      autoplayBlockedAudio = null;
+      audio.play().catch(() => {});
+      render();
+    }
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('[data-select-facility]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const facId = b.dataset.selectFacility;
+      const found = availableDestinations.find((d) => d.facility_id === facId);
+      if (found) {
+        selectedDestination = found;
+        if (found.coordinates) {
+          mapData.shelter = found.coordinates;
+        }
+        render();
       }
     })
   );
@@ -1244,10 +1565,7 @@ function bindInteractions() {
     b.addEventListener('click', () => {
       const candId = b.dataset.candidateId;
       if (candId) {
-        ambiguousPlaces = [];
-        chatMessages.push({ role: 'USER', text: `Selected: ${candId}` });
-        render();
-        void resolvePlace(candId);
+        void selectCandidatePlace(candId);
       }
     })
   );
