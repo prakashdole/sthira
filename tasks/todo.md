@@ -372,6 +372,17 @@ The earlier claim of absent OpenFreeMap coverage was invalid: the test used an i
 - Narrow-browser preview confirms solid blue Speak is readable and remains visually subordinate to the red Call Help escalation.
 - `npm run build`, `python -m pytest tests/test_v2_map_geometry.py -q`, and `git diff --check` pass.
 
+## Authority operations console — 2026-09-25
+
+- [x] Remove consumer voice ripple.
+- [x] Add an authority-only synthetic operations view with incident summary, operational map, and rescue-review queue.
+- [x] Verify authority view, consumer regression, build, and geometry tests.
+
+### Review — 2026-09-25
+
+- Consumer Speak no longer has a ripple. The authority view at `?view=authority` renders a synthetic incident map, operational summary, and a rescue-review queue. Marking a request only changes browser-local demo state and does not dispatch a team.
+- `npm run build`, `python -m pytest tests/test_v2_map_geometry.py -q`, and `git diff --check` pass.
+
 - [x] Operational-package manifest now requires authority, jurisdiction, version, effective/expiry window, checksum, facilities, allocation policy, emergency contacts, geometry, and cross-references.
 - [x] Synthetic package checksum verification, authenticated demo publication, version conflict detection, supersession, cancellation, rollback, and active-package API are covered by tests.
 - [x] Assignment API requires alert/session/idempotency linkage and rejects payload conflicts; local concurrent allocation and arrival tests pass.
