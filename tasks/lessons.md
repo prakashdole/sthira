@@ -30,3 +30,4 @@
 - When a user asks for the original treatment, restore its exact previous token values rather than an approximation of its color family.
 - A pseudo-element animation that scales from a positioned center must include its translation in every keyframe, or it will drift away from its target icon.
 - When an effect semantically belongs to a child icon, attach it to that child rather than centering it against a larger parent control.
+- If a floating pseudo-element continues to read as misaligned, use the icon's own outline/ring as the animation anchor instead of a separate decorative shape.
