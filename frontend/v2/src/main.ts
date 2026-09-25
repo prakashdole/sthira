@@ -31,6 +31,8 @@ import {
   type VoiceResponseEnvelope,
   processVoiceEnvelope,
   isAudioValidForReplay as isAudioReplayValid,
+  verifyAudioIntegrity,
+  AudioPlaybackGuard,
 } from './audioGuidance';
 
 type RuntimeState = 'checking' | 'demo' | 'blocked' | 'offline';
@@ -392,7 +394,7 @@ async function queryGuidanceDestinations(): Promise<void> {
         guidanceStatus = 'ERROR';
         guidanceErrorMessage = `Source status is ${guidanceFreshness}. Guidance unavailable.`;
         currentDataVersion = 'UNAVAILABLE';
-        autoplayBlockedAudio = null;
+        audioGuard.invalidate();
         availableDestinations = [];
         selectedDestination = null;
         isIllustrativePreview = false;
@@ -400,7 +402,11 @@ async function queryGuidanceDestinations(): Promise<void> {
         return;
       }
       guidanceFreshness = 'CURRENT';
-      currentDataVersion = envelope.data_version || 'v1';
+      const nextDataVersion = envelope.data_version || 'v1';
+      if (nextDataVersion !== currentDataVersion) {
+        audioGuard.invalidate();
+      }
+      currentDataVersion = nextDataVersion;
       const dests = envelope.data?.destinations;
       if (dests && dests.length > 0) {
         availableDestinations = dests.map((d) => ({
@@ -429,7 +435,7 @@ async function queryGuidanceDestinations(): Promise<void> {
       guidanceStatus = 'ERROR';
       guidanceFreshness = 'UNAVAILABLE';
       currentDataVersion = 'UNAVAILABLE';
-      autoplayBlockedAudio = null;
+      audioGuard.invalidate();
       availableDestinations = [];
       selectedDestination = null;
       guidanceErrorMessage = `Authority returned HTTP ${res.status}. Guidance unavailable.`;
@@ -439,7 +445,7 @@ async function queryGuidanceDestinations(): Promise<void> {
     guidanceStatus = 'ERROR';
     guidanceFreshness = 'UNAVAILABLE';
     currentDataVersion = 'UNAVAILABLE';
-    autoplayBlockedAudio = null;
+    audioGuard.invalidate();
     availableDestinations = [];
     selectedDestination = null;
     guidanceErrorMessage = 'Network error: could not connect to guidance service.';
@@ -735,7 +741,7 @@ function render() {
               ${message.role === 'ASSISTANT' && message.audio && isAudioValidForReplay(message.audio) ? `<button type="button" data-speak-message="${index}" aria-label="${t.readAloud}">${icons.volume}<span>${t.listen}</span></button>` : ''}
             </article>`
           ).join('')}
-          ${autoplayBlockedAudio ? `
+          ${audioGuard.canPlayPending(guidanceFreshness, currentDataVersion, speechLanguageTag(language)) ? `
             <div style="padding: 4px 8px;">
               <button class="tap-play-button" type="button" data-action="tap-play-audio">
                 ${icons.volume} <span>${t.tapToPlay}</span>
@@ -1018,9 +1024,14 @@ function isAudioValidForReplay(audio?: AudioMetadata): boolean {
   return isAudioReplayValid(audio, guidanceFreshness, currentDataVersion, speechLanguageTag(language));
 }
 
-let autoplayBlockedAudio: { audio: HTMLAudioElement; b64: string } | null = null;
+const audioGuard = new AudioPlaybackGuard();
 
 async function verifyAndPlayAudio(audioInfo: AudioMetadata): Promise<{ success: boolean; autoplayBlocked: boolean; error?: string }> {
+  const currentGen = audioGuard.currentGeneration;
+  const currentFreshness = guidanceFreshness;
+  const currentDataVer = currentDataVersion;
+  const currentLang = speechLanguageTag(language);
+
   if (!isAudioValidForReplay(audioInfo)) {
     return {
       success: false,
@@ -1029,41 +1040,27 @@ async function verifyAndPlayAudio(audioInfo: AudioMetadata): Promise<{ success: 
     };
   }
 
-  if (audioInfo.content_type && !audioInfo.content_type.startsWith('audio/')) {
-    return { success: false, autoplayBlocked: false, error: 'Invalid audio content-type: ' + audioInfo.content_type };
+  const integrity = await verifyAudioIntegrity(audioInfo);
+  if (!integrity.success) {
+    return {
+      success: false,
+      autoplayBlocked: false,
+      error: integrity.error || 'Audio integrity verification failed',
+    };
   }
 
-  if (audioInfo.settings) {
-    if (audioInfo.settings.sample_rate_hz !== undefined && audioInfo.settings.sample_rate_hz <= 0) {
-      return { success: false, autoplayBlocked: false, error: 'Invalid audio settings: sample_rate_hz <= 0' };
-    }
-    if (audioInfo.settings.channels !== undefined && audioInfo.settings.channels <= 0) {
-      return { success: false, autoplayBlocked: false, error: 'Invalid audio settings: channels <= 0' };
-    }
-  }
-
-  let binaryStr: string;
-  try {
-    binaryStr = atob(audioInfo.audio_b64);
-  } catch {
-    return { success: false, autoplayBlocked: false, error: 'Corrupted audio base64' };
-  }
-  const byteLen = binaryStr.length;
-  if (audioInfo.byte_size != null && byteLen !== audioInfo.byte_size) {
-    return { success: false, autoplayBlocked: false, error: `Audio byte size mismatch: expected ${audioInfo.byte_size}, got ${byteLen}` };
-  }
-  if (byteLen > 768 * 1024) {
-    return { success: false, autoplayBlocked: false, error: 'Audio exceeds maximum size ceiling' };
-  }
-
-  if (audioInfo.checksum_sha256 && window.crypto?.subtle) {
-    const uint8 = new Uint8Array(byteLen);
-    for (let i = 0; i < byteLen; i++) uint8[i] = binaryStr.charCodeAt(i);
-    const hashBuf = await window.crypto.subtle.digest('SHA-256', uint8);
-    const hashHex = Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, '0')).join('');
-    if (hashHex.toLowerCase() !== audioInfo.checksum_sha256.toLowerCase()) {
-      return { success: false, autoplayBlocked: false, error: 'Audio checksum mismatch (integrity failure)' };
-    }
+  if (
+    audioGuard.currentGeneration !== currentGen ||
+    guidanceFreshness !== currentFreshness ||
+    currentDataVersion !== currentDataVer ||
+    speechLanguageTag(language) !== currentLang ||
+    guidanceFreshness !== 'CURRENT'
+  ) {
+    return {
+      success: false,
+      autoplayBlocked: false,
+      error: 'Audio playback cancelled: UI context changed during verification',
+    };
   }
 
   return new Promise((resolve) => {
@@ -1071,13 +1068,39 @@ async function verifyAndPlayAudio(audioInfo: AudioMetadata): Promise<{ success: 
       const mime = audioInfo.content_type || 'audio/wav';
       const audio = new Audio(`data:${mime};base64,${audioInfo.audio_b64}`);
       audio.play().then(() => {
-        autoplayBlockedAudio = null;
+        if (
+          audioGuard.currentGeneration !== currentGen ||
+          guidanceFreshness !== currentFreshness ||
+          currentDataVersion !== currentDataVer ||
+          speechLanguageTag(language) !== currentLang ||
+          guidanceFreshness !== 'CURRENT'
+        ) {
+          audio.pause();
+          resolve({ success: false, autoplayBlocked: false, error: 'Context changed during playback start' });
+          return;
+        }
+        audioGuard.invalidate();
         resolve({ success: true, autoplayBlocked: false });
       }).catch((err: Error) => {
         if (err.name === 'NotAllowedError') {
-          autoplayBlockedAudio = { audio, b64: audioInfo.audio_b64 };
-          render();
-          resolve({ success: false, autoplayBlocked: true, error: 'Autoplay blocked by browser policy. Tap to play.' });
+          if (
+            audioGuard.currentGeneration === currentGen &&
+            guidanceFreshness === currentFreshness &&
+            currentDataVersion === currentDataVer &&
+            speechLanguageTag(language) === currentLang &&
+            guidanceFreshness === 'CURRENT'
+          ) {
+            audioGuard.setPending({
+              audio,
+              metadata: audioInfo,
+              expectedLanguage: currentLang,
+              expectedDataVersion: currentDataVer,
+            });
+            render();
+            resolve({ success: false, autoplayBlocked: true, error: 'Autoplay blocked by browser policy. Tap to play.' });
+          } else {
+            resolve({ success: false, autoplayBlocked: false, error: 'Context changed before autoplay could be queued' });
+          }
         } else {
           resolve({ success: false, autoplayBlocked: false, error: err.message });
         }
@@ -1096,6 +1119,7 @@ async function blobToBase64(blob: Blob): Promise<string> {
 }
 
 async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content_type: string } | { kind: 'transcript'; text: string }) {
+  audioGuard.invalidate();
   chatPending = true;
   chatError = '';
   voiceFeedbackKey = 'checkingBackend';
@@ -1171,7 +1195,7 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
           if (newLang === 'ml-IN') language = 'ML';
           if (newLang === 'hi-IN') language = 'HI';
           if (newLang === 'en-IN') language = 'EN';
-          autoplayBlockedAudio = null;
+          audioGuard.invalidate();
           render();
         },
         (candidates) => {
@@ -1190,6 +1214,9 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
         if (!playRes.success && !playRes.autoplayBlocked) {
           chatError = `Audio verification notice: ${playRes.error}`;
         }
+      } else if (outcome.guidanceSpeechExpected) {
+        // Guidance speech was expected, but audio metadata is missing/invalid or audio was unavailable
+        chatError = 'Audio verification notice: Audio integrity metadata missing or invalid';
       }
     } else if (outcome.captionUnavailable) {
       // Guidance speech was expected (e.g. destinations), but template text was absent:
@@ -1357,7 +1384,7 @@ function simulatePosition(
 
 function revokeRoute() {
   journeyState = transitionOnRevocation(journeyState);
-  autoplayBlockedAudio = null;
+  audioGuard.invalidate();
   guidanceFreshness = 'REVOKED';
   currentDataVersion = 'REVOKED';
   if (geolocationWatchId !== null) {
@@ -1493,7 +1520,7 @@ function bindInteractions() {
       chatSuggestions = [...words[language].suggestions];
       chatError = '';
       voiceFeedbackKey = 'micPrivacy';
-      autoplayBlockedAudio = null;
+      audioGuard.invalidate();
       render();
     })
   );
@@ -1534,11 +1561,26 @@ function bindInteractions() {
     })
   );
 
-  document.querySelector<HTMLButtonElement>('[data-action="tap-play-audio"]')?.addEventListener('click', () => {
-    if (autoplayBlockedAudio) {
-      const { audio } = autoplayBlockedAudio;
-      autoplayBlockedAudio = null;
-      audio.play().catch(() => {});
+  document.querySelector<HTMLButtonElement>('[data-action="tap-play-audio"]')?.addEventListener('click', async () => {
+    const curLang = speechLanguageTag(language);
+    if (!audioGuard.canPlayPending(guidanceFreshness, currentDataVersion, curLang)) {
+      audioGuard.invalidate();
+      render();
+      return;
+    }
+    const pending = audioGuard.pendingAutoplay;
+    if (pending) {
+      const integrity = await verifyAudioIntegrity(pending.metadata);
+      if (!integrity.success || !audioGuard.canPlayPending(guidanceFreshness, currentDataVersion, curLang)) {
+        audioGuard.invalidate();
+        chatError = `Audio verification notice: ${integrity.error || 'Audio integrity check failed'}`;
+        render();
+        return;
+      }
+      const audio = audioGuard.consumePending();
+      if (audio) {
+        audio.play().catch(() => {});
+      }
       render();
     }
   });
@@ -1753,7 +1795,7 @@ window.addEventListener('online', () => {
 
 window.addEventListener('offline', () => {
   runtime = 'offline';
-  autoplayBlockedAudio = null;
+  audioGuard.invalidate();
   guidanceFreshness = 'UNAVAILABLE';
   currentDataVersion = 'UNAVAILABLE';
   render();

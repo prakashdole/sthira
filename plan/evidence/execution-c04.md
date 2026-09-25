@@ -73,7 +73,7 @@ Use this procedure for local frontend + backend integration, test suites, and br
    STHIRA_EXERCISE_SEED=1 \
    go run ./cmd/sthira-exercise
    ```
-   *Persistence Check*: To verify persistence across server restarts, restart the process **without** `STHIRA_EXERCISE_SEED=1` (or rely on safe idempotent seeding) to verify clean reload of stored stays without destructive package operations.
+   *Persistence Check*: To verify persistence across server restarts, restart the process **without** `STHIRA_EXERCISE_SEED=1` to verify clean reload of stored stays. Initial seed requires `STHIRA_EXERCISE_SEED=1` into a fresh database only; reseeding an existing database fails closed because package seeding is non-idempotent (`PKGDEMO-1:1` already exists in database).
 
 4. **Vite Frontend Proxying**:
    ```bash
@@ -88,66 +88,107 @@ Use this procedure for local frontend + backend integration, test suites, and br
 
 ---
 
-### Procedure B: Deferred Real Models on AWS GPU (REAL_INFERENCE)
+### Procedure B: Deferred Real Models on AWS GPU (REAL_INFERENCE) — Prepared but NOT_RUN (`BLOCKED_HARDWARE`)
 **STRICTLY UNEXECUTED PENDING AWS RESTART AUTHORIZATION.**
-Instance `i-01d17e39266c292c2` is STOPPED in region `us-east-2`.
+Instance `i-01d17e39266c292c2` is verified STOPPED in region `us-east-2`.
 Weights are preserved on root EBS volume `vol-0b4e1d279d21586e2`:
-- Sarvam-30B FP8 MoE (~37 GB)
-- IndicConformer-600M-Multi ONNX (~2.4 GB)
-- Indic Parler-TTS PyTorch (~3.6 GB)
+- Sarvam-30B FP8 MoE (~37 GB): inside existing `sthira-sarvam` Docker container
+- IndicConformer-600M-Multi ONNX (~2.4 GB): `/models/indic-conformer-600m-multilingual`
+- Indic Parler-TTS PyTorch (~3.6 GB): `/models/indic-parler-tts`
+- Python environment: `/home/ubuntu/.venv/bin/python3`
 
-When authorized by the owner:
+When explicitly authorized by the owner:
+
 1. **Discover New Public IP**:
    AWS stop releases the previous public IP; query the new assigned IP upon authorized start:
    ```bash
-   aws ec2 describe-instances --instance-ids i-01d17e39266c292c2 --query "Reservations[0].Instances[0].PublicIpAddress" --output text
+   aws ec2 describe-instances --region us-east-2 --instance-ids i-01d17e39266c292c2 --query "Reservations[0].Instances[0].PublicIpAddress" --output text
    ```
 
-2. **Private Upstream vLLM Service (Port 8000)**:
+2. **Reuse Existing vLLM Container (Remote Host, Port 8000)**:
+   The `sthira-sarvam` container already exists on the remote EC2 instance hosting the Sarvam-30B model on port 8000. Do not invent a standalone `vllm serve` command:
    ```bash
-   vllm serve /path/to/sarvam-30b --port 8000 --max-model-len 4096 --dtype float8
+   # On remote EC2 instance:
+   docker ps -a
+   docker start sthira-sarvam
+   # Verify healthy vLLM HTTP completions:
+   curl -s http://127.0.0.1:8000/v1/models
    ```
    *Distinction*: Raw vLLM implements OpenAI-compatible `/v1/chat/completions`, NOT the private typed Sthira worker HTTP protocol.
 
-3. **Module-Aware Real Worker Binaries**:
-   Run the dedicated Go worker binaries wrapping the model runtimes on private loopback ports:
-   - **ASR Worker** (`backend/internal/asrworker/cmd/asrworker`):
+3. **Build Module-Aware Go Worker Binaries (Remote Host)**:
+   The workers are independent Go modules requiring module-aware builds:
+   ```bash
+   cd backend/internal/asrworker && go build -o asrworker ./cmd/asrworker
+   cd ../middleworker && go build -o middleworker ./cmd/middleworker
+   cd ../ttsworker && go build -o ttsworker ./cmd/ttsworker
+   ```
+
+4. **Launch Real Workers with Shared Token Auth (Remote Host)**:
+   Set a matching shared token (e.g. `SHARED_TOKEN="<shared-exercise-token>"`):
+   - **ASR Worker** (port 8001):
      ```bash
      cd backend/internal/asrworker
      STHIRA_ASR_ADDR="127.0.0.1:8001" \
-     STHIRA_ASR_PYTHON="python3" \
+     STHIRA_ASR_TOKEN="$SHARED_TOKEN" \
+     STHIRA_ASR_PYTHON="/home/ubuntu/.venv/bin/python3" \
      STHIRA_ASR_ADAPTER="sthira_v2.speech_asr_adapter" \
+     STHIRA_ASR_ARTIFACT_DIR="/models/indic-conformer-600m-multilingual" \
      ./asrworker
      ```
      *Note*: IndicConformer CPU ONNX inference is verified; language is client-passed via `speechLanguageTag` (no auto-detection).
-   - **Middle Worker** (`backend/internal/middleworker/cmd/middleworker`):
+   - **Middle Worker** (port 8002):
      ```bash
      cd backend/internal/middleworker
      STHIRA_MIDDLE_ADDR="127.0.0.1:8002" \
+     STHIRA_MIDDLE_TOKEN="$SHARED_TOKEN" \
      STHIRA_VLLM_URL="http://127.0.0.1:8000" \
      ./middleworker
      ```
      Wraps upstream raw vLLM with canonical Sarvam prompt, embedded guided JSON schema, and strict 512 max output tokens.
-   - **TTS Worker** (`backend/internal/ttsworker/cmd/ttsworker`):
+   - **TTS Worker** (port 8003):
      ```bash
      cd backend/internal/ttsworker
      STHIRA_TTS_ADDR="127.0.0.1:8003" \
-     STHIRA_TTS_PYTHON="python3" \
+     STHIRA_TTS_TOKEN="$SHARED_TOKEN" \
+     STHIRA_TTS_PYTHON="/home/ubuntu/.venv/bin/python3" \
      STHIRA_TTS_ADAPTER="sthira_v2.speech_tts_adapter" \
+     STHIRA_TTS_ARTIFACT_DIR="/models/indic-parler-tts" \
+     STHIRA_TTS_DEVICE="cuda" \
+     STHIRA_TTS_SYNTHETIC_EXERCISE="1" \
      ./ttsworker
      ```
      Wraps Indic Parler-TTS on CUDA (`STHIRA_TTS_DEVICE=cuda`) with native 44,100 Hz WAV caching and SHA-256 integrity verification.
 
-4. **Public Backend / Exercise Wiring**:
-   The public backend receives private worker URLs (`STHIRA_ASR_URL="http://127.0.0.1:8001"`, `STHIRA_MIDDLE_URL="http://127.0.0.1:8002"`, `STHIRA_TTS_URL="http://127.0.0.1:8003"`), not raw Python adapter or vLLM URLs.
-   For isolated exercise / demonstration with labelled synthetic fixtures:
-   ```bash
-   cd backend
-   STHIRA_ASR_URL="http://127.0.0.1:8001" \
-   STHIRA_MIDDLE_URL="http://127.0.0.1:8002" \
-   STHIRA_TTS_URL="http://127.0.0.1:8003" \
-   go run ./cmd/sthira-exercise
-   ```
+5. **SSH Port Forwarding & Backend Wiring (Multi-Terminal Guidance)**:
+   - **Terminal 1 (Local): SSH Tunnel to Remote Workers**:
+     ```bash
+     ssh -i <ec2-key.pem> -N \
+       -L 8001:127.0.0.1:8001 \
+       -L 8002:127.0.0.1:8002 \
+       -L 8003:127.0.0.1:8003 \
+       ubuntu@<public-ip>
+     ```
+   - **Terminal 2 (Local): Exercise Backend with Matching Tokens**:
+     ```bash
+     cd backend
+     STHIRA_DATABASE_DSN="postgres://apple@localhost:5432/${TEST_DB}?sslmode=disable" \
+     STHIRA_ADDR="127.0.0.1:8080" \
+     STHIRA_ASR_URL="http://127.0.0.1:8001" \
+     STHIRA_ASR_TOKEN="$SHARED_TOKEN" \
+     STHIRA_MIDDLE_URL="http://127.0.0.1:8002" \
+     STHIRA_MIDDLE_TOKEN="$SHARED_TOKEN" \
+     STHIRA_TTS_URL="http://127.0.0.1:8003" \
+     STHIRA_TTS_TOKEN="$SHARED_TOKEN" \
+     STHIRA_EXERCISE_SEED=1 \
+     go run ./cmd/sthira-exercise
+     ```
+     *(Note: omit `STHIRA_EXERCISE_SEED=1` on subsequent restarts into the existing database).*
+   - **Terminal 3 (Local): Vite Dev Server**:
+     ```bash
+     cd frontend/v2
+     VITE_BACKEND_URL="http://127.0.0.1:8080" npm run dev -- --port 5173
+     ```
 
 Real inference and supported-language acceptance remain separate from launch/build checks. No instance access, spending or model download was performed by this review.
 

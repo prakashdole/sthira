@@ -1,21 +1,22 @@
 export type TTSSettings = {
+  sample_rate?: number;
   sample_rate_hz?: number;
-  channels?: number;
-  bit_depth?: number;
+  channels: number;
+  bit_depth: number;
   codec?: string;
 };
 
 export type AudioMetadata = {
   audio_b64: string;
-  content_type?: string;
-  byte_size?: number;
-  checksum_sha256?: string;
+  content_type: string;
+  byte_size: number;
+  checksum_sha256: string;
   source_version: number;
   data_version: string;
   template_key?: string;
   template_version: number;
   language: string;
-  settings?: TTSSettings;
+  settings: TTSSettings;
 };
 
 export type VoiceResponseEnvelope = {
@@ -33,7 +34,13 @@ export type VoiceResponseEnvelope = {
       source_version?: number;
       template_version?: number;
       language?: string;
-      settings?: TTSSettings;
+      settings?: {
+        sample_rate?: number;
+        sample_rate_hz?: number;
+        channels?: number;
+        bit_depth?: number;
+        codec?: string;
+      };
     };
     state?: string;
   };
@@ -52,9 +59,10 @@ export type ProcessedVoiceOutcome =
     };
 
 /**
- * Validates audio provenance strictly against envelope data_version, positive
- * source_version, positive template_version, and matching template version.
- * Invented defaults (such as source_version = 1 or fabricated data_version) are rejected.
+ * Validates audio integrity metadata strictly against backend contracts.
+ * Mandatory fields: content_type, byte_size, checksum_sha256, source_version,
+ * template_version, data_version, language, and required settings (sample_rate, channels, bit_depth).
+ * Missing, non-positive, or inconsistent values reject audio metadata (returning undefined).
  */
 export function buildAudioMetadata(
   rawAudio: unknown,
@@ -67,26 +75,58 @@ export function buildAudioMetadata(
     return undefined;
   }
 
-  // Must have authoritative non-empty data_version from envelope
+  // Mandatory supported content_type
+  if (typeof audio.content_type !== 'string' || !audio.content_type.startsWith('audio/')) {
+    return undefined;
+  }
+
+  // Mandatory exact byte_size (must be positive integer <= 768 KiB ceiling)
+  const byteSize = audio.byte_size;
+  if (typeof byteSize !== 'number' || byteSize <= 0 || !Number.isInteger(byteSize) || byteSize > 768 * 1024) {
+    return undefined;
+  }
+
+  // Mandatory checksum_sha256 (must be 64-char hex)
+  if (typeof audio.checksum_sha256 !== 'string' || !/^[a-fA-F0-9]{64}$/.test(audio.checksum_sha256)) {
+    return undefined;
+  }
+
+  // Mandatory non-empty authoritative data_version from envelope
   if (typeof authoritativeDataVersion !== 'string' || authoritativeDataVersion.trim().length === 0) {
     return undefined;
   }
 
-  // source_version must be number > 0
+  // Mandatory positive integer source_version
   const sourceVersion = audio.source_version;
   if (typeof sourceVersion !== 'number' || sourceVersion <= 0 || !Number.isInteger(sourceVersion)) {
     return undefined;
   }
 
-  // template_version must be number > 0
+  // Mandatory positive integer template_version
   const templateVersion = audio.template_version;
   if (typeof templateVersion !== 'number' || templateVersion <= 0 || !Number.isInteger(templateVersion)) {
     return undefined;
   }
 
-  // language must be non-empty string
+  // Mandatory non-empty language
   const language = audio.language;
   if (typeof language !== 'string' || language.trim().length === 0) {
+    return undefined;
+  }
+
+  // Mandatory settings with positive sample_rate, channels, and bit_depth
+  if (!audio.settings || typeof audio.settings !== 'object') {
+    return undefined;
+  }
+  const settings = audio.settings as Record<string, unknown>;
+  const sampleRate = typeof settings.sample_rate === 'number' ? settings.sample_rate : settings.sample_rate_hz;
+  if (typeof sampleRate !== 'number' || sampleRate <= 0) {
+    return undefined;
+  }
+  if (typeof settings.channels !== 'number' || settings.channels <= 0) {
+    return undefined;
+  }
+  if (typeof settings.bit_depth !== 'number' || settings.bit_depth <= 0) {
     return undefined;
   }
 
@@ -107,16 +147,87 @@ export function buildAudioMetadata(
 
   return {
     audio_b64: audio.audio_b64,
-    content_type: typeof audio.content_type === 'string' ? audio.content_type : undefined,
-    byte_size: typeof audio.byte_size === 'number' ? audio.byte_size : undefined,
-    checksum_sha256: typeof audio.checksum_sha256 === 'string' ? audio.checksum_sha256 : undefined,
+    content_type: audio.content_type,
+    byte_size: byteSize,
+    checksum_sha256: audio.checksum_sha256.toLowerCase(),
     source_version: sourceVersion,
     data_version: authoritativeDataVersion,
     template_key: templateKey,
     template_version: templateVersion,
     language: language.trim(),
-    settings: audio.settings as TTSSettings | undefined,
+    settings: {
+      sample_rate: sampleRate,
+      sample_rate_hz: sampleRate,
+      channels: settings.channels as number,
+      bit_depth: settings.bit_depth as number,
+      codec: typeof settings.codec === 'string' ? settings.codec : undefined,
+    },
   };
+}
+
+/**
+ * Performs cryptographic and integrity verification over the audio payload bytes:
+ * - Content-type must start with audio/
+ * - Base64 must decode cleanly
+ * - Byte count must strictly equal audioInfo.byte_size
+ * - Web Crypto SubtleCrypto must be available (missing capability reports error)
+ * - SHA-256 digest must strictly match audioInfo.checksum_sha256
+ */
+export async function verifyAudioIntegrity(
+  audioInfo: AudioMetadata,
+  cryptoProvider?: SubtleCrypto
+): Promise<{ success: boolean; error?: string }> {
+  if (!audioInfo.content_type || !audioInfo.content_type.startsWith('audio/')) {
+    return { success: false, error: 'Invalid audio content-type: ' + audioInfo.content_type };
+  }
+
+  if (audioInfo.byte_size <= 0 || audioInfo.byte_size > 768 * 1024) {
+    return { success: false, error: 'Audio byte size out of valid bounds' };
+  }
+
+  if (!audioInfo.checksum_sha256 || !/^[a-fA-F0-9]{64}$/.test(audioInfo.checksum_sha256)) {
+    return { success: false, error: 'Invalid or missing checksum_sha256' };
+  }
+
+  if (!audioInfo.settings || audioInfo.settings.channels <= 0 || audioInfo.settings.bit_depth <= 0) {
+    return { success: false, error: 'Invalid audio settings' };
+  }
+
+  let binaryStr: string;
+  try {
+    binaryStr = atob(audioInfo.audio_b64);
+  } catch {
+    return { success: false, error: 'Corrupted audio base64' };
+  }
+
+  const byteLen = binaryStr.length;
+  if (byteLen !== audioInfo.byte_size) {
+    return { success: false, error: `Audio byte size mismatch: expected ${audioInfo.byte_size}, got ${byteLen}` };
+  }
+
+  const subtle =
+    cryptoProvider !== undefined
+      ? cryptoProvider
+      : ((typeof window !== 'undefined' ? window.crypto?.subtle : undefined) ??
+         (typeof globalThis !== 'undefined' ? (globalThis as any).crypto?.subtle : undefined));
+
+  if (!subtle) {
+    return { success: false, error: 'Web Crypto API unavailable: cannot verify audio integrity' };
+  }
+
+  const uint8 = new Uint8Array(byteLen);
+  for (let i = 0; i < byteLen; i++) uint8[i] = binaryStr.charCodeAt(i);
+
+  const hashBuf = await subtle.digest('SHA-256', uint8);
+  const hashHex = Array.from(new Uint8Array(hashBuf))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+
+  if (hashHex.toLowerCase() !== audioInfo.checksum_sha256.toLowerCase()) {
+    return { success: false, error: 'Audio checksum mismatch (integrity failure)' };
+  }
+
+  return { success: true };
 }
 
 /**
@@ -124,7 +235,8 @@ export function buildAudioMetadata(
  * - Freshness must be CURRENT
  * - Active UI language must match audio language
  * - Active UI data_version must match audio data_version
- * - Positive source_version and template_version required
+ * - Positive source_version, template_version, and byte_size required
+ * - Checksum must be 64-character hex
  */
 export function isAudioValidForReplay(
   audio: AudioMetadata | undefined,
@@ -138,7 +250,71 @@ export function isAudioValidForReplay(
   if (!audio.data_version || audio.data_version !== currentDataVersion) return false;
   if (typeof audio.source_version !== 'number' || audio.source_version <= 0) return false;
   if (typeof audio.template_version !== 'number' || audio.template_version <= 0) return false;
+  if (typeof audio.byte_size !== 'number' || audio.byte_size <= 0) return false;
+  if (!audio.checksum_sha256 || !/^[a-fA-F0-9]{64}$/.test(audio.checksum_sha256)) return false;
+  if (!audio.content_type || !audio.content_type.startsWith('audio/')) return false;
+  if (!audio.settings || audio.settings.channels <= 0 || audio.settings.bit_depth <= 0) return false;
   return true;
+}
+
+/**
+ * Lightweight context guard tracking state generation across asynchronous operations.
+ * Prevents an old asynchronous verification or delayed autoplay rejection from restoring
+ * obsolete audio after language/version/freshness changes or manual invalidation.
+ */
+export class AudioPlaybackGuard {
+  private generation = 0;
+  private pending: {
+    audio: HTMLAudioElement;
+    metadata: AudioMetadata;
+    expectedLanguage: string;
+    expectedDataVersion: string;
+    generation: number;
+  } | null = null;
+
+  get currentGeneration(): number {
+    return this.generation;
+  }
+
+  get pendingAutoplay() {
+    return this.pending;
+  }
+
+  invalidate(): void {
+    this.generation++;
+    this.pending = null;
+  }
+
+  setPending(params: {
+    audio: HTMLAudioElement;
+    metadata: AudioMetadata;
+    expectedLanguage: string;
+    expectedDataVersion: string;
+  }): boolean {
+    this.pending = {
+      ...params,
+      generation: this.generation,
+    };
+    return true;
+  }
+
+  canPlayPending(currentFreshness: string, currentDataVersion: string, currentLanguageTag: string): boolean {
+    if (!this.pending) return false;
+    if (this.pending.generation !== this.generation) return false;
+    if (currentFreshness !== 'CURRENT') return false;
+    if (this.pending.expectedDataVersion !== currentDataVersion) return false;
+    if (this.pending.expectedLanguage !== currentLanguageTag) return false;
+    if (!isAudioValidForReplay(this.pending.metadata, currentFreshness, currentDataVersion, currentLanguageTag)) {
+      return false;
+    }
+    return true;
+  }
+
+  consumePending(): HTMLAudioElement | null {
+    const p = this.pending;
+    this.pending = null;
+    return p ? p.audio : null;
+  }
 }
 
 /**
