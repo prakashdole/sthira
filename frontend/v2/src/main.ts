@@ -33,6 +33,18 @@ type AudioMetadata = {
   content_type?: string;
   byte_size?: number;
   checksum_sha256?: string;
+  source_id?: string;
+  source_version?: number;
+  data_version?: string;
+  template_key?: string;
+  template_version?: number;
+  language?: string;
+  settings?: {
+    sample_rate_hz?: number;
+    channels?: number;
+    bit_depth?: number;
+    codec?: string;
+  };
 };
 type ChatMessage = { role: 'USER' | 'ASSISTANT'; text: string; audio?: AudioMetadata };
 type AmbiguousCandidate = { place_id: string; place_kind: string };
@@ -122,6 +134,7 @@ let isIllustrativePreview = true;
 let guidanceStatus: 'PENDING' | 'LOADED' | 'EMPTY' | 'ERROR' = 'PENDING';
 let guidanceFreshness = 'UNKNOWN';
 let guidanceErrorMessage = '';
+let currentDataVersion = 'v1';
 
 let ambiguousPlaces: AmbiguousCandidate[] = [];
 let availableDestinations: DestinationChoice[] = [
@@ -371,6 +384,8 @@ async function queryGuidanceDestinations(): Promise<void> {
     if (res.ok) {
       const envelope = await res.json() as {
         status?: string;
+        data_version?: string;
+        source_status?: string;
         data?: {
           destinations?: Array<{
             facility_id: string;
@@ -383,11 +398,21 @@ async function queryGuidanceDestinations(): Promise<void> {
           package_id?: string;
           jurisdiction?: string;
         };
-        metadata?: {
-          freshness?: string;
-        };
       };
-      guidanceFreshness = envelope.metadata?.freshness || 'CURRENT';
+      if (!envelope.source_status || envelope.source_status !== 'CURRENT') {
+        guidanceFreshness = envelope.source_status || 'UNAVAILABLE';
+        guidanceStatus = 'ERROR';
+        guidanceErrorMessage = `Source status is ${guidanceFreshness}. Guidance unavailable.`;
+        currentDataVersion = 'UNAVAILABLE';
+        autoplayBlockedAudio = null;
+        availableDestinations = [];
+        selectedDestination = null;
+        isIllustrativePreview = false;
+        render();
+        return;
+      }
+      guidanceFreshness = 'CURRENT';
+      currentDataVersion = envelope.data_version || 'v1';
       const dests = envelope.data?.destinations;
       if (dests && dests.length > 0) {
         availableDestinations = dests.map((d) => ({
@@ -414,6 +439,9 @@ async function queryGuidanceDestinations(): Promise<void> {
     } else {
       isIllustrativePreview = false;
       guidanceStatus = 'ERROR';
+      guidanceFreshness = 'UNAVAILABLE';
+      currentDataVersion = 'UNAVAILABLE';
+      autoplayBlockedAudio = null;
       availableDestinations = [];
       selectedDestination = null;
       guidanceErrorMessage = `Authority returned HTTP ${res.status}. Guidance unavailable.`;
@@ -421,6 +449,9 @@ async function queryGuidanceDestinations(): Promise<void> {
   } catch {
     isIllustrativePreview = false;
     guidanceStatus = 'ERROR';
+    guidanceFreshness = 'UNAVAILABLE';
+    currentDataVersion = 'UNAVAILABLE';
+    autoplayBlockedAudio = null;
     availableDestinations = [];
     selectedDestination = null;
     guidanceErrorMessage = 'Network error: could not connect to guidance service.';
@@ -713,7 +744,7 @@ function render() {
             `<article class="chat-message chat-message--${message.role.toLowerCase()}">
               <span>${message.role === 'USER' ? t.you : 'Sthira'}</span>
               <p>${escapeHtml(message.text)}</p>
-              ${message.role === 'ASSISTANT' && message.audio?.audio_b64 ? `<button type="button" data-speak-message="${index}" aria-label="${t.readAloud}">${icons.volume}<span>${t.listen}</span></button>` : ''}
+              ${message.role === 'ASSISTANT' && message.audio && isAudioValidForReplay(message.audio) ? `<button type="button" data-speak-message="${index}" aria-label="${t.readAloud}">${icons.volume}<span>${t.listen}</span></button>` : ''}
             </article>`
           ).join('')}
           ${autoplayBlockedAudio ? `
@@ -995,62 +1026,37 @@ function startMapAnimation() {
   mapAnimationFrame = requestAnimationFrame(animate);
 }
 
-function speakText(text: string) {
-  if (!('speechSynthesis' in window)) return;
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = speechLanguageTag(language);
-  window.speechSynthesis.speak(u);
-}
-
-function formatSpeechKeyText(key: string, lang: Language): string {
-  const templates: Record<string, Record<Language, string>> = {
-    clarify_place: {
-      EN: 'Please clarify the location.',
-      ML: 'ദയവായി സ്ഥലം വ്യക്തമാക്കുക.',
-      HI: 'कृपया स्थान स्पष्ट करें।',
-    },
-    destination_options: {
-      EN: 'Destination choices are displayed on screen.',
-      ML: 'ലക്ഷ്യസ്ഥാന ഓപ്ഷനുകൾ സ്ക്രീനിൽ കാണിച്ചിരിക്കുന്നു.',
-      HI: 'गंतव्य विकल्प स्क्रीन पर प्रदर्शित हैं।',
-    },
-    verified_route_unavailable: {
-      EN: 'Verified route is currently unavailable.',
-      ML: 'സ്ഥിരീകരിച്ച റൂട്ട് നിലവിൽ ലഭ്യമല്ല.',
-      HI: 'सत्यापित मार्ग वर्तमान में अनुपलब्ध है।',
-    },
-    welcome: {
-      EN: 'Welcome to Sthira emergency guidance.',
-      ML: 'സ്ഥിര അടിയന്തര മാർഗ്ഗനിർദ്ദേശത്തിലേക്ക് സ്വാഗതം.',
-      HI: 'स्थिरा आपातकालीन मार्गदर्शन में आपका स्वागत है।',
-    },
-    stay_put_notice: {
-      EN: 'Remain at your current location and await official emergency instructions.',
-      ML: 'നിങ്ങളുടെ നിലവിലെ സ്ഥലത്ത് തുടരുക, ഔദ്യോഗിക അടിയന്തര നിർദ്ദേശങ്ങൾക്കായി കാത്തിരിക്കുക.',
-      HI: 'अपने वर्तमान स्थान पर रहें और आधिकारिक आपातकालीन निर्देशों की प्रतीक्षा करें।',
-    },
-    location_not_found: {
-      EN: 'Requested location was not found in the verified disaster database.',
-      ML: 'സ്ഥിരീകരിച്ച ദുരന്ത ഡാറ്റാബേസിൽ അഭ്യർത്ഥിച്ച സ്ഥലം കണ്ടെത്തിയില്ല.',
-      HI: 'सत्यापित आपदा डेटाबेस में अनुरोधित स्थान नहीं मिला।',
-    },
-  };
-  return templates[key]?.[lang] || words[lang].assistantUnavailable;
+function isAudioValidForReplay(audio?: AudioMetadata): boolean {
+  if (!audio || !audio.audio_b64) return false;
+  if (guidanceFreshness !== 'CURRENT') return false;
+  if (!audio.language || audio.language !== speechLanguageTag(language)) return false;
+  if (!audio.data_version || audio.data_version !== currentDataVersion) return false;
+  if (audio.source_version == null || audio.template_version == null) return false;
+  return true;
 }
 
 let autoplayBlockedAudio: { audio: HTMLAudioElement; b64: string } | null = null;
 
-async function verifyAndPlayAudio(audioInfo: {
-  audio_b64: string;
-  content_type?: string;
-  byte_size?: number;
-  checksum_sha256?: string;
-}): Promise<{ success: boolean; autoplayBlocked: boolean; error?: string }> {
-  if (!audioInfo.audio_b64) return { success: false, autoplayBlocked: false, error: 'No audio data' };
+async function verifyAndPlayAudio(audioInfo: AudioMetadata): Promise<{ success: boolean; autoplayBlocked: boolean; error?: string }> {
+  if (!isAudioValidForReplay(audioInfo)) {
+    return {
+      success: false,
+      autoplayBlocked: false,
+      error: 'Audio guidance is invalid, expired, or does not match active language and version',
+    };
+  }
 
   if (audioInfo.content_type && !audioInfo.content_type.startsWith('audio/')) {
     return { success: false, autoplayBlocked: false, error: 'Invalid audio content-type: ' + audioInfo.content_type };
+  }
+
+  if (audioInfo.settings) {
+    if (audioInfo.settings.sample_rate_hz !== undefined && audioInfo.settings.sample_rate_hz <= 0) {
+      return { success: false, autoplayBlocked: false, error: 'Invalid audio settings: sample_rate_hz <= 0' };
+    }
+    if (audioInfo.settings.channels !== undefined && audioInfo.settings.channels <= 0) {
+      return { success: false, autoplayBlocked: false, error: 'Invalid audio settings: channels <= 0' };
+    }
   }
 
   let binaryStr: string;
@@ -1060,7 +1066,7 @@ async function verifyAndPlayAudio(audioInfo: {
     return { success: false, autoplayBlocked: false, error: 'Corrupted audio base64' };
   }
   const byteLen = binaryStr.length;
-  if (audioInfo.byte_size && byteLen !== audioInfo.byte_size) {
+  if (audioInfo.byte_size != null && byteLen !== audioInfo.byte_size) {
     return { success: false, autoplayBlocked: false, error: `Audio byte size mismatch: expected ${audioInfo.byte_size}, got ${byteLen}` };
   }
   if (byteLen > 768 * 1024) {
@@ -1141,33 +1147,57 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
 
     const envelope = await res.json() as {
       data?: {
+        data_version?: string;
         validated_proposal?: unknown;
-        template?: { speech_key?: string };
+        template?: { speech_key?: string; text?: string; template_version?: number };
         audio?: {
           audio_b64?: string;
           content_type?: string;
           byte_size?: number;
           checksum_sha256?: string;
+          source_id?: string;
+          source_version?: number;
+          template_key?: string;
+          template_version?: number;
+          language?: string;
+          settings?: {
+            sample_rate_hz?: number;
+            channels?: number;
+            bit_depth?: number;
+            codec?: string;
+          };
         };
         state?: string;
       };
     };
 
     const out = envelope.data;
-    const replyText = out?.template?.speech_key
-      ? formatSpeechKeyText(out.template.speech_key, language)
-      : words[language].responseReady;
+    if (!out?.template?.text) {
+      chatPending = false;
+      chatError = words[language].assistantUnavailable;
+      voiceFeedbackKey = 'backendUnavailable';
+      render();
+      return;
+    }
 
-    const audioMeta = out?.audio?.audio_b64
+    const audioDataVersion = out.data_version || currentDataVersion;
+    const audioMeta: AudioMetadata | undefined = out.audio?.audio_b64
       ? {
           audio_b64: out.audio.audio_b64,
           content_type: out.audio.content_type,
           byte_size: out.audio.byte_size,
           checksum_sha256: out.audio.checksum_sha256,
+          source_id: out.audio.source_id,
+          source_version: out.audio.source_version ?? 1,
+          data_version: audioDataVersion,
+          template_key: out.template.speech_key,
+          template_version: out.audio.template_version ?? out.template.template_version ?? 1,
+          language: out.audio.language || speechLanguageTag(language),
+          settings: out.audio.settings,
         }
       : undefined;
 
-    chatMessages.push({ role: 'ASSISTANT', text: replyText, audio: audioMeta });
+    chatMessages.push({ role: 'ASSISTANT', text: out.template.text, audio: audioMeta });
     voiceFeedbackKey = 'responseReady';
 
     // Execute validated map action if proposal is present
@@ -1197,13 +1227,8 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
     }
 
     // Play verified synthesized audio if returned
-    if (out?.audio?.audio_b64) {
-      const playRes = await verifyAndPlayAudio({
-        audio_b64: out.audio.audio_b64,
-        content_type: out.audio.content_type,
-        byte_size: out.audio.byte_size,
-        checksum_sha256: out.audio.checksum_sha256,
-      });
+    if (audioMeta) {
+      const playRes = await verifyAndPlayAudio(audioMeta);
       if (!playRes.success && !playRes.autoplayBlocked) {
         chatError = `Audio verification notice: ${playRes.error}`;
       }
@@ -1365,6 +1390,9 @@ function simulatePosition(
 
 function revokeRoute() {
   journeyState = transitionOnRevocation(journeyState);
+  autoplayBlockedAudio = null;
+  guidanceFreshness = 'REVOKED';
+  currentDataVersion = 'REVOKED';
   if (geolocationWatchId !== null) {
     navigator.geolocation.clearWatch(geolocationWatchId);
     geolocationWatchId = null;
@@ -1498,6 +1526,7 @@ function bindInteractions() {
       chatSuggestions = [...words[language].suggestions];
       chatError = '';
       voiceFeedbackKey = 'micPrivacy';
+      autoplayBlockedAudio = null;
       render();
     })
   );
@@ -1532,7 +1561,7 @@ function bindInteractions() {
   document.querySelectorAll<HTMLButtonElement>('[data-speak-message]').forEach((b) =>
     b.addEventListener('click', () => {
       const message = chatMessages[Number(b.dataset.speakMessage)];
-      if (message?.audio) {
+      if (message?.audio && isAudioValidForReplay(message.audio)) {
         void verifyAndPlayAudio(message.audio);
       }
     })
@@ -1611,7 +1640,7 @@ function bindInteractions() {
   });
 
   document.querySelector<HTMLButtonElement>('[data-action="listen"]')?.addEventListener('click', () => {
-    const lastWithAudio = [...chatMessages].reverse().find((m) => m.audio?.audio_b64);
+    const lastWithAudio = [...chatMessages].reverse().find((m) => m.audio && isAudioValidForReplay(m.audio));
     if (lastWithAudio?.audio) {
       void verifyAndPlayAudio(lastWithAudio.audio);
     }
@@ -1757,6 +1786,9 @@ window.addEventListener('online', () => {
 
 window.addEventListener('offline', () => {
   runtime = 'offline';
+  autoplayBlockedAudio = null;
+  guidanceFreshness = 'UNAVAILABLE';
+  currentDataVersion = 'UNAVAILABLE';
   render();
 });
 

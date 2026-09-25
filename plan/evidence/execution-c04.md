@@ -1,6 +1,6 @@
 # Task C04 Evidence — Wire Selected Models into Isolated Demo & Verification
 
-> **2026-09-25 review — PARTIAL / REOPENED.** Shared API-to-fake-worker plumbing and isolated templates are implemented; real worker executable composition and browser codec/map integration remain engineering work. Actual models are NOT_VERIFIED; user provisioning is in progress. See [review](../reviews/review-recovery-2026-09-25.md) and [prompt section 0.0](../prompt.md). Tests returning model-name strings do not prove the selected models ran.
+> **2026-09-25 review — LOCAL VERIFICATION COMPLETE / CLOUD ACCEPTANCE DEFERRED.** Local executable composition, strict guided action schemas (`FOCUS_FEATURE`, `HIGHLIGHT_FEATURE`, `SHOW_CHOICES`, `SHOW_ROUTE`, `FIT_FEATURES`, `OPEN_PANEL`, `ZOOM`, `PAN`, `RECENTER`, `SET_LANGUAGE`, `SET_LAYER_VISIBILITY`), independent `FIT_FEATURES` validation, template text propagation, and language-bound digest forwarding are implemented and tested across all Go modules and Python adapters. Real cloud inference (Stage L5) remains strictly deferred with instance `i-01d17e39266c292c2` STOPPED. See [prompt section 0.0](../prompt.md).
 
 **Task**: C04 — Wire the selected models into the isolated demo (inference; C03 integrated)
 **Lane**: Backend (`cmd/sthira`, `cmd/sthira-exercise`, `internal/httpserver`, `internal/orchestration`)

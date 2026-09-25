@@ -76,6 +76,7 @@ const exerciseBody = `{
 	],
 	"instruction_assets":[
 		{"id":"INSDEMO-EN","language":"en-IN","title":"Demo instructions","summary":"Move to the demo safe zone."},
+		{"id":"INSDEMO-HI","language":"hi-IN","title":"डेमो निर्देश","summary":"डेमो सुरक्षित क्षेत्र स्क्रीन पर देखें।"},
 		{"id":"INSDEMO-ML","language":"ml-IN","title":"ഡെമോ നിർദ്ദേശം","summary":"ഡെമോ സുരക്ഷിത മേഖലയിലേക്ക് പോകുക."}
 	],
 	"allocation_policy":{
@@ -104,9 +105,10 @@ const (
 	exerciseFacilityID   = "FACDEMO-1"
 )
 
-// seedExercise drops the existing exercise rows (if any) and inserts
-// the demo package. Idempotent: safe to call on every start when
-// STHIRA_EXERCISE_SEED=1.
+// seedExercise inserts the demo package into a fresh task-owned database.
+// Seeding fails safely without modifying any rows if the exercise package
+// already exists. Restarting without STHIRA_EXERCISE_SEED=1 preserves all
+// existing reservations, stays, and inventory.
 func seedExercise(ctx context.Context, st *store.Store) error {
 	body := []byte(exerciseBody)
 	var pb struct {
@@ -126,48 +128,12 @@ func seedExercise(ctx context.Context, st *store.Store) error {
 	hash := sha256.Sum256(body)
 
 	return st.InTx(ctx, func(tx store.DBTX) error {
-		// Clean prior rows so re-seed is idempotent.
-		for _, q := range []string{
-			`DELETE FROM place_aliases WHERE jurisdiction = $1`,
-			`DELETE FROM approved_translations WHERE jurisdiction = $1`,
-			`DELETE FROM facilities WHERE facility_id = $1`,
-			`DELETE FROM zone_versions WHERE package_id = $1`,
-			`DELETE FROM packages WHERE package_id = $1`,
-			`DELETE FROM source_artifacts WHERE artifact_id = $1`,
-			`DELETE FROM source_authorizations WHERE authorization_id = $1`,
-			`DELETE FROM sources WHERE source_id = $1`,
-		} {
-			switch q {
-			case `DELETE FROM place_aliases WHERE jurisdiction = $1`,
-				`DELETE FROM approved_translations WHERE jurisdiction = $1`:
-				if _, err := tx.ExecContext(ctx, q, exerciseJurisdiction); err != nil {
-					return err
-				}
-			case `DELETE FROM facilities WHERE facility_id = $1`:
-				if _, err := tx.ExecContext(ctx, q, exerciseFacilityID); err != nil {
-					return err
-				}
-			case `DELETE FROM zone_versions WHERE package_id = $1`:
-				if _, err := tx.ExecContext(ctx, q, exercisePackageID); err != nil {
-					return err
-				}
-			case `DELETE FROM packages WHERE package_id = $1`:
-				if _, err := tx.ExecContext(ctx, q, exercisePackageID); err != nil {
-					return err
-				}
-			case `DELETE FROM source_artifacts WHERE artifact_id = $1`:
-				if _, err := tx.ExecContext(ctx, q, exerciseArtifactID); err != nil {
-					return err
-				}
-			case `DELETE FROM source_authorizations WHERE authorization_id = $1`:
-				if _, err := tx.ExecContext(ctx, q, exerciseAuthID); err != nil {
-					return err
-				}
-			case `DELETE FROM sources WHERE source_id = $1`:
-				if _, err := tx.ExecContext(ctx, q, exerciseSourceID); err != nil {
-					return err
-				}
-			}
+		var count int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM packages WHERE package_id = $1`, exercisePackageID).Scan(&count); err != nil {
+			return fmt.Errorf("check existing exercise package: %w", err)
+		}
+		if count > 0 {
+			return fmt.Errorf("exercise package %q already exists: seeding requires a fresh task-owned database and will not overwrite existing seed data", exercisePackageID)
 		}
 
 		if _, err := tx.ExecContext(ctx,
