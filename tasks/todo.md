@@ -35,6 +35,74 @@
 - Narrow-browser checks cover the language and location sequence, combined zone controls, the map surface, the unobstructed route sheet, the voice-control sheet, and 3D terrain rendering.
 - `npm run build`, TypeScript checking, `tests/test_v2_map_geometry.py` (2 passed), and `git diff --check` pass.
 
+## Current frontend task - mobile map decluttering
+
+- [x] Collapse optional map layers behind a deliberate control and remove scattered duplicate route tools.
+- [x] Keep device location useful for recentering without displaying it as a competing route marker.
+- [x] Remove the large map brief, leaving the map as the primary mobile surface.
+- [x] Make the voice launcher a friendly CSS character and reduce the mobile voice sheet to the essential interaction.
+- [x] Make the mobile safe-route action focus the route without taking over the screen.
+- [x] Verify narrow mobile, route, layers, and voice paths; run build and focused checks.
+
+### Review - 2026-09-25
+
+- Mobile now has one compact, top-right map control group. Zone choices appear only after Map Layers is opened, and the duplicate floating full-route action is gone.
+- Browser location is retained solely for recentering. It is not drawn as a competing marker alongside the synthetic exercise route.
+- The map has no large warning card. The thumb dock contains 112, the friendly Voice Map Control character, and a map-first route action.
+- Narrow-browser checks confirmed the collapsed and expanded layer states, route activation without a directions sheet, and the concise voice-control sheet. `npm run build`, TypeScript checking, `tests/test_v2_map_geometry.py` (2 passed), and `git diff --check` pass.
+
+## Current frontend task - mobile guidance flow correction
+
+- [x] Restore step-by-step route guidance as a dedicated second mobile screen.
+- [x] Keep browser location solely behind the explicit My Location action; load the scenario map by default.
+- [x] Reduce onboarding spacing and type scale so both setup screens fit one mobile viewport.
+- [x] Verify map, location, onboarding, and route-screen behavior.
+
+### Review - 2026-09-25
+
+- The map screen remains quiet and map-first. Tapping Route opens a full mobile guidance page with the route title and three existing step-by-step instructions, rather than placing another panel over the map.
+- Device coordinates no longer select the map's initial camera. They are only used after the explicit My Location control is tapped.
+- Browser screenshots confirm both setup screens fit the narrow viewport and that the route page has no top-bar overlap. `npm run build`, `tests/test_v2_map_geometry.py` (2 passed), and `git diff --check` pass.
+
+## Current frontend task - mobile visual-system unification
+
+- [x] Replace character-style Speak launcher with the shared microphone icon.
+- [x] Give dock controls one shape, height, and text grammar.
+- [x] Normalize mobile sheet surfaces, close controls, type, and action hierarchy.
+- [x] Verify narrow map, voice, emergency confirmation, and route pages.
+
+### Review - 2026-09-25
+
+- Speak now uses the same SVG microphone family as Voice Map Control. No emoji or character icon remains.
+- All dock controls use the same dark surface, height, radius, and stacked icon-or-code grammar. 112 is an outlined emergency code without duplicate visible copy.
+- Mobile voice, route, and modal surfaces now share navy material, close-button geometry, muted supporting type, and blue action treatment. Browser checks cover narrow map and voice states; build, geometry tests (2 passed), and whitespace validation pass.
+
+## Current frontend task - hierarchy and material system
+
+- [x] Make Call 112 one clear, dominant emergency action.
+- [x] Establish distinct display, UI-label, and body typography roles using bundled fonts.
+- [x] Define shared sheet geometry with semantic visual tiers for voice, route, and blocking emergency confirmation.
+- [x] Verify narrow mobile states and run build/tests.
+
+### Review - 2026-09-25
+
+- Call 112 is now a filled red dock action with a phone icon and explicit verb. Its confirmation uses a red critical surface and a single red dialler action.
+- The bundled Noto Sans 800 weight supplies display hierarchy; small labels use tracked UI styling; body instructions remain readable at the regular text weight.
+- Voice, route, and modal screens share spacing, close controls, radii, and navy materials, while accent rules communicate voice, route, or urgent-call stakes. Narrow-browser checks cover the map and emergency confirmation. `npm run build`, `tests/test_v2_map_geometry.py` (2 passed), and `git diff --check` pass.
+
+## Current frontend task - component contract correction
+
+- [x] Standardize bottom-dock icon treatment.
+- [x] Make critical confirmation fully opaque and reserve modal accent chrome for transient sheets.
+- [x] Separate display, route, voice, and emergency type roles.
+- [x] Verify then commit mobile-system work.
+
+### Review - 2026-09-25
+
+- All dock icons now use the same bare SVG treatment. Call 112 stays dominant through its filled red action, not an inconsistent icon badge.
+- Critical confirmation is an opaque red surface. Voice uses rounded blue-accented sheet chrome. Route is intentionally full-screen navigation without modal accent treatment.
+- Typography roles now distinguish large emergency/route display headlines from compact voice UI headings and tracked labels. Browser confirmation, build, geometry tests (2 passed), and whitespace validation pass.
+
 
 ## Current frontend task - 3D map perspective
 

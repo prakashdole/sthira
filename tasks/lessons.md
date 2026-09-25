@@ -16,3 +16,8 @@
 - An emergency interface cannot stop at functional controls: hierarchy, material, and typography must make the one urgent action unmistakable without turning the rest of the screen into dashboard clutter.
 - Persisting first-use completion can erase safety-critical language and location choices from demonstrations and fresh emergency sessions. Keep that setup visible when the product flow requires it.
 - Never place a persistent floating action over route instructions or a voice panel. A thumb-zone control must yield when a task-specific sheet is open.
+- A mobile emergency map must reserve the map viewport. Default controls should collapse behind deliberate entry points, and status must not become a second large overlay.
+- Decluttering must move guidance into a clearly reachable second screen, not remove the guidance a person needs to act.
+- Visual cleanup must start from shared control and sheet rules. Per-screen styling creates inconsistent emergency affordances even when each screen looks acceptable alone.
+- Shared components still require semantic hierarchy: emergency confirmation, route guidance, and voice control should share a grid and control grammar while visibly communicating different stakes.
+- A full-page route view is navigation, not a modal. Do not borrow modal accent treatment for it; reserve one rounded, accented chrome for transient sheets and confirmations.
