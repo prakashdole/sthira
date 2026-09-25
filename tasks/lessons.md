@@ -31,3 +31,4 @@
 - A pseudo-element animation that scales from a positioned center must include its translation in every keyframe, or it will drift away from its target icon.
 - When an effect semantically belongs to a child icon, attach it to that child rather than centering it against a larger parent control.
 - If a floating pseudo-element continues to read as misaligned, use the icon's own outline/ring as the animation anchor instead of a separate decorative shape.
+- Geometric centering can still look wrong with icon glyphs; validate optical center in the rendered UI and correct the glyph independently when needed.
