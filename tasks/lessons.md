@@ -21,3 +21,4 @@
 - Visual cleanup must start from shared control and sheet rules. Per-screen styling creates inconsistent emergency affordances even when each screen looks acceptable alone.
 - Shared components still require semantic hierarchy: emergency confirmation, route guidance, and voice control should share a grid and control grammar while visibly communicating different stakes.
 - A full-page route view is navigation, not a modal. Do not borrow modal accent treatment for it; reserve one rounded, accented chrome for transient sheets and confirmations.
+- Map presence needs clear semantic separation: a device dot may animate for orientation, while hazard and relocation overlays use distinct motion and color without implying live predictions.

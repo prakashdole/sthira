@@ -103,6 +103,18 @@
 - Critical confirmation is an opaque red surface. Voice uses rounded blue-accented sheet chrome. Route is intentionally full-screen navigation without modal accent treatment.
 - Typography roles now distinguish large emergency/route display headlines from compact voice UI headings and tracked labels. Browser confirmation, build, geometry tests (2 passed), and whitespace validation pass.
 
+## Current frontend task - map presence and zone motion
+
+- [x] Show consented device location as a map dot with a distinct orientation halo.
+- [x] Replace static zone polygons with restrained, semantically distinct perimeter and pulse motion.
+- [x] Verify device, zone, reduced-motion, and build paths; commit.
+
+### Review - 2026-09-25
+
+- Consented device coordinates now render as a blue location dot with a breathing orientation halo; the device label remains hidden so it does not compete with the exercise route.
+- Red zones use a strong dashed perimeter and red atmospheric pulse. Relocation zones use a softer green dashed boundary and slower pulse. Both remain synthetic exercise overlays, not live forecasts.
+- Narrow-browser confirmation shows the red-zone boundary and layer toggle. Animation is bypassed when reduced motion is active. `npm run build`, geometry tests (2 passed), and `git diff --check` pass.
+
 
 ## Current frontend task - 3D map perspective
 

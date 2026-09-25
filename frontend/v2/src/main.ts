@@ -220,23 +220,24 @@ async function initMap(renderVersion: number) {
     ] } },
     route: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: mapData.route }, properties: {} } },
     roads: { type: 'geojson', data: { type: 'FeatureCollection', features: mapData.roads.map((coordinates) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates }, properties: {} })) } },
-    places: { type: 'geojson', data: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: mapData.user }, properties: { label: t.userMapLabel, kind: 'user' } }, { type: 'Feature', geometry: { type: 'Point', coordinates: mapData.shelter }, properties: { label: t.shelterMapLabel, kind: 'shelter' } }] } },
+    places: { type: 'geojson', data: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: mapData.user }, properties: { label: t.userMapLabel, kind: 'user' } }, { type: 'Feature', geometry: { type: 'Point', coordinates: mapData.shelter }, properties: { label: t.shelterMapLabel, kind: 'shelter' } }, ...(deviceLocation ? [{ type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: deviceLocation }, properties: { label: t.deviceMapLabel, kind: 'device' } }] : [])] } },
   }, layers: [
     { id: 'background', type: 'background', paint: { 'background-color': mapColor('--map-color-surface') } },
     { id: 'basemap', type: 'raster', source: 'basemap', paint: { 'raster-opacity': 0.92, 'raster-saturation': -0.12, 'raster-contrast': 0.14, 'raster-brightness-max': 0.82 } },
     { id: 'roads', type: 'line', source: 'roads', paint: { 'line-color': mapColor('--map-color-paper'), 'line-width': 1.5, 'line-opacity': 0.32 } },
-    { id: 'hazard-band', type: 'line', source: 'hazard', layout: { visibility: redZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-danger'), 'line-width': 16, 'line-blur': 5, 'line-opacity': 0, 'line-opacity-transition': { duration: motionDuration() } } },
+    { id: 'hazard-band', type: 'line', source: 'hazard', layout: { visibility: redZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-danger'), 'line-width': 22, 'line-blur': 7, 'line-opacity': 0, 'line-opacity-transition': { duration: motionDuration() } } },
     { id: 'hazard-fill', type: 'fill', source: 'hazard', layout: { visibility: redZonesVisible ? 'visible' : 'none' }, paint: { 'fill-color': mapColor('--map-color-danger'), 'fill-opacity': 0, 'fill-opacity-transition': { duration: motionDuration() } } },
-    { id: 'hazard-edge', type: 'line', source: 'hazard', layout: { visibility: redZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-danger'), 'line-width': 2.5, 'line-opacity': 0, 'line-opacity-transition': { duration: motionDuration() } } },
-    { id: 'relocation-band', type: 'line', source: 'relocation', layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-success'), 'line-width': 16, 'line-blur': 5, 'line-opacity': 0, 'line-opacity-transition': { duration: motionDuration() } } },
+    { id: 'hazard-edge', type: 'line', source: 'hazard', layout: { visibility: redZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-danger'), 'line-width': 3.5, 'line-opacity': 0, 'line-dasharray': [1, 1.4], 'line-opacity-transition': { duration: motionDuration() } } },
+    { id: 'relocation-band', type: 'line', source: 'relocation', layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-success'), 'line-width': 18, 'line-blur': 6, 'line-opacity': 0, 'line-opacity-transition': { duration: motionDuration() } } },
     { id: 'relocation-fill', type: 'fill', source: 'relocation', layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'fill-color': mapColor('--map-color-success'), 'fill-opacity': 0, 'fill-opacity-transition': { duration: motionDuration() } } },
-    { id: 'relocation-edge', type: 'line', source: 'relocation', layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-success'), 'line-width': 2.5, 'line-opacity': 0, 'line-opacity-transition': { duration: motionDuration() } } },
+    { id: 'relocation-edge', type: 'line', source: 'relocation', layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-success'), 'line-width': 3, 'line-opacity': 0, 'line-dasharray': [1.6, 1], 'line-opacity-transition': { duration: motionDuration() } } },
     { id: 'route-casing', type: 'line', source: 'route', paint: { 'line-color': mapColor('--map-color-paper'), 'line-width': 9, 'line-opacity': 0.9 } },
     { id: 'approved-route', type: 'line', source: 'route', paint: { 'line-color': mapColor('--map-color-accent'), 'line-width': 5, 'line-opacity': 0.98 } },
     { id: 'route-motion', type: 'line', source: 'route', paint: { 'line-color': mapColor('--map-color-paper'), 'line-width': 2, 'line-opacity': routeStarted ? 0.9 : 0, 'line-dasharray': [0.2, 2.4, 1.6] } },
     { id: 'shelter-pulse', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'shelter'], paint: { 'circle-radius': 15, 'circle-color': mapColor('--map-color-success'), 'circle-opacity': 0.24 } },
-    { id: 'place-points', type: 'circle', source: 'places', paint: { 'circle-radius': 8, 'circle-color': mapColor('--map-color-accent'), 'circle-stroke-color': mapColor('--map-color-paper'), 'circle-stroke-width': 3 } },
-    { id: 'place-labels', type: 'symbol', source: 'places', layout: { 'text-field': ['get', 'label'], 'text-size': 13, 'text-offset': [0, 1.5], 'text-anchor': 'top' }, paint: { 'text-color': mapColor('--map-color-paper'), 'text-halo-color': mapColor('--map-color-surface'), 'text-halo-width': 2 } },
+    { id: 'device-pulse', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'device'], paint: { 'circle-radius': 17, 'circle-color': mapColor('--map-color-accent'), 'circle-opacity': 0 } },
+    { id: 'place-points', type: 'circle', source: 'places', paint: { 'circle-radius': ['case', ['==', ['get', 'kind'], 'device'], 7, 8], 'circle-color': ['case', ['==', ['get', 'kind'], 'device'], mapColor('--map-color-paper'), mapColor('--map-color-accent')], 'circle-stroke-color': ['case', ['==', ['get', 'kind'], 'device'], mapColor('--map-color-accent'), mapColor('--map-color-paper')], 'circle-stroke-width': 3 } },
+    { id: 'place-labels', type: 'symbol', source: 'places', filter: ['!=', ['get', 'kind'], 'device'], layout: { 'text-field': ['get', 'label'], 'text-size': 13, 'text-offset': [0, 1.5], 'text-anchor': 'top' }, paint: { 'text-color': mapColor('--map-color-paper'), 'text-halo-color': mapColor('--map-color-surface'), 'text-halo-width': 2 } },
   ] } });
   perspectiveCamera = null;
   map.on('idle', () => {
@@ -304,18 +305,24 @@ function focusRoute() { map?.fitBounds(mapData.routeBounds as [[number, number],
 function revealMapLayers() {
   if (!map) return;
   const show = () => {
-    if (redZonesVisible) { map?.setPaintProperty('hazard-band', 'line-opacity', 0.2); map?.setPaintProperty('hazard-fill', 'fill-opacity', 0.34); map?.setPaintProperty('hazard-edge', 'line-opacity', 0.92); }
-    if (relocationZonesVisible) { map?.setPaintProperty('relocation-band', 'line-opacity', 0.2); map?.setPaintProperty('relocation-fill', 'fill-opacity', 0.26); map?.setPaintProperty('relocation-edge', 'line-opacity', 0.92); }
+    if (redZonesVisible) { map?.setPaintProperty('hazard-band', 'line-opacity', 0.22); map?.setPaintProperty('hazard-fill', 'fill-opacity', 0.22); map?.setPaintProperty('hazard-edge', 'line-opacity', 0.96); }
+    if (relocationZonesVisible) { map?.setPaintProperty('relocation-band', 'line-opacity', 0.18); map?.setPaintProperty('relocation-fill', 'fill-opacity', 0.15); map?.setPaintProperty('relocation-edge', 'line-opacity', 0.9); }
+    if (deviceLocation) map?.setPaintProperty('device-pulse', 'circle-opacity', 0.2);
   };
   if (motionDuration() === 0) show(); else requestAnimationFrame(show);
 }
 function startMapAnimation() {
-  if (!map || !routeStarted || motionDuration() === 0) return;
+  if (!map || motionDuration() === 0 || (!routeStarted && !redZonesVisible && !relocationZonesVisible && !deviceLocation)) return;
   const dashFrames = [[0.2, 2.4, 1.6], [0.7, 2.4, 1.1], [1.2, 2.4, 0.6], [1.7, 2.4, 0.1]];
   let frame = 0;
   const animate = () => {
     if (!map || !map.isStyleLoaded()) return;
-    map.setPaintProperty('route-motion', 'line-dasharray', dashFrames[Math.floor(frame / 12) % dashFrames.length]);
+    const cycle = Math.floor(frame / 12) % dashFrames.length;
+    const pulse = (Math.sin(frame / 10) + 1) / 2;
+    if (routeStarted) map.setPaintProperty('route-motion', 'line-dasharray', dashFrames[cycle]);
+    if (redZonesVisible) { map.setPaintProperty('hazard-edge', 'line-dasharray', dashFrames[cycle]); map.setPaintProperty('hazard-band', 'line-opacity', 0.13 + pulse * 0.15); }
+    if (relocationZonesVisible) { map.setPaintProperty('relocation-edge', 'line-dasharray', dashFrames[(cycle + 2) % dashFrames.length]); map.setPaintProperty('relocation-band', 'line-opacity', 0.1 + pulse * 0.1); }
+    if (deviceLocation) { map.setPaintProperty('device-pulse', 'circle-radius', 14 + pulse * 10); map.setPaintProperty('device-pulse', 'circle-opacity', 0.08 + (1 - pulse) * 0.18); }
     frame += 1;
     mapAnimationFrame = requestAnimationFrame(animate);
   };
