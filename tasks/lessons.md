@@ -1,5 +1,7 @@
 # Lessons
 
+- Never substitute invented building boxes for requested real-world 3D mapping. Validate a provider's TileJSON URL, zoom limits, and decoded features before declaring coverage absent. Distinguish elevation, extruded footprints, and textured photogrammetry in implementation claims.
+
 - A disaster interface must distinguish government authority from software presentation at every screen and API boundary.
 - “God's view” should be implemented and named as Voice Map Control; avoid language suggesting omniscience or predictive certainty.
 - Voice transcription is probabilistic. Deterministic intent parsing and confirmation boundaries keep it from becoming an authority path.
@@ -12,3 +14,5 @@
 - Open-source models can satisfy a government-data-only policy when self-hosted, but their outputs are still AI-generated interface artifacts.
 - A mobile emergency interface must make language and location setup explicit before guidance begins, while always keeping manual, text-first, and permission-denied paths available.
 - An emergency interface cannot stop at functional controls: hierarchy, material, and typography must make the one urgent action unmistakable without turning the rest of the screen into dashboard clutter.
+- Persisting first-use completion can erase safety-critical language and location choices from demonstrations and fresh emergency sessions. Keep that setup visible when the product flow requires it.
+- Never place a persistent floating action over route instructions or a voice panel. A thumb-zone control must yield when a task-specific sheet is open.

@@ -35,7 +35,10 @@ function savedLanguage(): Language {
 }
 
 function savedOnboardingStep(): OnboardingStep {
-  try { return localStorage.getItem('sthira-onboarding-complete') === 'true' ? null : 'language'; } catch { return 'language'; }
+  // Setup is deliberately shown on every fresh app load. In an emergency, this
+  // keeps the spoken language and location choice visible instead of hiding them
+  // behind a previous browser session.
+  return 'language';
 }
 
 let language: Language = savedLanguage();
@@ -51,6 +54,7 @@ let hasRendered = false;
 let redZonesVisible = false;
 let relocationZonesVisible = false;
 let mapTilted = false;
+let perspectiveCamera: { center: [number, number]; zoom: number } | null = null;
 let pendingZoneFocus: 'RED' | 'RELOCATION' | null = null;
 let voiceOpen = false;
 let voiceListening = false;
@@ -85,7 +89,6 @@ function escapeHtml(value: string) {
 }
 
 function completeOnboarding() {
-  try { localStorage.setItem('sthira-onboarding-complete', 'true'); } catch { /* Continue without storage. */ }
   onboardingStep = null;
   render();
 }
@@ -146,7 +149,7 @@ function render() {
   if (onboardingStep) { renderOnboarding(); return; }
   document.documentElement.lang = language === 'ML' ? 'ml' : language === 'HI' ? 'hi' : 'en';
   document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-    <div class="app-shell ${hasRendered ? '' : 'is-entering'} ${voiceOpen ? 'voice-is-open' : ''}">
+    <div class="app-shell ${hasRendered ? '' : 'is-entering'} ${voiceOpen ? 'voice-is-open' : ''} ${directionsOpen ? 'route-is-open' : ''}">
       <header class="topbar">
         <a class="brand" href="/" aria-label="${t.brandHome}"><span class="brand-mark">സ്</span><span><strong>Sthira</strong><small>${t.tagline}</small></span></a>
         <div class="system-state system-state--${runtime}"><i></i><span>${runtimeCopy()}</span></div>
@@ -163,19 +166,19 @@ function render() {
           <article class="destination"><div><span class="destination-label">${t.destinationLabel}</span><h2>${t.destinationName}</h2><p>${t.destinationMeta}</p></div><div class="distance"><strong>${t.distance}</strong><span>${t.duration}</span></div></article>
           <button class="primary-action ${routeStarted ? 'is-success' : ''}" data-testid="start-route" type="button" data-action="route">${icons.route}<span>${routeStarted ? t.routeActive : t.startRoute}</span>${icons.arrow}</button>
           <ol class="instructions"><li><span>1</span><p><strong>${t.instruction1Title}</strong> ${t.instruction1Body}</p></li><li><span>2</span><p>${t.instruction2}</p></li><li><span>3</span><p>${t.instruction3}</p></li></ol>
+          <p class="grounding-line">${t.groundingLine}</p>
           <div class="quick-actions"><button type="button" data-action="directions">${icons.route}<span>${t.directions}</span></button><button type="button" data-action="listen">${icons.volume}<span>${t.listen}</span></button><button type="button" data-action="isl">${icons.info}<span>${t.isl}</span></button><button type="button" data-action="voice-open">${icons.mic}<span>${t.askByVoice}</span></button></div>
           <a class="rescue-action" data-testid="call-112" href="tel:112"><span>${t.trapped}</span><strong>${t.rescue}</strong></a>
         </section>
         <section class="map-surface" aria-label="${t.mapAria}">
           <div id="map-canvas"></div>
-          <div class="map-loading" role="status">${t.mapLoading}</div>
+          <div class="map-loading" role="status">${mapTilted ? t.loadingTerrain : t.mapLoading}</div>
           ${locationStatus !== 'idle' ? `<div class="map-location-notice map-location-notice--${locationStatus}" role="status">${locationStatus === 'checking' ? t.locationChecking : locationStatus === 'ready' ? t.locationActive : t.locationUnavailable}</div>` : ''}
-          <div class="map-toolbar" aria-label="${t.mapTools}"><button class="${mapTilted ? 'is-active' : ''}" type="button" data-action="toggle-3d" aria-label="${t.map3d}" aria-pressed="${mapTilted}"><span class="map-toolbar__perspective-label">${t.map3d}</span><span class="map-toolbar__perspective-short" aria-hidden="true">3D</span></button><button type="button" data-action="recenter" aria-label="${t.myLocation}">${icons.locate}<span>${t.myLocation}</span></button><button type="button" data-action="map-route" aria-label="${t.fullRoute}">${icons.route}<span>${t.fullRoute}</span></button></div>
-          <div class="layer-switcher" aria-label="${t.mapLayers}"><button class="zone-toggle zone-toggle--danger ${redZonesVisible ? 'is-active' : ''}" type="button" data-action="toggle-red-zones" aria-pressed="${redZonesVisible}"><i></i><span>${t.redZones}</span></button><button class="zone-toggle zone-toggle--relocation ${relocationZonesVisible ? 'is-active' : ''}" type="button" data-action="toggle-relocation-zones" aria-pressed="${relocationZonesVisible}"><i></i><span>${t.relocationZones}</span></button></div>
+          <div class="map-controls"><div class="map-toolbar" aria-label="${t.mapTools}"><button class="${mapTilted ? 'is-active' : ''}" type="button" data-action="toggle-3d" aria-label="${t.map3d}" aria-pressed="${mapTilted}"><span class="map-toolbar__perspective-label">${t.map3d}</span><span class="map-toolbar__perspective-short" aria-hidden="true">3D</span></button><button type="button" data-action="recenter" aria-label="${t.myLocation}">${icons.locate}<span>${t.myLocation}</span></button><button type="button" data-action="map-route" aria-label="${t.fullRoute}">${icons.route}<span>${t.fullRoute}</span></button></div><div class="layer-switcher" aria-label="${t.mapLayers}"><button class="zone-toggle zone-toggle--danger ${redZonesVisible ? 'is-active' : ''}" type="button" data-action="toggle-red-zones" aria-pressed="${redZonesVisible}"><i></i><span>${t.redZones}</span></button><button class="zone-toggle zone-toggle--relocation ${relocationZonesVisible ? 'is-active' : ''}" type="button" data-action="toggle-relocation-zones" aria-pressed="${relocationZonesVisible}"><i></i><span>${t.relocationZones}</span></button></div></div>
           <div class="map-key"><span class="${redZonesVisible ? '' : 'is-muted'}"><i class="hazard-key"></i>${t.redZone}</span><span><i class="route-key"></i>${t.approvedRoute}</span><span class="${relocationZonesVisible ? '' : 'is-muted'}"><i class="relocation-key"></i>${t.relocationZone}</span><span><i class="shelter-key"></i>${t.safeShelter}</span></div>
-          <div class="map-disclaimer">${t.imagery} <a href="https://www.esri.com/" target="_blank" rel="noreferrer">© Esri</a>, ${t.overlays}</div>
-          <section class="mobile-brief" aria-label="${t.severeWarning}"><span>${t.mobileAlert}</span><strong>${t.leave}</strong><button class="mobile-route-action ${routeStarted ? 'is-success' : ''}" type="button" data-action="route">${icons.route}${routeStarted ? t.routeActive : t.startRoute}</button></section>
-          <nav class="mobile-safety-dock" aria-label="${t.emergencyAssistance}"><button class="dock-action dock-action--emergency" type="button" data-action="assist-open"><span>${t.emergencyCall}</span><strong>112</strong></button><button class="voice-fab ${voiceListening ? 'is-listening' : ''}" type="button" data-action="voice-open" aria-expanded="${voiceOpen}">${icons.mic}<span>${t.voicePrompt}</span><small>${t.voiceHint}</small></button><button class="dock-action" type="button" data-action="directions">${icons.route}<span>${t.routeShort}</span></button></nav>
+          <div class="map-disclaimer">${t.imagery} <a href="https://www.esri.com/" target="_blank" rel="noreferrer">© Esri</a> · ${t.buildingContext} · ${t.overlays}</div>
+          <section class="mobile-brief" aria-label="${t.severeWarning}"><span>${t.mobileAlert}</span><strong>${t.leave}</strong><p>${t.groundingLine}</p><button class="mobile-route-action ${routeStarted ? 'is-success' : ''}" type="button" data-action="route">${icons.route}${routeStarted ? t.routeActive : t.startRoute}</button></section>
+          <nav class="mobile-safety-dock" aria-label="${t.emergencyAssistance}"><button class="dock-action dock-action--emergency" type="button" data-action="assist-open"><strong>112</strong><span>${t.emergencyCall}</span></button><button class="dock-action dock-action--voice ${voiceListening ? 'is-listening' : ''}" type="button" data-action="voice-open" aria-expanded="${voiceOpen}">${icons.mic}<span>${t.voicePrompt}</span></button><button class="dock-action" type="button" data-action="directions">${icons.route}<span>${t.routeShort}</span></button></nav>
         </section>
       </main>
       <aside class="voice-console ${voiceOpen ? 'is-open' : ''}" role="dialog" aria-modal="false" aria-labelledby="voice-title" ${voiceOpen ? '' : 'hidden'}>
@@ -205,8 +208,10 @@ async function initMap(renderVersion: number) {
   const { Map, Popup } = await import('maplibre-gl');
   if (renderVersion !== mapRenderVersion || !document.body.contains(container)) return;
   const t = words[language];
-  map = new Map({ container, center: deviceLocation || [76.112, 11.562], zoom: deviceLocation ? 14.5 : 13.4, pitch: mapTilted ? 58 : 0, bearing: mapTilted ? -18 : 0, dragRotate: true, pitchWithRotate: true, attributionControl: false, style: { version: 8, sources: {
+  const mapZoom = mapTilted ? Math.max(perspectiveCamera?.zoom || 0, 15.5) : (perspectiveCamera?.zoom ?? (deviceLocation ? 14.5 : 13.4));
+  map = new Map({ container, center: perspectiveCamera?.center || deviceLocation || [76.112, 11.562], zoom: mapZoom, pitch: mapTilted ? 65 : 0, bearing: mapTilted ? -18 : 0, maxPitch: 75, dragRotate: true, pitchWithRotate: true, attributionControl: false, style: { version: 8, terrain: mapTilted ? { source: 'elevation', exaggeration: 1 } : undefined, light: { anchor: 'viewport', color: 'hsl(210, 55%, 93%)', intensity: 0.42, position: [1.5, 210, 30] }, sources: {
     basemap: { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, attribution: 'Imagery © Esri' },
+    elevation: { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], tileSize: 256, encoding: 'terrarium', maxzoom: 15, attribution: '<a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noreferrer">Terrain Tiles</a>' },
     hazard: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: mapData.hazard }, properties: { label: t.hazardLabel, detail: t.hazardDetail } } },
     relocation: { type: 'geojson', data: { type: 'FeatureCollection', features: [
       { type: 'Feature', geometry: { type: 'Polygon', coordinates: mapData.relocationZones[0] }, properties: { label: t.relocation1Label, detail: t.relocation1Detail } },
@@ -233,6 +238,10 @@ async function initMap(renderVersion: number) {
     { id: 'place-points', type: 'circle', source: 'places', paint: { 'circle-radius': ['case', ['==', ['get', 'kind'], 'device'], 7, 8], 'circle-color': ['case', ['==', ['get', 'kind'], 'device'], mapColor('--map-color-paper'), mapColor('--map-color-accent')], 'circle-stroke-color': ['case', ['==', ['get', 'kind'], 'device'], mapColor('--map-color-accent'), mapColor('--map-color-paper')], 'circle-stroke-width': 3 } },
     { id: 'place-labels', type: 'symbol', source: 'places', layout: { 'text-field': ['get', 'label'], 'text-size': 13, 'text-offset': [0, 1.5], 'text-anchor': 'top' }, paint: { 'text-color': mapColor('--map-color-paper'), 'text-halo-color': mapColor('--map-color-surface'), 'text-halo-width': 2 } },
   ] } });
+  perspectiveCamera = null;
+  map.on('idle', () => {
+    if (renderVersion === mapRenderVersion) document.querySelector<HTMLElement>('.map-loading')?.setAttribute('hidden', '');
+  });
   map.once('load', () => {
     if (renderVersion !== mapRenderVersion) return;
     document.querySelector<HTMLElement>('.map-loading')?.setAttribute('hidden', '');
@@ -279,17 +288,19 @@ function syncPerspectiveControl() {
   control?.setAttribute('aria-pressed', String(mapTilted));
 }
 function toggleMapPerspective() {
+  if (!map) return;
+  perspectiveCamera = { center: map.getCenter().toArray(), zoom: map.getZoom() };
   mapTilted = !mapTilted;
-  map?.easeTo({ pitch: mapTilted ? 58 : 0, bearing: mapTilted ? -18 : 0, duration: motionDuration() });
-  syncPerspectiveControl();
+  render();
 }
 function recenterMap() {
   if (!deviceLocation) { requestLocation(); return; }
   mapTilted = false;
+  map?.setTerrain(null);
   map?.easeTo({ center: deviceLocation, zoom: 15, pitch: 0, bearing: 0, duration: motionDuration() });
   syncPerspectiveControl();
 }
-function focusRoute() { map?.fitBounds(mapData.routeBounds as [[number, number], [number, number]], { padding: 90, duration: motionDuration() }); }
+function focusRoute() { map?.fitBounds(mapData.routeBounds as [[number, number], [number, number]], { padding: window.innerWidth < 768 ? { top: 140, bottom: 290, left: 40, right: 40 } : 90, pitch: mapTilted ? 65 : 0, bearing: mapTilted ? -18 : 0, duration: motionDuration() }); }
 function revealMapLayers() {
   if (!map) return;
   const show = () => {
@@ -465,7 +476,7 @@ function bindInteractions() {
   document.querySelector<HTMLButtonElement>('[data-action="voice-listen"]')?.addEventListener('click', toggleListening);
   document.querySelectorAll<HTMLButtonElement>('[data-command]').forEach((b) => b.addEventListener('click', () => void runVoiceCommand(b.dataset.command || '')));
   document.querySelector<HTMLFormElement>('[data-command-form]')?.addEventListener('submit', (e) => { e.preventDefault(); void runVoiceCommand(String(new FormData(e.currentTarget as HTMLFormElement).get('command') || '')); });
-  document.querySelector<HTMLButtonElement>('[data-action="route"]')?.addEventListener('click', () => { routeStarted = true; directionsOpen = true; render(); focusRoute(); });
+  document.querySelectorAll<HTMLButtonElement>('[data-action="route"]').forEach((button) => button.addEventListener('click', () => { routeStarted = true; directionsOpen = true; render(); }));
   document.querySelector<HTMLButtonElement>('[data-action="map-route"]')?.addEventListener('click', focusRoute);
   document.querySelector<HTMLButtonElement>('[data-action="toggle-3d"]')?.addEventListener('click', toggleMapPerspective);
   document.querySelector<HTMLButtonElement>('[data-action="recenter"]')?.addEventListener('click', recenterMap);

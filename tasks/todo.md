@@ -9,6 +9,42 @@
 > evidence for the Python reference app under `src/`; they do not satisfy any
 > Go, mobile or live-operation gate. Unchecked items below are superseded by
 > the Go phases and remain here only as a record of what the Python app lacked.
+## Current frontend task - first-use flow and visual correction
+
+- [x] Restore the visible language then location setup flow on every fresh app load.
+- [x] Recompose first use and the map guidance surface around clear emergency hierarchy, not dashboard-card patterns.
+- [ ] Verify the reduced-motion path in a browser that exposes motion-preference emulation.
+
+### Review - 2026-09-25
+
+- The application now opens with language selection on each new page load, then advances to the explicit location choice before any map loads. Language preference is still retained for the interface itself.
+- First-use now shares the civic-night visual language with the emergency map: the strong route action is reserved for the actual guidance screen, while setup uses clear choices and avoids generic form-card styling.
+- Browser verification at the narrow preview viewport confirmed the language entry screen after refresh and the map's location-unavailable state. TypeScript type-checking, focused geometry tests (2 passed), and whitespace validation pass. Browser-level reduced-motion emulation remains to be checked.
+
+## Current frontend task - mobile emergency-surface rework
+
+- [x] Remove extruded building blocks from the 3D terrain view.
+- [x] Unify the map tools, alert brief, and thumb-zone controls into one mobile visual system.
+- [x] Prevent route and voice sheets from being obscured by persistent map controls.
+- [x] Rework first-use selection and voice-sheet affordances to remove ambiguous secondary actions.
+- [x] Verify narrow viewport layout, build, tests, then commit the completed change.
+
+### Review - 2026-09-25
+
+- Removed OpenFreeMap extrusion blocks entirely. The 3D view is now an honest terrain perspective with satellite imagery and no invented or flat building cuboids.
+- Narrow-browser checks cover the language and location sequence, combined zone controls, the map surface, the unobstructed route sheet, the voice-control sheet, and 3D terrain rendering.
+- `npm run build`, TypeScript checking, `tests/test_v2_map_geometry.py` (2 passed), and `git diff --check` pass.
+
+
+## Current frontend task - 3D map perspective
+
+- [x] Add a MapLibre 2.5D camera toggle and mouse/touch tilt controls.
+- [x] Keep the existing north-up reset and camera paths predictable.
+- [x] Verify the frontend build and map geometry tests.
+
+### Review
+
+- [x] The 3D control toggles a 58 degree pitch and 18 degree bearing. Recenter restores 2D north-up orientation. `npm run build` and `tests/test_v2_map_geometry.py` pass.
 
 ## Documentation pivot
 
@@ -157,6 +193,38 @@ The current application is a locally runnable synthetic emergency-guidance demo 
 - [x] Use browser geolocation coordinates for the user's own map recenter action without falsely connecting them to the synthetic route.
 - [x] Re-verify phone, laptop, language, location-denied, and reduced-motion paths.
 - [x] Commit the completed frontend redesign on `CLEAN`.
+
+## Real 3D map correction — in progress
+
+- [x] Remove the invented scenario buildings.
+- [x] Validate real building coverage through OpenFreeMap's published TileJSON instead of guessed tile URLs.
+- [x] Add measured terrain elevation, mapped building footprints, and visible provider attribution.
+- [x] Verify terrain rendering and route controls in the running browser and production build.
+- [ ] Obtain a licensed photogrammetry source and verify regional coverage for photographic building façades.
+
+### Correction evidence
+
+- Removed all eight invented building footprints. OpenFreeMap TileJSON provides the versioned tile URL and a maximum native zoom of 14; a decoded scenario tile contains actual mapped building polygons.
+- Terrain uses Terrarium elevation tiles at real scale. Browser diagnostics confirmed ground elevation around 773 metres at the scene center and a route draped over the hillside.
+- Runtime terrain switching produced intermittent empty frames. Initializing terrain with the map style fixes that, retaining the selected center and zoom while switching views.
+- Fixed the mobile route button binding so both desktop and mobile route actions open guidance. No new rendering dependency was added.
+- Final production build and geometry tests pass; browser checks cover terrain-on rendering, 2D reset, and mobile route activation. Photorealistic mesh integration remains pending a licensed source and coverage verification.
+
+The earlier claim of absent OpenFreeMap coverage was invalid: the test used an incorrect tile URL and unsupported zooms. Textured Google Earth-style city meshes require a separate photogrammetry source; extruded footprints alone are not that feature.
+
+## Previous 3D map pass — superseded
+
+- [x] Add real Esri vector building footprints as an extrusion layer over the existing satellite imagery.
+- [x] Make the 3D control enter a genuine building scene and keep the approved route visible above it.
+- [x] Add one quiet, fully translated grounding line that supports action without obscuring emergency guidance.
+- [ ] Verify reduced-motion behavior in a browser that exposes motion-preference emulation.
+
+### Review — 2026-09-25
+
+- The 3D control now lifts the MapLibre camera to a street-level zoom and turns on shaded `fill-extrusion` layers. Esri building footprints render when the provider has coverage.
+- The current synthetic route tile has no Esri building footprints, so the demo also renders a separate, explicitly illustrative set of synthetic building context blocks. The Esri satellite base and all emergency route/zone semantics remain unchanged.
+- The route layers remain ordered above the extrusion layers. The new grounding line is present in English, Malayalam, and Hindi.
+- `npm run build`, `tests/test_v2_map_geometry.py`, `git diff --check`, and narrow-browser 2D/3D/localization verification pass. The existing reduced-motion duration boundary remains in use; it still needs browser-level preference emulation verification.
 
 ### Review — 2026-09-25
 
