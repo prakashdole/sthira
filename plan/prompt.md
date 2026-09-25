@@ -8,6 +8,8 @@ This section overrides conflicting DONE labels, acceptance claims and continuati
 
 ### 0.0 Current checkpoint — 2026-09-25 review of `e70f512`
 
+**Live-model check (2026-09-25):** The owner now reports a running instance with all three models uploaded. Follow [live-inference-acceptance.md](live-inference-acceptance.md) for authorized instance probes, model instructions, and laptop/phone manual acceptance. Actual remote inference remains NOT_RUN until endpoint access and responses are verified; local C02/C04 corrections are not closed by uploaded weights. Instance verification is now requested by the owner; the earlier review-only restriction below does not prohibit those requested checks.
+
 **C00–C05 are not all accepted; deployment/model testing is not the only remaining work.** Review window `b48a372..e70f512` (11 commits). The incremental code-review graph was refreshed at HEAD; source/caller checks and real browser/HTTP/PostgreSQL probes found the gaps below. Read [review-recovery-2026-09-25.md](reviews/review-recovery-2026-09-25.md) for bounded evidence and limits. This checkpoint supersedes worker DONE reports in the recovery ledger. Keep successful repairs; do not restart the phase plan.
 
 User is provisioning instances. That is not evidence that weights, worker launch, model quality, language coverage or deployment acceptance passed. Do not provision additional infrastructure, spend money, access instances or download weights under this review prompt. Request the actual authorized endpoints/artifact/runtime details when needed; finish independent engineering first. Use the selected IndicConformer-600M-Multi / Sarvam-30B / Indic Parler-TTS stack without substitution.
