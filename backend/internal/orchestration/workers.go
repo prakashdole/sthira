@@ -291,6 +291,9 @@ type PipelineConfig struct {
 	// NonOperationalFallback supplies the cached snapshot the
 	// fallback path uses. Required when AllowCachedFallback=true.
 	NonOperationalFallback CachedFallback
+	// AllowSyntheticTemplates, when true, permits templates marked SyntheticOnly.
+	// Process-isolated to exercise mode only; production defaults to false (fail-closed).
+	AllowSyntheticTemplates bool
 }
 
 // MetricsRecorder is the low-cardinality metrics sink the orchestrator

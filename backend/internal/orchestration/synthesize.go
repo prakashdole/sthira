@@ -184,7 +184,7 @@ func (o *Orchestrator) Synthesize(ctx context.Context, req contracts.TTSRequest,
 			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template not registered for language", Retryable: false,
 		})
 	}
-	if tpl.SyntheticOnly {
+	if tpl.SyntheticOnly && !o.cfg.AllowSyntheticTemplates {
 		return contracts.TTSResponse{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
 			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template is synthetic-only", Retryable: false,
 		})

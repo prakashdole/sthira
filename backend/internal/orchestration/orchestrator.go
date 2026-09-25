@@ -593,7 +593,7 @@ func (o *Orchestrator) stageTemplate(ctx context.Context, sc contracts.ScopedCon
 			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template not registered for language", Retryable: false,
 		})
 	}
-	if tpl.SyntheticOnly {
+	if tpl.SyntheticOnly && !o.cfg.AllowSyntheticTemplates {
 		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
 			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template is synthetic-only", Retryable: false,
 		})

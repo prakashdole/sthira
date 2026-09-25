@@ -210,3 +210,24 @@ func DefaultTemplateRegistry() *MapTemplateRegistry {
 	}
 	return r
 }
+
+// ExerciseTemplateRegistry returns a TemplateRegistry preloaded with the
+// standard templates bound to the given package source and template versions.
+// All templates remain conspicuously marked SyntheticOnly=true to prevent
+// accidental production exposure.
+func ExerciseTemplateRegistry(sourceVersion, templateVersion int) *MapTemplateRegistry {
+	r := NewMapTemplateRegistry()
+	def := DefaultTemplateRegistry()
+	for _, k := range def.Keys() {
+		for _, lang := range []string{"en-IN", "hi-IN", "ml-IN"} {
+			if tpl, ok := def.Lookup(k, lang); ok {
+				tpl.SourceVersion = sourceVersion
+				tpl.TemplateVersion = templateVersion
+				tpl.SyntheticOnly = true
+				r.Add(tpl)
+			}
+		}
+	}
+	return r
+}
+

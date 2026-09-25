@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"sthira/backend/internal/httpserver"
+	"sthira/backend/internal/orchestration"
 	"sthira/backend/internal/store"
 )
 
@@ -127,6 +128,8 @@ func seedExercise(ctx context.Context, st *store.Store) error {
 	return st.InTx(ctx, func(tx store.DBTX) error {
 		// Clean prior rows so re-seed is idempotent.
 		for _, q := range []string{
+			`DELETE FROM place_aliases WHERE jurisdiction = $1`,
+			`DELETE FROM approved_translations WHERE jurisdiction = $1`,
 			`DELETE FROM facilities WHERE facility_id = $1`,
 			`DELETE FROM zone_versions WHERE package_id = $1`,
 			`DELETE FROM packages WHERE package_id = $1`,
@@ -135,6 +138,11 @@ func seedExercise(ctx context.Context, st *store.Store) error {
 			`DELETE FROM sources WHERE source_id = $1`,
 		} {
 			switch q {
+			case `DELETE FROM place_aliases WHERE jurisdiction = $1`,
+				`DELETE FROM approved_translations WHERE jurisdiction = $1`:
+				if _, err := tx.ExecContext(ctx, q, exerciseJurisdiction); err != nil {
+					return err
+				}
 			case `DELETE FROM facilities WHERE facility_id = $1`:
 				if _, err := tx.ExecContext(ctx, q, exerciseFacilityID); err != nil {
 					return err
@@ -228,6 +236,42 @@ func seedExercise(ctx context.Context, st *store.Store) error {
 				return err
 			}
 		}
+
+		// Seed place aliases for Meppadi disambiguation (zone vs facility).
+		for _, alias := range []struct {
+			id, key, target, kind string
+		}{
+			{"ALIASDEMO-1", "meppadi", exerciseZoneID, "ZONE"},
+			{"ALIASDEMO-2", "meppadi", exerciseFacilityID, "FACILITY"},
+			{"ALIASDEMO-3", "safe zone", exerciseZoneID, "ZONE"},
+		} {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO place_aliases (alias_id, jurisdiction, lookup_key, place_id, place_kind, created_at)
+				 VALUES ($1, $2, $3, $4, $5, $6)`,
+				alias.id, exerciseJurisdiction, alias.key, alias.target, alias.kind, now); err != nil {
+				return err
+			}
+		}
+
+		// Seed approved translations for DEMO-EXERCISE bound to SRCDEMO-1 (version 1).
+		tpls := orchestration.ExerciseTemplateRegistry(1, 1)
+		for _, k := range tpls.Keys() {
+			for _, lang := range []string{"en-IN", "hi-IN", "ml-IN"} {
+				if t, ok := tpls.Lookup(k, lang); ok {
+					h := sha256.Sum256([]byte(t.Text))
+					dig := hex.EncodeToString(h[:])
+					transID := fmt.Sprintf("TRANS-EX-%s-%s", k, lang)
+					if _, err := tx.ExecContext(ctx,
+						`INSERT INTO approved_translations
+							(translation_id, jurisdiction, speech_key, language, source_version, template_version,
+							 approved_by, evidence_ref, approved_at, source_id, template_sha256, created_at)
+						 VALUES ($1, $2, $3, $4, 1, 1, 'exercise.demo', 'EXERCISE-NO-REAL-AUTHORITY', $5, $6, $7, $5)`,
+						transID, exerciseJurisdiction, k, lang, now, exerciseSourceID, dig); err != nil {
+						return err
+					}
+				}
+			}
+		}
 		return nil
 	})
 }
@@ -268,6 +312,30 @@ func main() {
 		logger.Info("exercise fixture seeded", "jurisdiction", exerciseJurisdiction, "package", exercisePackageID)
 	}
 
+	refreshInterval := 10 * time.Second
+	if d := os.Getenv("STHIRA_WORKER_HEALTH_REFRESH"); d != "" {
+		if v, err := time.ParseDuration(d); err == nil && v > 0 {
+			refreshInterval = v
+		}
+	}
+	voiceOpts, _, err := httpserver.WireVoicePipeline(ctx, httpserver.VoiceWiringConfig{
+		Store:                   st,
+		Logger:                  logger,
+		ASRURL:                  os.Getenv("STHIRA_ASR_URL"),
+		ASRToken:                os.Getenv("STHIRA_ASR_TOKEN"),
+		MiddleURL:               os.Getenv("STHIRA_MIDDLE_URL"),
+		MiddleToken:             os.Getenv("STHIRA_MIDDLE_TOKEN"),
+		TTSURL:                  os.Getenv("STHIRA_TTS_URL"),
+		TTSToken:                os.Getenv("STHIRA_TTS_TOKEN"),
+		HealthRefreshInterval:   refreshInterval,
+		AllowSyntheticTemplates: true, // Exercise binary: synthetic templates permitted (isolated to exercise binary)
+		Templates:               orchestration.ExerciseTemplateRegistry(1, 1),
+	})
+	if err != nil {
+		logger.Error("failed to wire exercise voice pipeline", "error", err)
+		os.Exit(1)
+	}
+
 	cfg := httpserver.DefaultConfig(addr)
 	opts := []httpserver.Option{
 		httpserver.WithLogger(logger),
@@ -276,6 +344,7 @@ func main() {
 		httpserver.WithPersistedContextResolver(st),
 		httpserver.WithSyntheticExercise(httpserver.StaticSyntheticExercise(true)),
 	}
+	opts = append(opts, voiceOpts...)
 	if os.Getenv("STHIRA_ENABLE_ACCESS_LOG") == "1" {
 		opts = append(opts, httpserver.WithAccessLog(true))
 		logger.Info("access log enabled (privacy-preserving structured logging)")
