@@ -344,7 +344,7 @@ func TestProcess_CancellationAtEveryStage(t *testing.T) {
 	})
 	tpls := orchestrationtest.NewTemplates()
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
-	sc.ApprovedTemplateSHA["welcome"] = orchestrationtest.DigestString("hi")
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("welcome", "en-IN")] = orchestrationtest.DigestString("hi")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls.Add(contracts.ApprovedTemplate{
@@ -679,11 +679,11 @@ func TestSynthesize_TwoJurisdictionsScoping(t *testing.T) {
 	sc1 := orchestrationtest.BuildScopedContext("J1", "en-IN")
 	sc1.TemplateKeys = []string{"welcome"}
 	sc1.ApprovedSpeechKeys = map[string][]string{"welcome": {"en-IN"}}
-	sc1.ApprovedTemplateSHA = map[string]string{"welcome": orchestrationtest.DigestString("Welcome, citizen.")}
+	sc1.ApprovedTemplateSHA = map[string]string{contracts.TemplateDigestKey("welcome", "en-IN"): orchestrationtest.DigestString("Welcome, citizen.")}
 	sc2 := orchestrationtest.BuildScopedContext("J2", "en-IN")
 	sc2.TemplateKeys = []string{"destination_options"} // "welcome" not allowed in J2
 	sc2.ApprovedSpeechKeys = map[string][]string{"destination_options": {"en-IN"}}
-	sc2.ApprovedTemplateSHA = map[string]string{"destination_options": orchestrationtest.DigestString("Destination choices are displayed on screen.")}
+	sc2.ApprovedTemplateSHA = map[string]string{contracts.TemplateDigestKey("destination_options", "en-IN"): orchestrationtest.DigestString("Destination choices are displayed on screen.")}
 
 	resolver := orchestrationtest.NewResolver(sc1)
 	resolver.AddJurisdiction(sc2)
@@ -742,7 +742,7 @@ func TestSynthesize_UnapprovedSyntheticTranslation(t *testing.T) {
 	sc.TemplateKeys = append(sc.TemplateKeys, "synth_key", "missing_trans")
 	sc.ApprovedSpeechKeys["synth_key"] = []string{"en-IN"}
 	sc.ApprovedSpeechKeys["missing_trans"] = []string{"ml-IN"}
-	sc.ApprovedTemplateSHA["synth_key"] = orchestrationtest.DigestString("Synthetic only.")
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("synth_key", "en-IN")] = orchestrationtest.DigestString("Synthetic only.")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
@@ -787,7 +787,7 @@ func TestSynthesize_InjectedTemplateArg(t *testing.T) {
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
 	sc.TemplateKeys = append(sc.TemplateKeys, "choice_prompt")
 	sc.ApprovedSpeechKeys["choice_prompt"] = []string{"en-IN"}
-	sc.ApprovedTemplateSHA["choice_prompt"] = orchestrationtest.DigestString("Select destination: {facility_id}.")
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("choice_prompt", "en-IN")] = orchestrationtest.DigestString("Select destination: {facility_id}.")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
@@ -828,7 +828,7 @@ func TestSynthesize_InventedArgIDRejected(t *testing.T) {
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
 	sc.TemplateKeys = append(sc.TemplateKeys, "choice_prompt")
 	sc.ApprovedSpeechKeys["choice_prompt"] = []string{"en-IN"}
-	sc.ApprovedTemplateSHA["choice_prompt"] = orchestrationtest.DigestString("Select destination: {facility_id}.")
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("choice_prompt", "en-IN")] = orchestrationtest.DigestString("Select destination: {facility_id}.")
 	// sc knows FAC-KNOWN only
 	sc.KnownFacilities = map[string]contracts.FacilityRef{
 		"FAC-KNOWN": {FacilityID: "FAC-KNOWN"},
@@ -873,7 +873,7 @@ func TestSynthesize_MismatchedTemplateVersionRejected(t *testing.T) {
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
 	sc.TemplateKeys = append(sc.TemplateKeys, "welcome")
 	sc.TemplateVersion = 1
-	sc.ApprovedTemplateSHA["welcome"] = orchestrationtest.DigestString("Welcome to Sthira.")
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("welcome", "en-IN")] = orchestrationtest.DigestString("Welcome to Sthira.")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
@@ -1005,7 +1005,7 @@ func TestSynthesize_InvalidReturnedAudio(t *testing.T) {
 func TestProcess_UnavailableTTSPreservesActionsAndText(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
-	sc.ApprovedTemplateSHA["destination_options"] = orchestrationtest.DigestString("Destination choices are displayed on screen.")
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("destination_options", "en-IN")] = orchestrationtest.DigestString("Destination choices are displayed on screen.")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()

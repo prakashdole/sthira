@@ -340,7 +340,7 @@ func TestVoiceProcess_HandleSpeech_TwoJurisdictions(t *testing.T) {
 	sc1 := orchestrationtest.BuildScopedContext("J1", "en-IN")
 	sc1.TemplateKeys = []string{"welcome"}
 	sc1.ApprovedSpeechKeys = map[string][]string{"welcome": {"en-IN"}}
-	sc1.ApprovedTemplateSHA = map[string]string{"welcome": orchestrationtest.DigestString("Welcome, citizen.")}
+	sc1.ApprovedTemplateSHA = map[string]string{contracts.TemplateDigestKey("welcome", "en-IN"): orchestrationtest.DigestString("Welcome, citizen.")}
 	sc2 := orchestrationtest.BuildScopedContext("J2", "en-IN")
 	sc2.TemplateKeys = []string{"other_key"} // "welcome" not allowed in J2
 	sc2.ApprovedSpeechKeys = map[string][]string{}
@@ -384,7 +384,7 @@ func TestVoiceProcess_HandleSpeech_InjectedArg(t *testing.T) {
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
 	sc.TemplateKeys = append(sc.TemplateKeys, "choice_prompt")
 	sc.ApprovedSpeechKeys["choice_prompt"] = []string{"en-IN"}
-	sc.ApprovedTemplateSHA["choice_prompt"] = orchestrationtest.DigestString("Select destination: {facility_id}.")
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("choice_prompt", "en-IN")] = orchestrationtest.DigestString("Select destination: {facility_id}.")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()

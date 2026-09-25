@@ -20,7 +20,7 @@ import (
 func TestStageTTS_PropagatesReturnedSettingsNotRequestSide(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
-	sc.ApprovedTemplateSHA["welcome"] = orchestrationtest.DigestString("Welcome.")
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("welcome", "en-IN")] = orchestrationtest.DigestString("Welcome.")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
@@ -92,7 +92,7 @@ func TestStageTTS_PropagatesReturnedSettingsNotRequestSide(t *testing.T) {
 func TestStageTTS_RejectsMismatchedSettings(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
-	sc.ApprovedTemplateSHA["welcome"] = orchestrationtest.DigestString("Welcome.")
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("welcome", "en-IN")] = orchestrationtest.DigestString("Welcome.")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()

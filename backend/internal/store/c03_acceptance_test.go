@@ -480,3 +480,57 @@ func TestC03_ConflictingActiveApprovals_FailsClosed(t *testing.T) {
 		t.Fatalf("expected error message to mention conflicting active approvals, got: %v", err)
 	}
 }
+
+// TestC03_ExactLanguageBoundary_RejectsMissingTupleAndFlatKey proves that:
+// 1. Correct (speech_key, language) tuple resolves successfully.
+// 2. Missing tuple key rejects even if language is in ApprovedSpeechKeys and a flat key exists.
+// 3. Unapproved language rejects.
+// 4. Legacy flat key alone fails closed without falling back.
+func TestC03_ExactLanguageBoundary_RejectsMissingTupleAndFlatKey(t *testing.T) {
+	sc := contracts.ScopedContext{
+		AllowedLanguages: []string{"en-IN", "ml-IN"},
+		TemplateKeys:     []string{"welcome"},
+		ApprovedSpeechKeys: map[string][]string{
+			"welcome": {"en-IN", "ml-IN"},
+		},
+		ApprovedTemplateSHA: map[string]string{
+			"welcome":       "flat-digest",
+			"welcome/en-IN": "en-digest",
+		},
+	}
+
+	// 1. Correct EN tuple passes
+	digEN, okEN := sc.TemplateDigest("welcome", "en-IN")
+	if !okEN || digEN != "en-digest" {
+		t.Fatalf("expected en-digest, got (%q, %v)", digEN, okEN)
+	}
+
+	// 2. Missing ML tuple rejects EVEN THOUGH "welcome" flat key exists and ml-IN is in ApprovedSpeechKeys
+	digML, okML := sc.TemplateDigest("welcome", "ml-IN")
+	if okML || digML != "" {
+		t.Fatalf("expected missing tuple (welcome, ml-IN) to reject, but got (%q, %v)", digML, okML)
+	}
+
+	// 3. Wrong-language (not in ApprovedSpeechKeys) rejects
+	digHI, okHI := sc.TemplateDigest("welcome", "hi-IN")
+	if okHI || digHI != "" {
+		t.Fatalf("expected unapproved language to reject, but got (%q, %v)", digHI, okHI)
+	}
+
+	// 4. Legacy flat key alone without tuple must fail closed
+	scFlatOnly := contracts.ScopedContext{
+		AllowedLanguages: []string{"en-IN"},
+		TemplateKeys:     []string{"welcome"},
+		ApprovedSpeechKeys: map[string][]string{
+			"welcome": {"en-IN"},
+		},
+		ApprovedTemplateSHA: map[string]string{
+			"welcome": "flat-digest",
+		},
+	}
+	digFlat, okFlat := scFlatOnly.TemplateDigest("welcome", "en-IN")
+	if okFlat || digFlat != "" {
+		t.Fatalf("expected flat key alone to reject, but got (%q, %v)", digFlat, okFlat)
+	}
+}
+

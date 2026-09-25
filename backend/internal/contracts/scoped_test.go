@@ -26,9 +26,12 @@ func mkScoped() ScopedContext {
 			"verified_route_unavailable": {"ml-IN", "en-IN"},
 		},
 		ApprovedTemplateSHA: map[string]string{
-			"destination_options":        "x",
-			"clarify_place":              "x",
-			"verified_route_unavailable": "x",
+			"destination_options/ml-IN":        "x",
+			"destination_options/en-IN":        "x",
+			"clarify_place/ml-IN":              "x",
+			"clarify_place/en-IN":              "x",
+			"verified_route_unavailable/ml-IN": "x",
+			"verified_route_unavailable/en-IN": "x",
 		},
 		KnownPlaces: map[string]PlaceCandidate{
 			"PLACE-1": {PlaceID: "PLACE-1", PlaceKind: "ADMIN", Name: "Ward 8", Jurisdiction: "KL"},

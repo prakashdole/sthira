@@ -124,7 +124,7 @@ func TestA2_ArgsForTemplateNoFacilityCollision(t *testing.T) {
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
 	sc.TemplateKeys = []string{"route_prompt"}
 	sc.ApprovedSpeechKeys = map[string][]string{"route_prompt": {"en-IN"}}
-	sc.ApprovedTemplateSHA = map[string]string{"route_prompt": orchestrationtest.DigestString("Route: {route_id}, Facility: {facility_id}.")}
+	sc.ApprovedTemplateSHA = map[string]string{contracts.TemplateDigestKey("route_prompt", "en-IN"): orchestrationtest.DigestString("Route: {route_id}, Facility: {facility_id}.")}
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()

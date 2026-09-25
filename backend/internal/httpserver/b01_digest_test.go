@@ -23,7 +23,7 @@ func TestB01_VoiceSpeech_DigestMismatchRejected(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
 	// Approved digest is for the fixture text; registry holds different text.
-	sc.ApprovedTemplateSHA["welcome"] = orchestrationtest.DigestString("Welcome, citizen.")
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("welcome", "en-IN")] = orchestrationtest.DigestString("Welcome, citizen.")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()

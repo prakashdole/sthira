@@ -676,7 +676,7 @@ func TestVoiceProcess_RealHTTP_QueueSaturation(t *testing.T) {
 			"destination_options": {"en-IN"},
 		},
 		ApprovedTemplateSHA: map[string]string{
-			"destination_options": hex.EncodeToString(dsum[:]),
+			contracts.TemplateDigestKey("destination_options", "en-IN"): hex.EncodeToString(dsum[:]),
 		},
 	}
 	resolver := &testStaticResolver{sc: sc}

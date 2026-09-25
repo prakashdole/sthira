@@ -358,8 +358,8 @@ func BuildScopedContext(jurisdiction, language string) contracts.ScopedContext {
 			"destination_options": {language},
 		},
 		ApprovedTemplateSHA: map[string]string{
-			"welcome":             welcomeSHA,
-			"destination_options": destSHA,
+			contracts.TemplateDigestKey("welcome", language):             welcomeSHA,
+			contracts.TemplateDigestKey("destination_options", language): destSHA,
 		},
 		IssuedAt: "2026-09-21T00:00:00Z",
 	}

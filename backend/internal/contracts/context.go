@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"context"
-	"strings"
 )
 
 // P6 scoped context. The P1/P4 flat `KnownIDs map[string]bool` is insufficient
@@ -213,11 +212,9 @@ func TemplateDigestKey(speechKey, language string) string {
 }
 
 // TemplateDigest returns the approved template digest for the given speech_key
-// and language. It checks the exact language-bound tuple key "speech_key/language"
-// first. For backward compatibility with legacy test fixtures where the map was
-// keyed by speech_key alone without a language separator, it only falls back to
-// "speech_key" if that key is approved for the language.
-// B01: If not approved or missing, returns ("", false).
+// and language. It requires the exact language-bound tuple key "speech_key/language".
+// Missing tuple or wrong language rejects (fails closed).
+// B01/C03: If not approved or missing, returns ("", false).
 func (sc ScopedContext) TemplateDigest(key, language string) (string, bool) {
 	if key == "" || language == "" || sc.ApprovedTemplateSHA == nil {
 		return "", false
@@ -228,12 +225,6 @@ func (sc ScopedContext) TemplateDigest(key, language string) (string, bool) {
 	tupleKey := TemplateDigestKey(key, language)
 	if sha, ok := sc.ApprovedTemplateSHA[tupleKey]; ok && sha != "" {
 		return sha, true
-	}
-	// Fallback only if the map key is flat and has no "/" language delimiter
-	if !strings.Contains(key, "/") {
-		if sha, ok := sc.ApprovedTemplateSHA[key]; ok && sha != "" {
-			return sha, true
-		}
 	}
 	return "", false
 }
