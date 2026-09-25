@@ -231,6 +231,16 @@ func TestServer_NewServerRejectsNilWorker(t *testing.T) {
 	}
 }
 
+func TestMapWorkerErrorToState_OutputExceeded(t *testing.T) {
+	state, status := mapWorkerErrorToState(ErrOutputExceeded)
+	if state != MiddleStateOutputExceeded {
+		t.Errorf("state: got %q, want %q", state, MiddleStateOutputExceeded)
+	}
+	if status != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", status, http.StatusBadRequest)
+	}
+}
+
 func mustEncode(t *testing.T, v any) []byte {
 	t.Helper()
 	bs, err := json.Marshal(v)

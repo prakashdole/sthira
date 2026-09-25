@@ -1157,3 +1157,47 @@ func TestProcess_PlayableAudioOutput(t *testing.T) {
 		t.Errorf("checksum mismatch: computed %s != expected %s", checksum, out.Audio.ChecksumSHA256)
 	}
 }
+
+// TestProcess_MiddleHallucinatedSpeechKeyRejectedByValidator asserts that an unapproved
+// speech_key hallucinated by the middle model (e.g. ZOOM_IN_INSTRUCTION) is caught by
+// the independent validator and fails closed.
+func TestProcess_MiddleHallucinatedSpeechKeyRejectedByValidator(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	resolver := orchestrationtest.NewResolver(orchestrationtest.BuildScopedContext("JTEST", "en-IN"))
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
+
+	mid.SetProposeHook(func(ctx context.Context, req contracts.MiddleWorkerRequest) (contracts.MiddleWorkerResponse, error) {
+		speechKey := "ZOOM_IN_INSTRUCTION"
+		intent := contracts.IntentZoom
+		return contracts.MiddleWorkerResponse{
+			RequestID:   req.RequestID,
+			DataVersion: "v1",
+			Proposal: contracts.ModelOutput{
+				SchemaVersion: "3.0",
+				RequestID:     req.RequestID,
+				DataVersion:   "v1",
+				Status:        contracts.StatusOK,
+				Intent:        &intent,
+				Language:      "en-IN",
+				Actions: []contracts.Action{
+					{Type: contracts.ActionZoom, Direction: "IN", Steps: 1},
+				},
+				SpeechKey:        &speechKey,
+				ClarificationIDs: []string{},
+				EvidenceIDs:      []string{},
+			},
+			ModelRevision: "sarvamai/sarvam-30b",
+		}, nil
+	})
+
+	req := transcriptPipelineRequest("JTEST", "en-IN", "zoom in")
+	out, err := o.Process(context.Background(), req, nil)
+	if err == nil {
+		t.Fatalf("expected validator rejection for hallucinated speech_key ZOOM_IN_INSTRUCTION, got: %+v", out)
+	}
+	if out.State != contracts.PipelineModelUnavailable {
+		t.Errorf("expected state %s, got %s", contracts.PipelineModelUnavailable, out.State)
+	}
+}

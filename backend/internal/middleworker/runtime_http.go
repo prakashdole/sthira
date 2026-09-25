@@ -91,6 +91,7 @@ func (h *HTTPClientRuntime) Propose(ctx context.Context, req RequestEnvelope) (*
 		SystemPrompt:       h.system,
 		UserPayload:        payload,
 		ChatTemplateKwargs: h.chatKwargs,
+		MaxOutputTokens:    req.MaxOutputTokens,
 	})
 }
 

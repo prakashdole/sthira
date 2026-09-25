@@ -373,3 +373,54 @@ func jsonString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
 }
+
+func TestClient_ProposeLengthFinishReasonReturnsOutputExceeded(t *testing.T) {
+	srv := newFakeVLLM(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"length","index":0,"message":{"role":"assistant","content":"{\"schema_version\":\"3.0\""}}],"model":"sarvamai/sarvam-30b"}`))
+	})
+	c := newTestClient(t, srv.URL)
+	_, err := c.Propose(context.Background(), ProposeInput{
+		ModelID:      SarvamModelID,
+		RequestID:    "r-len",
+		SystemPrompt: "S",
+		UserPayload:  []byte(`{"request_id":"r-len"}`),
+	})
+	if !errors.Is(err, ErrOutputExceeded) {
+		t.Fatalf("expected ErrOutputExceeded for finish_reason=length, got %v", err)
+	}
+}
+
+func TestClient_ProposeMaxOutputTokensRespected(t *testing.T) {
+	var gotBody []byte
+	srv := newFakeVLLM(t, func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","index":0,"message":{"role":"assistant","content":` + jsonString(validProposalJSON) + `}}],"model":"sarvamai/sarvam-30b"}`))
+	})
+	c, err := NewClient(ClientConfig{
+		BaseURL:    srv.URL,
+		Limits:     Limits{MaxContextTokens: 4096, MaxOutputTokens: 512, MaxResponseBytes: 4096, MaxRequestBytes: 4096},
+		SchemaJSON: []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.Propose(context.Background(), ProposeInput{
+		ModelID:         SarvamModelID,
+		RequestID:       "r1",
+		SystemPrompt:    "S",
+		UserPayload:     []byte(`{"request_id":"r1"}`),
+		MaxOutputTokens: 384,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req chatCompletionRequest
+	if err := json.Unmarshal(gotBody, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.MaxTokens != 384 {
+		t.Errorf("MaxTokens sent to vLLM: got %d, want 384", req.MaxTokens)
+	}
+}

@@ -2,6 +2,7 @@ package middleworker
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -134,5 +135,59 @@ func TestSarvamConfig_PopulatesFields(t *testing.T) {
 	}
 	if len(cfg.Languages) == 0 {
 		t.Error("Languages empty")
+	}
+}
+
+// TestSarvamConfig_DefaultsToSarvamSystemPrompt ensures that when system is empty,
+// SarvamConfig automatically supplies the canonical SarvamSystemPrompt.
+func TestSarvamConfig_DefaultsToSarvamSystemPrompt(t *testing.T) {
+	cfg := SarvamConfig(&Client{}, "")
+	if cfg.System != SarvamSystemPrompt() {
+		t.Errorf("System prompt should default to SarvamSystemPrompt when empty")
+	}
+}
+
+// TestSarvamSystemPrompt_ContainsAllRequiredSections verifies that the assembled
+// system prompt covers the full action contract, panels, explicit speech_key constraints,
+// and token-budget preservation rules from plan/voice-map-system-prompt.md.
+func TestSarvamSystemPrompt_ContainsAllRequiredSections(t *testing.T) {
+	prompt := SarvamSystemPrompt()
+
+	requiredSubstrings := []string{
+		"STHIRA_INTERFACE_CONTROLLER_V3",
+		"TRUSTED_CONTEXT",
+		"FOCUS_FEATURE",
+		"SHOW_CHOICES",
+		"SHOW_ROUTE",
+		"OPEN_PANEL",
+		"ZOOM",
+		"PAN",
+		"RECENTER",
+		"SET_LANGUAGE",
+		"ALERT_DETAILS",
+		"DESTINATION_PREVIEW",
+		"ROUTE_STEPS",
+		"RESERVATION_CONFIRMATION",
+		"ARRIVAL_CONFIRMATION",
+		"EMERGENCY_CALL_CONFIRMATION",
+		"speech_key must be exactly one of the strings listed in scoped_context.template_keys, or null",
+		"NEVER invent, hallucinate, translate, or guess a speech_key",
+		"ZOOM_IN_INSTRUCTION",
+		"compact single-line JSON",
+		"schema_version",
+		"request_id",
+		"data_version",
+		"status",
+		"language",
+		"actions",
+		"speech_key",
+		"clarification_ids",
+		"evidence_ids",
+	}
+
+	for _, sub := range requiredSubstrings {
+		if !strings.Contains(prompt, sub) {
+			t.Errorf("SarvamSystemPrompt missing required constraint: %q", sub)
+		}
 	}
 }

@@ -306,12 +306,12 @@ func mapWorkerErrorToState(err error) (string, int) {
 		return MiddleStateCanceled, 499
 	case errors.Is(err, ErrMalformed),
 		errors.Is(err, ErrExtraText),
-		errors.Is(err, ErrSchemaUnsupported),
-		errors.Is(err, ErrOutputExceeded):
+		errors.Is(err, ErrSchemaUnsupported):
 		return MiddleStateMalformed, http.StatusBadRequest
 	case errors.Is(err, ErrContextExceeded):
 		return MiddleStateContextExceeded, http.StatusRequestEntityTooLarge
-	case errors.Is(err, ErrOversized):
+	case errors.Is(err, ErrOutputExceeded),
+		errors.Is(err, ErrOversized):
 		return MiddleStateOutputExceeded, http.StatusBadRequest
 	default:
 		return MiddleStateUnavailable, http.StatusInternalServerError

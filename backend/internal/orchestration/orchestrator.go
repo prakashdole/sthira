@@ -563,7 +563,7 @@ func (o *Orchestrator) stageMiddle(ctx context.Context, id CorrelationID, sc con
 		RequestID:       string(id),
 		ScopedContext:   sc,
 		Transcript:      asrResp,
-		MaxOutputTokens: 256,
+		MaxOutputTokens: 512,
 		DeadlineMillis:  o.cfg.Limits.MiddleDeadline.Milliseconds(),
 	})
 	if err != nil {
