@@ -28,3 +28,4 @@
 - When a color direction is rejected, change the hue family rather than merely adjusting lightness or saturation of the same treatment.
 - When the user explicitly selects an established color direction, use it cleanly and consistently rather than adding novelty treatments.
 - When a user asks for the original treatment, restore its exact previous token values rather than an approximation of its color family.
+- A pseudo-element animation that scales from a positioned center must include its translation in every keyframe, or it will drift away from its target icon.
