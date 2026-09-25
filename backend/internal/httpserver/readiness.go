@@ -146,7 +146,89 @@ func (s *Server) CheckReadiness(ctx context.Context) ReadinessReport {
 		}
 	}
 
-	// 4. Rate Limiter
+	// 4. Source activation (distinguishes operational government data from API DB connectivity)
+	if s.store == nil {
+		subsystems["source_activation"] = SubsystemHealth{
+			Status: StatusSkipped,
+			Detail: "store not configured",
+		}
+	} else {
+		srcCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		defer cancel()
+		var count int
+		err := s.store.DB().QueryRowContext(srcCtx,
+			`SELECT COUNT(*) FROM sources WHERE state = 'OPERATIONAL'`).Scan(&count)
+		if err != nil {
+			subsystems["source_activation"] = SubsystemHealth{
+				Status: StatusUnavailable,
+				Detail: "source activation unreadable",
+			}
+		} else if count == 0 {
+			subsystems["source_activation"] = SubsystemHealth{
+				Status: StatusUnavailable,
+				Detail: "no operational sources activated",
+			}
+		} else {
+			subsystems["source_activation"] = SubsystemHealth{
+				Status: StatusReady,
+				Detail: fmt.Sprintf("%d operational sources", count),
+			}
+		}
+	}
+
+	// 5. Operator Identity Provider (distinguishes operator IdP from local API readiness)
+	if s.operatorVerifier == nil {
+		subsystems["idp"] = SubsystemHealth{
+			Status: StatusDisabled,
+			Detail: "operator IdP not configured; operator sessions fail closed",
+		}
+	} else {
+		subsystems["idp"] = SubsystemHealth{
+			Status: StatusReady,
+			Detail: "operator IdP configured",
+		}
+	}
+
+	// 6. Voice Models (distinguishes model worker readiness from API server liveness)
+	if s.workersHealthFn != nil {
+		workers := s.workersHealthFn()
+		allHealthy := true
+		var issues []string
+		for _, w := range workers {
+			if !w.Ready {
+				allHealthy = false
+				issues = append(issues, fmt.Sprintf("%s(not ready)", w.Stage))
+			}
+		}
+		if allHealthy && len(workers) > 0 {
+			subsystems["models"] = SubsystemHealth{
+				Status: StatusReady,
+				Detail: fmt.Sprintf("all %d worker stages ready", len(workers)),
+			}
+		} else if len(workers) == 0 {
+			subsystems["models"] = SubsystemHealth{
+				Status: StatusNotReady,
+				Detail: "no workers reporting",
+			}
+		} else {
+			subsystems["models"] = SubsystemHealth{
+				Status: StatusNotReady,
+				Detail: fmt.Sprintf("unready worker stages: %s", strings.Join(issues, ", ")),
+			}
+		}
+	} else if s.voiceProcess != nil {
+		subsystems["models"] = SubsystemHealth{
+			Status: StatusReady,
+			Detail: "voice pipeline configured",
+		}
+	} else {
+		subsystems["models"] = SubsystemHealth{
+			Status: StatusDisabled,
+			Detail: "voice pipeline not wired",
+		}
+	}
+
+	// 7. Rate Limiter
 	if s.rateLimit == nil {
 		subsystems["rate_limiter"] = SubsystemHealth{
 			Status: StatusDisabled,
