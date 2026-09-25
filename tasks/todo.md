@@ -362,6 +362,16 @@ The earlier claim of absent OpenFreeMap coverage was invalid: the test used an i
 - Narrow-browser verification confirms the calm moon-silver Speak surface has readable navy text and does not compete with red Call Help.
 - `npm run build`, `python -m pytest tests/test_v2_map_geometry.py -q`, and `git diff --check` pass.
 
+## Voice color refinement — 2026-09-25
+
+- [x] Replace alternate color experiments with a single solid blue Speak surface; retain red emergency separation.
+- [x] Verify narrow mobile rendering and build.
+
+### Review — 2026-09-25
+
+- Narrow-browser preview confirms solid blue Speak is readable and remains visually subordinate to the red Call Help escalation.
+- `npm run build`, `python -m pytest tests/test_v2_map_geometry.py -q`, and `git diff --check` pass.
+
 - [x] Operational-package manifest now requires authority, jurisdiction, version, effective/expiry window, checksum, facilities, allocation policy, emergency contacts, geometry, and cross-references.
 - [x] Synthetic package checksum verification, authenticated demo publication, version conflict detection, supersession, cancellation, rollback, and active-package API are covered by tests.
 - [x] Assignment API requires alert/session/idempotency linkage and rejects payload conflicts; local concurrent allocation and arrival tests pass.

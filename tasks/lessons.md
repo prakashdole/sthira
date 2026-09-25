@@ -25,3 +25,5 @@
 - Voice-first CTAs need an explicit icon/text layout at narrow widths; emergency escalation needs its own high-contrast, fixed placement rather than sharing ordinary map-control weight.
 - Voice emphasis can be vivid, but its accent must remain semantically separate from the red emergency-call path and leave breathing room from onboarding copy.
 - Do not force a bright novelty color into a safety-critical primary control; a calm, high-contrast neutral can carry voice focus while red retains emergency meaning.
+- When a color direction is rejected, change the hue family rather than merely adjusting lightness or saturation of the same treatment.
+- When the user explicitly selects an established color direction, use it cleanly and consistently rather than adding novelty treatments.
