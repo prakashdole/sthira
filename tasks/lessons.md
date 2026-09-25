@@ -23,3 +23,4 @@
 - A full-page route view is navigation, not a modal. Do not borrow modal accent treatment for it; reserve one rounded, accented chrome for transient sheets and confirmations.
 - Map presence needs clear semantic separation: a device dot may animate for orientation, while hazard and relocation overlays use distinct motion and color without implying live predictions.
 - Voice-first CTAs need an explicit icon/text layout at narrow widths; emergency escalation needs its own high-contrast, fixed placement rather than sharing ordinary map-control weight.
+- Voice emphasis can be vivid, but its accent must remain semantically separate from the red emergency-call path and leave breathing room from onboarding copy.
