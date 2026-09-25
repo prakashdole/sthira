@@ -77,8 +77,6 @@ let detailsOpen = false;
 let assistanceOpen = false;
 let audioOpen = false;
 let islOpen = false;
-const authorityMode = new URLSearchParams(window.location.search).get('view') === 'authority';
-const dispatchedTeams = new Set<string>();
 
 function runtimeCopy() {
   const t = words[language];
@@ -122,7 +120,7 @@ function renderOnboarding() {
           <h1 id="onboarding-title">${startingStep ? t.startingVoice : languageStep ? t.onboardingLanguageTitle : t.onboardingLocationTitle}</h1>
           <p>${startingStep ? t.groundingLine : languageStep ? t.onboardingLanguageBody : t.onboardingLocationBody}</p>
         </div>
-        ${startingStep ? `<button class="onboarding-primary onboarding-primary--voice" type="button" data-action="onboarding-start">${icons.mic}<span>${t.beginVoice}</span></button><a class="authority-signin" href="?view=authority">Authority sign-in</a>` : languageStep ? `
+        ${startingStep ? `<button class="onboarding-primary onboarding-primary--voice" type="button" data-action="onboarding-start">${icons.mic}<span>${t.beginVoice}</span></button>` : languageStep ? `
           <div class="language-options" role="group" aria-label="${t.chooseLanguage}">
             ${(['EN', 'ML', 'HI'] as Language[]).map((code) => `<button class="${language === code ? 'is-active' : ''}" type="button" data-onboarding-language="${code}" aria-pressed="${language === code}"><strong>${code}</strong><span>${code === 'EN' ? 'English' : code === 'ML' ? 'മലയാളം' : 'हिन्दी'}</span></button>`).join('')}
           </div>
@@ -147,48 +145,12 @@ function renderOnboarding() {
   document.querySelectorAll<HTMLButtonElement>('[data-action="onboarding-complete"]').forEach((button) => button.addEventListener('click', completeOnboarding));
 }
 
-function renderAuthorityDashboard() {
-  if (mapAnimationFrame !== null) cancelAnimationFrame(mapAnimationFrame);
-  mapAnimationFrame = null;
-  map?.remove();
-  mapRenderVersion += 1;
-  document.documentElement.lang = 'en';
-  document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-    <main class="authority-console" aria-labelledby="authority-title">
-      <header class="authority-header">
-        <a class="brand authority-brand" href="/" aria-label="Open citizen guidance"><span class="brand-mark">സ്</span><span><strong>Sthira</strong><small>Authority operations</small></span></a>
-        <div class="authority-incident"><i></i><span>Synthetic exercise incident</span><strong>Flood evacuation</strong></div>
-        <a class="authority-exit" href="/">Citizen view</a>
-      </header>
-      <section class="authority-grid">
-        <aside class="authority-rail" aria-label="Incident summary">
-          <div><span>Active incident</span><h1 id="authority-title">Ward 12 flood response</h1><p>Exercise data only. Decisions remain under the responsible authority.</p></div>
-          <dl class="authority-metrics"><div><dt>People assigned</dt><dd>128 <small>of 164</small></dd></div><div><dt>Shelter capacity</dt><dd>72% <small>available</small></dd></div><div><dt>Rescue requests</dt><dd class="is-alert">6 <small>awaiting triage</small></dd></div></dl>
-          <section class="authority-status"><h2>Operational checks</h2><p><i></i> Route package validated</p><p><i></i> Shelter allocation available</p><p><i></i> Source: synthetic fixture</p></section>
-        </aside>
-        <section class="authority-map" aria-label="Synthetic incident map"><div id="map-canvas"></div><div class="authority-map-label"><strong>Operational map</strong><span>Hazard, approved route, relocation areas</span></div></section>
-        <aside class="authority-queue" aria-labelledby="queue-title"><div class="authority-queue-head"><div><span>Rescue queue</span><h2 id="queue-title">Needs review</h2></div><button type="button" data-action="authority-refresh">Refresh</button></div>
-          ${[
-            ['RQ-014', 'Ward 12, north access', '2 people', 'High'],
-            ['RQ-018', 'Ridge Road junction', 'Medical transport', 'High'],
-            ['RQ-021', 'School approach', '4 people', 'Review'],
-          ].map(([id, place, need, level]) => `<article class="authority-request ${dispatchedTeams.has(id) ? 'is-dispatched' : ''}"><div><strong>${id}</strong><span class="authority-priority authority-priority--${level.toLowerCase()}">${dispatchedTeams.has(id) ? 'Marked for team' : level}</span></div><p>${place}</p><small>${need}</small><button type="button" data-authority-dispatch="${id}" ${dispatchedTeams.has(id) ? 'disabled' : ''}>${dispatchedTeams.has(id) ? 'Marked' : 'Mark for team'}</button></article>`).join('')}
-          <p class="authority-boundary">This interface records no dispatch. Connect it only to an approved authority workflow.</p>
-        </aside>
-      </section>
-    </main>`;
-  document.querySelectorAll<HTMLButtonElement>('[data-authority-dispatch]').forEach((button) => button.addEventListener('click', () => { dispatchedTeams.add(button.dataset.authorityDispatch!); renderAuthorityDashboard(); }));
-  document.querySelector<HTMLButtonElement>('[data-action="authority-refresh"]')?.addEventListener('click', renderAuthorityDashboard);
-  void initMap(mapRenderVersion);
-}
-
 function render() {
   const t = words[language];
   if (mapAnimationFrame !== null) cancelAnimationFrame(mapAnimationFrame);
   mapAnimationFrame = null;
   map?.remove();
   mapRenderVersion += 1;
-  if (authorityMode) { renderAuthorityDashboard(); return; }
   if (onboardingStep) { renderOnboarding(); return; }
   document.documentElement.lang = language === 'ML' ? 'ml' : language === 'HI' ? 'hi' : 'en';
   document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
