@@ -38,6 +38,7 @@ Source adapters fetch once per agreed schedule, not once per app user. Store raw
 | S08 | [Staticcheck](https://staticcheck.dev/docs/) | Official documentation retrieved: static Go bug/performance/style checks; free/open-source claim; no application test run |
 | S09 | [Go profiling](https://go.dev/blog/pprof) | Official profiling guidance retrieved; supports measuring bottlenecks instead of inferring from language |
 | S10 | [ZAP API documentation](https://www.zaproxy.org/docs/desktop/start/features/api/) | Official API documentation retrieved; proposed dynamic-testing tool, not run here |
+| S11 | [Sarvam-30B model card](https://huggingface.co/sarvamai/sarvam-30b) | Official README retrieved 2026-09-21: MoE architecture (19 layers, 128 experts, top-6 routed), 2.4B active non-embedding params out of 30B total, Apache-2.0 license, chat template with enable_thinking option (must be false in production), 22 Indian languages. Selected FP8 precision (~30 GB weights). Requires vLLM PR #33942 / fork / hotpatch or SGLang |
 
 Retrieval used direct primary READMEs/pages and Jina-rendered documentation. Firecrawl's configured credentials failed; no credentials/configuration were changed. These are documentation checks, not live runtime or performance validation. Save exact release/model hashes and license text at implementation, since documentation can change.
 

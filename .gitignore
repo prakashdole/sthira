@@ -14,6 +14,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!loadmodel/k6/lib/
 lib64/
 parts/
 sdist/
@@ -64,4 +65,9 @@ data/cache/
 .reticle/
 .pytest_cache/
 output/
+loadmodel/bin/
+bin/
+loadmodel/reports/*/metrics.json
+loadmodel/reports/*/raw_metrics*.json
+loadmodel/reports/*/*.raw.json
 claude.txt

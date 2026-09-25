@@ -1,0 +1,126 @@
+# Go backend + PostgreSQL deployment package owned by deploy/go-backend/.
+#
+# Project scope: a single-host, local/staging bring-up of the bounded /api/v3
+# backend with a durable PostGIS store. Distinct from
+# deploy/docker-compose.demo.yml (Python demo) and from
+# backend/deploy/recovery/compose.recovery.yml (P7 rehearsal). Neither of
+# those is edited by this package.
+#
+# Operational rules honoured here:
+#   - The API is the only service published to the host loopback. PostgreSQL
+#     and any future model worker port stay on the internal network.
+#   - Fixed container and volume names are removed to preserve project
+#     isolation: multiple stacks with different STHIRA_DEPLOY_PROJECT names
+#     can run on the same Docker daemon without colliding.
+#   - The API listens on 0.0.0.0:8080 inside the container so port mappings
+#     from the host loopback reach it; published port uses standard host IP
+#     binding (127.0.0.1:${STHIRA_API_HOST_PORT:-8080}:8080).
+#   - Bounded resources (CPUs, memory, PIDs) prevent a runaway replica from
+#     starving the host.
+#   - Migrations are *not* applied automatically on API startup. The package's
+#     dedicated `migrate` service or explicit `scripts/go-migrate.sh` runs them once.
+#   - PostgreSQL + PostGIS is pinned to supported 18-3.6 (overridable via
+#     STHIRA_PG_IMAGE).
+
+name: ${STHIRA_DEPLOY_PROJECT:-sthira-go}
+
+services:
+  postgres:
+    image: ${STHIRA_PG_IMAGE:-postgis/postgis:18-3.6}
+    restart: unless-stopped
+    networks:
+      - sthira-go-backend
+    environment:
+      POSTGRES_USER: ${STHIRA_PG_USER:?STHIRA_PG_USER is required}
+      POSTGRES_PASSWORD: ${STHIRA_PG_PASSWORD:?STHIRA_PG_PASSWORD is required}
+      POSTGRES_DB: ${STHIRA_PG_DATABASE:?STHIRA_PG_DATABASE is required}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1Gi
+        reservations:
+          cpus: "0.25"
+          memory: 256Mi
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    image: ${STHIRA_DEPLOY_IMAGE:-sthira-go-backend:local}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sthira-go-backend
+    # Publish only on the loopback interface with standard port mapping.
+    # PostgreSQL is not published.
+    ports:
+      - "${STHIRA_API_HOST_IP:-127.0.0.1}:${STHIRA_API_HOST_PORT:-8080}:8080"
+    environment:
+      STHIRA_ADDR: 0.0.0.0:8080
+      STHIRA_DATABASE_DSN: ${STHIRA_DATABASE_DSN}
+      # Optional external worker URLs. When *all three* are set the API
+      # wires its voice orchestrator; otherwise voice stays unavailable
+      # (the server reports 503, which is the documented fail-closed
+      # posture). The deploy/go-backend package does not bundle ASR/middle/
+      # TTS workers, model weights, or attempt to verify their contracts.
+      STHIRA_ASR_URL: ${STHIRA_ASR_URL:-}
+      STHIRA_ASR_TOKEN: ${STHIRA_ASR_TOKEN:-}
+      STHIRA_MIDDLE_URL: ${STHIRA_MIDDLE_URL:-}
+      STHIRA_MIDDLE_TOKEN: ${STHIRA_MIDDLE_TOKEN:-}
+      STHIRA_TTS_URL: ${STHIRA_TTS_URL:-}
+      STHIRA_TTS_TOKEN: ${STHIRA_TTS_TOKEN:-}
+    healthcheck:
+      disable: true
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 768Mi
+        reservations:
+          cpus: "0.25"
+          memory: 128Mi
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64Mi
+
+  migrate:
+    image: ${STHIRA_DEPLOY_MIGRATE_IMAGE:-sthira-go-backend:local-migrate}
+    restart: "no"
+    profiles:
+      - tools
+    networks:
+      - sthira-go-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      STHIRA_DATABASE_DSN: ${STHIRA_DATABASE_DSN}
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256Mi
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  sthira-go-backend:
+    driver: bridge
+    internal: false
+
+volumes:
+  pgdata:

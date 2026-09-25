@@ -1,0 +1,356 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sthira.local/schemas/middle/model_output.schema.json",
+  "title": "STHIRA_INTERFACE_CONTROLLER_V3 — model_output",
+  "description": "Frozen v3.0 middle-model output contract. Reused by vLLM guided generation; the orchestrator's independent validator (contracts.ValidateModelOutput) is the safety gate, not this schema. Schema mismatch between the model output and this file is a contract bug.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "data_version",
+    "status",
+    "language",
+    "actions",
+    "speech_key",
+    "clarification_ids",
+    "evidence_ids",
+    "intent"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "3.0"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "data_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "CLARIFY",
+        "UNSUPPORTED",
+        "DATA_UNAVAILABLE",
+        "ERROR"
+      ]
+    },
+    "intent": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "enum": [
+            "FOCUS_PLACE",
+            "SHOW_ALERT_AREA",
+            "LIST_DESTINATIONS",
+            "PREVIEW_DESTINATION",
+            "SHOW_ROUTE",
+            "SHOW_MY_LOCATION",
+            "ZOOM",
+            "PAN",
+            "RECENTER",
+            "REPEAT_GUIDANCE",
+            "CHANGE_LANGUAGE",
+            "OPEN_CONFIRMATION"
+          ]
+        }
+      ]
+    },
+    "language": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "actions": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "$ref": "#/$defs/action"
+      }
+    },
+    "speech_key": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      ]
+    },
+    "clarification_ids": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "evidence_ids": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    }
+  },
+  "$defs": {
+    "action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "target_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "FOCUS_FEATURE"
+            },
+            "target_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "target_ids"
+          ],
+          "properties": {
+            "type": {
+              "const": "SHOW_CHOICES"
+            },
+            "target_ids": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 3,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "route_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "SHOW_ROUTE"
+            },
+            "route_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "panel"
+          ],
+          "properties": {
+            "type": {
+              "const": "OPEN_PANEL"
+            },
+            "panel": {
+              "type": "string",
+              "enum": [
+                "ALERT_DETAILS",
+                "DESTINATION_PREVIEW",
+                "ROUTE_STEPS",
+                "RESERVATION_CONFIRMATION",
+                "ARRIVAL_CONFIRMATION",
+                "EMERGENCY_CALL_CONFIRMATION"
+              ]
+            },
+            "target_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "direction",
+            "steps"
+          ],
+          "properties": {
+            "type": {
+              "const": "ZOOM"
+            },
+            "direction": {
+              "enum": [
+                "IN",
+                "OUT"
+              ]
+            },
+            "steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "direction",
+            "steps"
+          ],
+          "properties": {
+            "type": {
+              "const": "PAN"
+            },
+            "direction": {
+              "enum": [
+                "NORTH",
+                "SOUTH",
+                "EAST",
+                "WEST"
+              ]
+            },
+            "steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "RECENTER"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "language"
+          ],
+          "properties": {
+            "type": {
+              "const": "SET_LANGUAGE"
+            },
+            "language": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "target_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "HIGHLIGHT_FEATURE"
+            },
+            "target_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "target_ids"
+          ],
+          "properties": {
+            "type": {
+              "const": "FIT_FEATURES"
+            },
+            "target_ids": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 3,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "layer",
+            "visible"
+          ],
+          "properties": {
+            "type": {
+              "const": "SET_LAYER_VISIBILITY"
+            },
+            "layer": {
+              "type": "string",
+              "enum": [
+                "RED_ZONES",
+                "SAFE_ZONES",
+                "ROUTES",
+                "MY_LOCATION"
+              ]
+            },
+            "visible": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,4 +1,4 @@
-"""Bounded IndicConformer seam; no model artifact is bundled or executed."""
+"""Bounded adapter for the local AI4Bharat IndicConformer model."""
 
 from __future__ import annotations
 
@@ -54,17 +54,15 @@ class IndicConformerAdapter:
         if self.gate.state is not STTState.READY or self.runtime is None:
             raise RuntimeError("IndicConformer artifact gate is not ready")
         if language not in self.gate.languages:
-            raise ValueError("language is not configured for speech")
+            raise ValueError("language is not configured for local speech recognition")
         if media_type not in {"audio/wav", "audio/webm", "audio/ogg"}:
             raise ValueError("audio media type is unsupported")
         if not audio or len(audio) > MAX_AUDIO_BYTES or duration_seconds <= 0 or duration_seconds > MAX_AUDIO_SECONDS:
             raise ValueError("audio bounds are invalid")
-        request_id = f"stt-{uuid4().hex}"
         try:
             text, confidence = self.runtime.transcribe(bytes(audio), language=language)
         finally:
-            # The local bytes object is not returned, cached, or logged.
             audio = b""
-        if not isinstance(text, str) or not 0 <= confidence <= 1:
+        if not isinstance(text, str) or not text.strip() or not 0 <= confidence <= 1:
             raise RuntimeError("speech runtime returned invalid output")
-        return Transcript(request_id, language, text, confidence, raw_audio_retained=False)
+        return Transcript(f"stt-{uuid4().hex}", language, text.strip(), confidence, raw_audio_retained=False)

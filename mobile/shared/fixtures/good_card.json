@@ -1,0 +1,83 @@
+{
+  "schema_version": "3.0",
+  "package_id": "PKG-WAYANAD-2026-V1",
+  "version": 1,
+  "jurisdiction": "KL-WYD",
+  "evidence_class": "SYNTHETIC_DEMO",
+  "effective_at": "2026-09-23T10:00:00Z",
+  "expires_at": "2026-09-24T10:00:00Z",
+  "alert": {
+    "identifier": "ALT-2026-001",
+    "sender": "kerala.sdma.gov.in",
+    "headline": "Flash Flood Warning Wayanad",
+    "severity": "Severe",
+    "urgency": "Immediate",
+    "certainty": "Observed",
+    "area_description": "Meppadi and Chooralmala"
+  },
+  "red_zones": [
+    {
+      "id": "RZ-MEPPADI-01",
+      "name": "Meppadi Inundation Zone",
+      "centroid": [76.12, 11.55]
+    }
+  ],
+  "safe_zones": [
+    {
+      "id": "SZ-KALPETTA-01",
+      "name": "Kalpetta Relief Camp",
+      "role": "PRIMARY_SHELTER",
+      "status": "OPEN",
+      "capacity_mode": "FIXED",
+      "total_capacity": 500,
+      "location": [76.08, 11.61],
+      "services": ["FOOD", "WATER", "MEDICAL"]
+    }
+  ],
+  "approved_routes": [
+    {
+      "id": "RT-MEPPADI-KALPETTA-01",
+      "from_zone_id": "RZ-MEPPADI-01",
+      "to_safe_zone_id": "SZ-KALPETTA-01",
+      "mode": "ROAD",
+      "approval": "APPROVED",
+      "valid_from": "2026-09-23T10:00:00Z",
+      "valid_until": "2026-09-24T10:00:00Z"
+    }
+  ],
+  "facilities": [
+    {
+      "id": "FAC-KALPETTA-HALL-01",
+      "safe_zone_id": "SZ-KALPETTA-01",
+      "name": "Kalpetta Town Hall",
+      "address": "Main Road, Kalpetta",
+      "contact_phone": "04936-202233"
+    }
+  ],
+  "instructions": [
+    {
+      "id": "INST-01",
+      "order": 1,
+      "phase": "IMMEDIATE",
+      "text": "Evacuate immediately via designated road to Kalpetta Town Hall.",
+      "language": "en"
+    }
+  ],
+  "emergency_contacts": [
+    {
+      "label": "Disaster Helpline",
+      "phone_number": "1077"
+    }
+  ],
+  "allocation_policy": {
+    "order": ["SZ-KALPETTA-01"],
+    "route_required": true,
+    "hold_duration_minutes": 120
+  },
+  "checksum_sha256": "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b",
+  "signature": {
+    "algorithm": "Ed25519",
+    "key_id": "KEY-SDMA-KL-2026",
+    "value": "MC4CAQAwBQYDK2VwBCIEIKn7X6p+55qg2hK3xY3U0L1h6uW5Q=="
+  }
+}

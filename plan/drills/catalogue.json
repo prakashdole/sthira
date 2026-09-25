@@ -1,0 +1,394 @@
+{
+  "catalogue_version": 1,
+  "historical_events": [
+    {
+      "event_id": "EV-KL-2018-FLOOD",
+      "state": "KL",
+      "kind": "flood",
+      "occurred": "2018-08",
+      "source_ref": "gov:cwc:kerala-flood-study-2018"
+    },
+    {
+      "event_id": "EV-KL-2019-SLIDE",
+      "state": "KL",
+      "kind": "landslide",
+      "occurred": "2019-08",
+      "source_ref": "gov:gsi:bhusanket-kavalappara-puthumala-2019"
+    },
+    {
+      "event_id": "EV-KL-2024-SLIDE",
+      "state": "KL",
+      "kind": "landslide",
+      "occurred": "2024-07",
+      "source_ref": "gov:gsi:bhusanket-chooralmala-meppadi-2024"
+    },
+    {
+      "event_id": "EV-HP-2023-FLOOD",
+      "state": "HP",
+      "kind": "flood",
+      "occurred": "2023-07",
+      "source_ref": "gov:cwc:beas-basin-flood-report-2023"
+    },
+    {
+      "event_id": "EV-HP-2023-SLIDE",
+      "state": "HP",
+      "kind": "landslide",
+      "occurred": "2023-08",
+      "source_ref": "gov:gsi:bhusanket-shimla-mandi-landslides-2023"
+    },
+    {
+      "event_id": "EV-UK-2013-FLOOD",
+      "state": "UK",
+      "kind": "flood",
+      "occurred": "2013-06",
+      "source_ref": "gov:nidm:kedarnath-debris-flow-report-2013"
+    },
+    {
+      "event_id": "EV-UK-2021-SLIDE",
+      "state": "UK",
+      "kind": "landslide",
+      "occurred": "2021-02",
+      "source_ref": "gov:gsi:chamoli-rockslide-glof-study-2021"
+    },
+    {
+      "event_id": "EV-AS-2022-FLOOD",
+      "state": "AS",
+      "kind": "flood",
+      "occurred": "2022-06",
+      "source_ref": "gov:cwc:brahmaputra-silchar-flood-bulletin-2022"
+    },
+    {
+      "event_id": "EV-AS-2020-FLOOD",
+      "state": "AS",
+      "kind": "flood",
+      "occurred": "2020-07",
+      "source_ref": "gov:cwc:kaziranga-barpeta-flood-summary-2020"
+    },
+    {
+      "event_id": "EV-MH-2021-FLOOD",
+      "state": "MH",
+      "kind": "flood",
+      "occurred": "2021-07",
+      "source_ref": "gov:cwc:konkan-vashishti-river-chiplun-2021"
+    },
+    {
+      "event_id": "EV-MH-2023-SLIDE",
+      "state": "MH",
+      "kind": "landslide",
+      "occurred": "2023-07",
+      "source_ref": "gov:gsi:bhusanket-irshalwadi-landslide-2023"
+    },
+    {
+      "event_id": "EV-TN-2015-FLOOD",
+      "state": "TN",
+      "kind": "flood",
+      "occurred": "2015-12",
+      "source_ref": "gov:cwc:adyar-cooum-chennai-floods-2015"
+    },
+    {
+      "event_id": "EV-TN-2023-FLOOD",
+      "state": "TN",
+      "kind": "flood",
+      "occurred": "2023-12",
+      "source_ref": "gov:cwc:thamarabarani-tirunelveli-thoothukudi-2023"
+    },
+    {
+      "event_id": "EV-KA-2018-SLIDE",
+      "state": "KA",
+      "kind": "landslide",
+      "occurred": "2018-08",
+      "source_ref": "gov:gsi:bhusanket-kodagu-western-ghats-2018"
+    },
+    {
+      "event_id": "EV-KA-2019-FLOOD",
+      "state": "KA",
+      "kind": "flood",
+      "occurred": "2019-08",
+      "source_ref": "gov:cwc:krishna-basin-belagavi-flood-2019"
+    },
+    {
+      "event_id": "EV-OD-2019-FLOOD",
+      "state": "OD",
+      "kind": "flood",
+      "occurred": "2019-05",
+      "source_ref": "gov:imd:cyclone-fani-storm-surge-mahanadi-2019"
+    },
+    {
+      "event_id": "EV-OD-2020-FLOOD",
+      "state": "OD",
+      "kind": "flood",
+      "occurred": "2020-08",
+      "source_ref": "gov:cwc:baitarani-subarnarekha-flood-2020"
+    },
+    {
+      "event_id": "EV-SK-2023-FLOOD",
+      "state": "SK",
+      "kind": "flood",
+      "occurred": "2023-10",
+      "source_ref": "gov:cwc:south-lhonak-glof-teesta-2023"
+    },
+    {
+      "event_id": "EV-SK-2024-SLIDE",
+      "state": "SK",
+      "kind": "landslide",
+      "occurred": "2024-06",
+      "source_ref": "gov:gsi:bhusanket-mangan-landslide-2024"
+    },
+    {
+      "event_id": "EV-WB-2021-SLIDE",
+      "state": "WB",
+      "kind": "landslide",
+      "occurred": "2021-10",
+      "source_ref": "gov:gsi:bhusanket-kalimpong-darjeeling-2021"
+    },
+    {
+      "event_id": "EV-WB-2017-FLOOD",
+      "state": "WB",
+      "kind": "flood",
+      "occurred": "2017-08",
+      "source_ref": "gov:cwc:torsa-river-alipurduar-jalpaiguri-2017"
+    }
+  ],
+  "states": [
+    {
+      "state_code": "KL",
+      "name": "Kerala",
+      "languages": [
+        { "language": "ml-IN", "asr_supported": true, "tts_supported": true },
+        { "language": "en-IN", "asr_supported": false, "tts_supported": false }
+      ],
+      "scenarios": [
+        {
+          "scenario_id": "SC-KL-2018-FLOOD",
+          "state": "KL",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-KL-2018-FLOOD",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        },
+        {
+          "scenario_id": "SC-KL-2024-SLIDE",
+          "state": "KL",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-KL-2024-SLIDE",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        }
+      ]
+    },
+    {
+      "state_code": "HP",
+      "name": "Himachal Pradesh",
+      "languages": [
+        { "language": "hi-IN", "asr_supported": true, "tts_supported": true },
+        { "language": "en-IN", "asr_supported": false, "tts_supported": false }
+      ],
+      "scenarios": [
+        {
+          "scenario_id": "SC-HP-2023-FLOOD",
+          "state": "HP",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-HP-2023-FLOOD",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        },
+        {
+          "scenario_id": "SC-HP-2023-SLIDE",
+          "state": "HP",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-HP-2023-SLIDE",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        }
+      ]
+    },
+    {
+      "state_code": "UK",
+      "name": "Uttarakhand",
+      "languages": [
+        { "language": "hi-IN", "asr_supported": true, "tts_supported": true },
+        { "language": "en-IN", "asr_supported": false, "tts_supported": false }
+      ],
+      "scenarios": [
+        {
+          "scenario_id": "SC-UK-2013-FLOOD",
+          "state": "UK",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-UK-2013-FLOOD",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        },
+        {
+          "scenario_id": "SC-UK-2021-SLIDE",
+          "state": "UK",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-UK-2021-SLIDE",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        }
+      ]
+    },
+    {
+      "state_code": "AS",
+      "name": "Assam",
+      "languages": [
+        { "language": "as-IN", "asr_supported": false, "tts_supported": false },
+        { "language": "en-IN", "asr_supported": false, "tts_supported": false }
+      ],
+      "scenarios": [
+        {
+          "scenario_id": "SC-AS-2022-FLOOD",
+          "state": "AS",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-AS-2022-FLOOD",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        },
+        {
+          "scenario_id": "SC-AS-2020-FLOOD",
+          "state": "AS",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-AS-2020-FLOOD",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        }
+      ]
+    },
+    {
+      "state_code": "MH",
+      "name": "Maharashtra",
+      "languages": [
+        { "language": "mr-IN", "asr_supported": false, "tts_supported": false },
+        { "language": "en-IN", "asr_supported": false, "tts_supported": false }
+      ],
+      "scenarios": [
+        {
+          "scenario_id": "SC-MH-2021-FLOOD",
+          "state": "MH",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-MH-2021-FLOOD",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        },
+        {
+          "scenario_id": "SC-MH-2023-SLIDE",
+          "state": "MH",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-MH-2023-SLIDE",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        }
+      ]
+    },
+    {
+      "state_code": "TN",
+      "name": "Tamil Nadu",
+      "languages": [
+        { "language": "ta-IN", "asr_supported": false, "tts_supported": false },
+        { "language": "en-IN", "asr_supported": false, "tts_supported": false }
+      ],
+      "scenarios": [
+        {
+          "scenario_id": "SC-TN-2015-FLOOD",
+          "state": "TN",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-TN-2015-FLOOD",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        },
+        {
+          "scenario_id": "SC-TN-2023-FLOOD",
+          "state": "TN",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-TN-2023-FLOOD",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        }
+      ]
+    },
+    {
+      "state_code": "KA",
+      "name": "Karnataka",
+      "languages": [
+        { "language": "kn-IN", "asr_supported": false, "tts_supported": false },
+        { "language": "en-IN", "asr_supported": false, "tts_supported": false }
+      ],
+      "scenarios": [
+        {
+          "scenario_id": "SC-KA-2018-SLIDE",
+          "state": "KA",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-KA-2018-SLIDE",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        },
+        {
+          "scenario_id": "SC-KA-2019-FLOOD",
+          "state": "KA",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-KA-2019-FLOOD",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        }
+      ]
+    },
+    {
+      "state_code": "OD",
+      "name": "Odisha",
+      "languages": [
+        { "language": "or-IN", "asr_supported": false, "tts_supported": false },
+        { "language": "en-IN", "asr_supported": false, "tts_supported": false }
+      ],
+      "scenarios": [
+        {
+          "scenario_id": "SC-OD-2019-FLOOD",
+          "state": "OD",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-OD-2019-FLOOD",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        },
+        {
+          "scenario_id": "SC-OD-2020-FLOOD",
+          "state": "OD",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-OD-2020-FLOOD",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        }
+      ]
+    },
+    {
+      "state_code": "SK",
+      "name": "Sikkim",
+      "languages": [
+        { "language": "ne-IN", "asr_supported": false, "tts_supported": false },
+        { "language": "en-IN", "asr_supported": false, "tts_supported": false }
+      ],
+      "scenarios": [
+        {
+          "scenario_id": "SC-SK-2023-FLOOD",
+          "state": "SK",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-SK-2023-FLOOD",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        },
+        {
+          "scenario_id": "SC-SK-2024-SLIDE",
+          "state": "SK",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-SK-2024-SLIDE",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        }
+      ]
+    },
+    {
+      "state_code": "WB",
+      "name": "West Bengal",
+      "languages": [
+        { "language": "bn-IN", "asr_supported": false, "tts_supported": false },
+        { "language": "en-IN", "asr_supported": false, "tts_supported": false }
+      ],
+      "scenarios": [
+        {
+          "scenario_id": "SC-WB-2021-SLIDE",
+          "state": "WB",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-WB-2021-SLIDE",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        },
+        {
+          "scenario_id": "SC-WB-2017-FLOOD",
+          "state": "WB",
+          "evidence": "HISTORICAL_EVENT",
+          "historical_event_id": "EV-WB-2017-FLOOD",
+          "exercise_time": "2026-09-12T04:00:00Z"
+        }
+      ]
+    }
+  ]
+}

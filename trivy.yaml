@@ -1,0 +1,10 @@
+scan:
+  skip-dirs:
+    - ".codex-build-pitch"
+    - ".codex-finalizer"
+    - ".codex-p4-route-boundary"
+    - ".codex-p5-resource-contracts"
+    - "frontend/v2/node_modules"
+    - ".venv"
+  skip-files:
+    - ".env"

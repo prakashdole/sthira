@@ -1,0 +1,1171 @@
+openapi: 3.0.3
+info:
+  title: Sthira /api/v3 boundary
+  version: 3.0.0
+  description: >-
+    Contract for the Go backend. Documents the implemented health and
+    middle-model validation boundary plus the P4 citizen destination/stay slice
+    (sessions, place resolution, eligible-destination query, reservations and
+    stay events). Package import/review/publish and speech endpoints are later
+    phases and remain absent. All operational facts carry source provenance,
+    evidence class and version; unknown is distinct from empty, zero or current.
+    The P4 addition is deliberate: the P1 slice deferred these endpoints to a
+    later phase; P4 implements the citizen stay flows.
+servers:
+  - url: /api/v3
+tags:
+  - name: health
+  - name: voice
+  - name: voice-p6
+  - name: stay
+  - name: operations
+  - name: offline
+  - name: observability
+paths:
+  /health/live:
+    get:
+      tags: [health]
+      summary: Process liveness only
+      description: Never inspects dependencies and never claims readiness.
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+  /health/ready:
+    get:
+      tags: [health]
+      summary: Dependency and approved-source readiness
+      description: >-
+        Actively probes real dependencies. Without verified dependencies it
+        answers 503; it never reports READY from configuration presence alone.
+        Internal blocker reasons are redacted from the response.
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /voice/commands:
+    post:
+      tags: [voice]
+      summary: Validate a constrained middle-model proposal
+      description: >-
+        Accepts a typed chat/transcript command carrying a middle-model
+        proposal and independently validates it against the current server
+        snapshot and active-context IDs. Performs no write, call or capacity
+        mutation. Request bodies are bounded in size and depth; duplicate JSON
+        keys, unknown fields, trailing data and prohibited actions are rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VoiceCommandRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '413': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '422': { $ref: '#/components/responses/ErrorEnvelope' }
+  /sessions:
+    post:
+      tags: [stay]
+      summary: Issue a citizen session
+      description: >-
+        Account-free citizen session issuance (R22): no civil identity is
+        required. Returns an unguessable bearer token once; only its SHA-256
+        hash is stored. Sessions expire and can be revoked. Public.
+      responses:
+        '201': { $ref: '#/components/responses/DataEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /places/resolve:
+    post:
+      tags: [stay]
+      summary: Resolve a place by alias or admin ID
+      description: >-
+        Jurisdiction-aware resolution from known aliases/admin IDs. Multiple
+        candidates yield AMBIGUOUS_PLACE with candidate IDs in errors[0].details.candidates;
+        unknown yields NOT_FOUND. No LLM geocode. Public.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jurisdiction, query]
+              properties:
+                jurisdiction: { type: string }
+                query: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /guidance/query:
+    post:
+      tags: [stay]
+      summary: Read-only eligible destination query
+      description: >-
+        Read-only preview of eligible destinations for a party and half-open
+        date range. Unknown capacity is reported as unknown and never promised.
+        The operational route gate is closed while route authority (O05) is
+        open; no destination is route-verified for operational use. Performs no
+        write. Public.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jurisdiction, package_id, party_size, start_date, end_date]
+              properties:
+                jurisdiction: { type: string }
+                package_id: { type: string }
+                party_size: { type: integer, minimum: 1 }
+                start_date: { type: string, format: date }
+                end_date: { type: string, format: date }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /reservations:
+    post:
+      tags: [stay]
+      summary: Create an explicit reservation
+      description: >-
+        Explicit confirmed choice, separate from the read-only preview. Binds
+        facility+route+source snapshot+party size and revalidates the source
+        snapshot version at commit (STALE_VERSION on drift). Idempotency-keyed;
+        a capacity conflict is a recoverable CAPACITY_CONFLICT and never
+        silently substitutes another destination. Requires a citizen session.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [facility_id, package_id, party_size, start_date, end_date, idempotency_key, snapshot_version]
+              properties:
+                facility_id: { type: string }
+                package_id: { type: string }
+                route_id: { type: string }
+                party_size: { type: integer, minimum: 1 }
+                start_date: { type: string, format: date }
+                end_date: { type: string, format: date }
+                snapshot_version:
+                  type: integer
+                  description: >-
+                    Authoritative source snapshot version client confirmed its
+                    choice against; revalidated at commit under the locked
+                    snapshot. Required and must be > 0. Rejected with
+                    INVALID_VALUE (400) if zero or missing. Returns
+                    STALE_VERSION (409) if the locked package snapshot differs.
+      responses:
+        '201': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '401': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /reservations/{id}:
+    get:
+      tags: [stay]
+      summary: Read own reservation/stay (restart recovery)
+      description: >-
+        Authenticated owner-only read of a reservation/stay by stay or
+        reservation ID; the authenticated read path to recover state after a
+        restart. Knowing the ID is not authorization (R22). Private, no-store.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '401': { $ref: '#/components/responses/ErrorEnvelope' }
+        '403': { $ref: '#/components/responses/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /reservations/{id}/events:
+    post:
+      tags: [stay]
+      summary: Apply a typed stay event
+      description: >-
+        Typed event ARRIVE/CANCEL/DEPART/EXTEND/TRANSFER on an owned stay.
+        Arrival requires explicit citizen confirmation (R14). Idempotency-keyed;
+        capacity conservation holds across every event. Requires the owning
+        citizen session.
+        For TRANSFER, the response includes new_stay_id and new_reservation_id
+        for the replacement stay (both on first success and on idempotent replay).
+        The authenticated GET /reservations/{new_stay_id} provides the recovery
+        path after restart or a lost response.
+        snapshot_version is REQUIRED for EXTEND and TRANSFER (those are
+        commitments that revalidate against the locked snapshot). For ARRIVE,
+        CANCEL, DEPART the snapshot_version may be omitted because no
+        commitment revalidation is required.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, idempotency_key]
+              properties:
+                type: { type: string, enum: [ARRIVE, CANCEL, DEPART, EXTEND, TRANSFER] }
+                idempotency_key: { type: string }
+                new_end_date: { type: string, format: date }
+                new_facility_id: { type: string }
+                new_route_id: { type: string }
+                snapshot_version:
+                  type: integer
+                  description: >-
+                    Required for EXTEND and TRANSFER (snapshot_version > 0).
+                    Rejected with INVALID_VALUE if zero or missing for those
+                    commitment types.
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '401': { $ref: '#/components/responses/ErrorEnvelope' }
+        '403': { $ref: '#/components/responses/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /operations/sessions:
+    post:
+      tags: [operations]
+      summary: Issue an operator session
+      description: >-
+        Issues a jurisdiction-scoped OPERATOR session. Operator authority comes
+        from a server-verified identity plus a second factor (MFA) established at
+        a trusted authentication boundary, NOT from any request-body flag (R22).
+        The request carries no jurisdiction or MFA field: the permitted
+        jurisdiction is derived from a server-controlled grant bound to the
+        verified subject. With no trusted verifier configured the endpoint fails
+        closed (503); without a grant it returns 403. The bearer token is shown
+        once; only its hash is stored.
+      responses:
+        '201': { $ref: '#/components/responses/DataEnvelope' }
+        '401': { $ref: '#/components/responses/ErrorEnvelope' }
+        '403': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /operations/sources/{id}/transitions:
+    post:
+      tags: [operations]
+      summary: Publish, suspend or revoke a source
+      description: >-
+        Moves a source to OPERATIONAL (publish), SUSPENDED or RETIRED (revoke).
+        Requires an OPERATOR session with verified MFA. Jurisdiction-scoped: the
+        source must hold a currently-valid authorization in the operator's own
+        jurisdiction, else FORBIDDEN. Idempotency-keyed; the transition and its
+        audit event commit atomically.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target, idempotency_key]
+              properties:
+                target: { type: string, enum: [OPERATIONAL, SUSPENDED, RETIRED] }
+                idempotency_key: { type: string }
+                reason: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '401': { $ref: '#/components/responses/ErrorEnvelope' }
+        '403': { $ref: '#/components/responses/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /operations/sources/{id}/quarantine:
+    post:
+      tags: [operations]
+      summary: Quarantine a source's evidence
+      description: >-
+        Moves a source from any active state to QUARANTINED, marking its evidence
+        as not-to-be-used pending review. Distinct from SUSPENDED (a temporary
+        operational pause). Requires an OPERATOR session with verified MFA.
+        Jurisdiction-scoped via the source's current authorization. Quarantined
+        evidence is excluded from the resolved operational context and from new
+        reservation commit revalidation; existing stays are NOT cancelled or
+        released. Quarantine is terminal: release requires a fresh source.
+        Idempotency-keyed to the target source; version-guarded; audit-attributed.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotency_key, reason]
+              properties:
+                idempotency_key: { type: string }
+                reason: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '401': { $ref: '#/components/responses/ErrorEnvelope' }
+        '403': { $ref: '#/components/responses/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /operations/stays/{id}/corrections:
+    post:
+      tags: [operations]
+      summary: Auditable operator stay correction
+      description: >-
+        Applies an auditable operator correction to a stay's party size
+        (downward only, releasing space; an increase would require new capacity
+        and is rejected rather than silently overbooking). Requires an OPERATOR
+        session with verified MFA. Jurisdiction-scoped: the stay's facility must
+        sit in the operator's jurisdiction, else FORBIDDEN. The correction, its
+        audit event (actor = operator session) and the inventory adjustment
+        commit atomically. Idempotency-keyed.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_party_size, idempotency_key, reason]
+              properties:
+                new_party_size: { type: integer, minimum: 1 }
+                idempotency_key: { type: string }
+                reason: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '401': { $ref: '#/components/responses/ErrorEnvelope' }
+        '403': { $ref: '#/components/responses/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /regions/{id}/manifest:
+    get:
+      tags: [offline]
+      summary: Read active regional manifest
+      description: Public regional discovery manifest. Supports ETag conditional GET (304 Not Modified).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Active regional manifest
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Manifest' }
+        '304': { description: Not Modified }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '410': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+  /packages/{id}/versions/{version}:
+    get:
+      tags: [offline]
+      summary: Download immutable public incident card
+      description: Public standalone incident card projection. Supports standard Range (206) and If-Range.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Public incident card
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicIncidentCard' }
+        '206': { description: Partial Content }
+        '304': { description: Not Modified }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '410': { $ref: '#/components/responses/ErrorEnvelope' }
+        '416': { $ref: '#/components/responses/ErrorEnvelope' }
+  /resources/{id}:
+    get:
+      tags: [offline]
+      summary: Download content-addressed resource asset
+      description: Immutable auxiliary asset (vector map pack, style, font glyph, audio). Resumable via standard RFC 9110 Range headers.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Full asset stream
+          content:
+            application/octet-stream: {}
+        '206':
+          description: Partial asset stream
+          content:
+            application/octet-stream: {}
+        '304': { description: Not Modified }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '416': { description: Range Not Satisfiable }
+  # P6 — voice pipeline entry points. Additive only; the existing /voice/commands
+  # contract is unchanged. See plan/p6-contract.md. Worker 9 owns the
+  # orchestration handler; the request/response envelopes below are the
+  # coordinator freeze.
+  /voice/transcriptions:
+    post:
+      tags: [voice-p6]
+      summary: Transcribe a bounded audio upload to text
+      description: >-
+        ASR entry point. Accepts a bounded compressed mono audio upload
+        (audio/wav | audio/webm | audio/ogg; ≤512 KiB compressed; ≤20 s
+        decoded; 8 kHz – 48 kHz; mono) and a single enabled context language.
+        Returns a typed transcript. The handler does NOT store the
+        transcript server-side; persistence is the caller's job. It does NOT
+        log audio bytes. Cancellation propagates to the ASR worker via the
+        request context.
+      parameters:
+        - name: X-Language
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Request-ID
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          audio/wav:  { schema: { type: string, format: binary } }
+          audio/webm: { schema: { type: string, format: binary } }
+          audio/ogg:  { schema: { type: string, format: binary } }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/ErrorEnvelope' }
+        '413': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '422': { $ref: '#/components/responses/ErrorEnvelope' }
+        '499': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+        '504': { $ref: '#/components/responses/ErrorEnvelope' }
+  /voice/process:
+    post:
+      tags: [voice-p6]
+      summary: Full voice pipeline (audio → ASR → context → middle → validator → optional TTS)
+      description: >-
+        Orchestrator entry point. Drives the full pipeline under per-stage
+        and total deadlines with cancellation and stale-result rejection.
+        Performs NO write, call or capacity mutation. Body is JSON (typed
+        PipelineRequest); the embedded audio (when used) is base64-encoded
+        and bounded to the same compressed-bytes and decoded-duration limits
+        as /voice/transcriptions.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PipelineRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/ErrorEnvelope' }
+        '409': { $ref: '#/components/responses/ErrorEnvelope' }
+        '413': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '422': { $ref: '#/components/responses/ErrorEnvelope' }
+        '499': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+        '504': { $ref: '#/components/responses/ErrorEnvelope' }
+  /voice/speech:
+    post:
+      tags: [voice-p6]
+      summary: Synthesize an approved template to audio
+      description: >-
+        TTS entry point. Accepts a request naming an approved speech_key,
+        language, validated template args and source_version; returns a
+        content-addressed audio envelope. Only Go-approved text (rendered
+        from the typed template registry) and version metadata reach the
+        worker; arbitrary public text is rejected at the orchestrator.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TTSRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '400': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/ErrorEnvelope' }
+        '409': { $ref: '#/components/responses/ErrorEnvelope' }
+        '413': { $ref: '#/components/responses/ErrorEnvelope' }
+        '415': { $ref: '#/components/responses/ErrorEnvelope' }
+        '422': { $ref: '#/components/responses/ErrorEnvelope' }
+        '499': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+        '504': { $ref: '#/components/responses/ErrorEnvelope' }
+  /observability/metrics:
+    get:
+      tags: [observability]
+      summary: Low-cardinality operational metrics snapshot
+      description: >-
+        Returns operational metadata suitable for a metrics scraper: server
+        start time, pipeline stage counts and timings (queue depth, queue
+        rejects, stale drops, worker ready/not-ready), DB connection-pool
+        statistics (when a durable store is wired) and worker health
+        summaries (when a voice orchestrator is wired). The endpoint NEVER
+        returns citizen identifiers, bearer tokens, GPS coordinates, audio
+        bytes, transcripts, or session IDs. Without a configured
+        STHIRA_PPROF_TOKEN the endpoint fails closed (503 DEPENDENCY_UNAVAILABLE);
+        with a configured token the request must include either the
+        X-Observability-Token header or an `Authorization: Bearer <token>`
+        header, otherwise it returns 401 UNAUTHORIZED.
+      parameters:
+        - in: header
+          name: X-Observability-Token
+          required: false
+          schema: { type: string }
+          description: Required when STHIRA_PPROF_TOKEN is configured; identical to the pprof secret.
+        - in: header
+          name: Authorization
+          required: false
+          schema: { type: string }
+          description: Alternative token carrier; `Bearer <token>` form.
+      responses:
+        '200': { $ref: '#/components/responses/DataEnvelope' }
+        '401': { $ref: '#/components/responses/ErrorEnvelope' }
+        '405': { $ref: '#/components/responses/ErrorEnvelope' }
+        '503': { $ref: '#/components/responses/ErrorEnvelope' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+  responses:
+    DataEnvelope:
+      description: Success envelope; exactly `data` is populated.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+    ErrorEnvelope:
+      description: Error envelope; exactly `errors` is populated.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+    MethodNotAllowed:
+      description: Method not allowed; `Allow` header names the permitted method.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+  schemas:
+    Envelope:
+      type: object
+      required: [request_id, schema_version, generated_at, data_version, source_status]
+      properties:
+        request_id: { type: string }
+        schema_version: { type: string, enum: ['3.0'] }
+        generated_at: { type: string, format: date-time, description: UTC }
+        data_version: { type: string }
+        source_status:
+          type: string
+          enum: [CURRENT, STALE, EXPIRED, UNAVAILABLE, UNKNOWN]
+        data: { description: Present on success only. }
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/APIError' }
+          description: Present on failure only.
+    APIError:
+      type: object
+      required: [code, message, correlation_id, retryable]
+      properties:
+        code:
+          type: string
+          description: >-
+            Stable machine-readable token, e.g. MALFORMED_JSON, DUPLICATE_KEY,
+            TRAILING_DATA, BODY_TOO_LARGE, DEPTH_EXCEEDED, UNKNOWN_FIELD,
+            INVALID_VALUE, VALIDATION_FAILED, METHOD_NOT_ALLOWED,
+            UNSUPPORTED_MEDIA_TYPE, AMBIGUOUS_PLACE, DATA_UNAVAILABLE,
+            STALE_VERSION, ROUTE_UNVERIFIED, CAPACITY_UNKNOWN,
+            CAPACITY_CONFLICT, IDEMPOTENCY_CONFLICT, LANGUAGE_UNSUPPORTED,
+            MODEL_UNAVAILABLE, FORBIDDEN, RATE_LIMITED, NOT_FOUND, INTERNAL.
+        message: { type: string }
+        field: { type: string }
+        correlation_id: { type: string }
+        retryable: { type: boolean }
+        details:
+          type: object
+          description: Optional structured machine-readable error details (e.g. candidates on AMBIGUOUS_PLACE).
+          properties:
+            candidates:
+              type: array
+              description: Distinct place candidates returned on AMBIGUOUS_PLACE (HTTP 409).
+              items:
+                $ref: '#/components/schemas/PlaceCandidate'
+    PlaceCandidate:
+      type: object
+      required: [place_id, place_kind]
+      properties:
+        place_id:
+          type: string
+          description: Authoritative safe-zone, facility, or administrative identifier.
+        place_kind:
+          type: string
+          enum: [ZONE, FACILITY, ADMIN]
+        jurisdiction:
+          type: string
+          description: Jurisdiction this candidate belongs to.
+    VoiceCommandRequest:
+      type: object
+      required: [request_id, data_version, jurisdiction, proposal]
+      additionalProperties: false
+      properties:
+        request_id: { type: string }
+        data_version: { type: string }
+        jurisdiction:
+          type: string
+          description: >-
+            Untrusted lookup input selecting WHICH jurisdiction's authoritative
+            snapshot to resolve. Never proof of authorization or snapshot
+            contents. Required; an unknown/empty jurisdiction resolves nothing
+            (fail closed) rather than substituting another jurisdiction.
+        proposal: { $ref: '#/components/schemas/ModelOutput' }
+    ModelOutput:
+      type: object
+      description: >-
+        Exact middle-model output contract (STHIRA_INTERFACE_CONTROLLER_V3).
+        Independently validated against the current request, snapshot and known
+        IDs. A non-OK status carries null intent and no actions.
+      required:
+        - schema_version
+        - request_id
+        - data_version
+        - status
+        - intent
+        - language
+        - actions
+        - speech_key
+        - clarification_ids
+        - evidence_ids
+      additionalProperties: false
+      properties:
+        schema_version: { type: string, enum: ['3.0'] }
+        request_id: { type: string }
+        data_version: { type: string }
+        status:
+          type: string
+          enum: [OK, CLARIFY, UNSUPPORTED, DATA_UNAVAILABLE, ERROR]
+        intent:
+          nullable: true
+          type: string
+          enum:
+            - FOCUS_PLACE
+            - SHOW_ALERT_AREA
+            - LIST_DESTINATIONS
+            - PREVIEW_DESTINATION
+            - SHOW_ROUTE
+            - SHOW_MY_LOCATION
+            - ZOOM
+            - PAN
+            - RECENTER
+            - REPEAT_GUIDANCE
+            - CHANGE_LANGUAGE
+            - OPEN_CONFIRMATION
+        language: { type: string, description: Enabled context language tag. }
+        actions:
+          type: array
+          maxItems: 5
+          items: { $ref: '#/components/schemas/Action' }
+        speech_key:
+          nullable: true
+          type: string
+          description: Approved template key or null; never free-form speech.
+        clarification_ids:
+          type: array
+          maxItems: 3
+          items: { type: string }
+        evidence_ids:
+          type: array
+          items: { type: string }
+    Action:
+      type: object
+      description: >-
+        Strict tagged action. Only the fields legal for its `type` may be set;
+        extra fields are forbidden. SHOW_CHOICES carries the server-permitted
+        IDs in order (max 3). ZOOM/PAN steps are exactly 1.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum:
+            - FOCUS_FEATURE
+            - SHOW_CHOICES
+            - SHOW_ROUTE
+            - OPEN_PANEL
+            - ZOOM
+            - PAN
+            - RECENTER
+            - SET_LANGUAGE
+        target_id: { type: string }
+        target_ids:
+          type: array
+          maxItems: 3
+          items: { type: string }
+        route_id: { type: string }
+        panel:
+          type: string
+          enum:
+            - ALERT_DETAILS
+            - DESTINATION_PREVIEW
+            - ROUTE_STEPS
+            - RESERVATION_CONFIRMATION
+            - ARRIVAL_CONFIRMATION
+            - EMERGENCY_CALL_CONFIRMATION
+        direction: { type: string, description: IN/OUT for ZOOM; NORTH/SOUTH/EAST/WEST for PAN. }
+        steps: { type: integer, enum: [1] }
+        language: { type: string }
+    Manifest:
+      type: object
+      description: Signed regional discovery manifest
+      required:
+        - schema_version
+        - manifest_id
+        - jurisdiction
+        - revision
+        - generated_at
+        - valid_until
+        - source_status
+        - critical_card
+        - resources
+        - revocations
+        - provenance
+        - checksum_sha256
+      properties:
+        schema_version: { type: string, enum: ["3.0"] }
+        manifest_id: { type: string }
+        jurisdiction: { type: string }
+        revision: { type: integer, minimum: 1 }
+        generated_at: { type: string, format: date-time }
+        valid_until: { type: string, format: date-time }
+        source_status: { type: string }
+        critical_card:
+          type: object
+          required: [package_id, version, uri, checksum_sha256, uncompressed_bytes, compressed_bytes, content_type]
+          properties:
+            package_id: { type: string }
+            version: { type: integer, minimum: 1 }
+            uri: { type: string }
+            checksum_sha256: { type: string }
+            uncompressed_bytes: { type: integer, minimum: 1 }
+            compressed_bytes: { type: integer, minimum: 1, maximum: 65536 }
+            content_type: { type: string }
+        resources:
+          type: array
+          items:
+            type: object
+            required: [resource_id, type, uri, checksum_sha256, byte_size, content_type, required, attribution]
+            properties:
+              resource_id: { type: string }
+              type:
+                type: string
+                enum: [VECTOR_TILES, MAP_STYLE, MAP_SPRITE, MAP_GLYPHS, GAZETTEER, EMERGENCY_AUDIO]
+              uri: { type: string }
+              checksum_sha256: { type: string }
+              byte_size: { type: integer, minimum: 1 }
+              content_type: { type: string }
+              required: { type: boolean }
+              attribution: { type: string }
+        revocations:
+          type: object
+          properties:
+            revoked_packages:
+              type: array
+              items: { type: string }
+            cancelled_routes:
+              type: array
+              items: { type: string }
+            superseded_versions:
+              type: array
+              items:
+                type: object
+                required: [package_id, version]
+                properties:
+                  package_id: { type: string }
+                  version: { type: integer, minimum: 1 }
+        provenance:
+          type: object
+          required: [authority, dataset_id, evidence_class]
+          properties:
+            authority: { type: string }
+            dataset_id: { type: string }
+            evidence_class: { type: string }
+        checksum_sha256: { type: string }
+        signature:
+          type: object
+          required: [algorithm, key_id, value]
+          properties:
+            algorithm: { type: string, enum: [Ed25519] }
+            key_id: { type: string }
+            value: { type: string }
+    PublicIncidentCard:
+      type: object
+      description: Standalone public incident card projection
+      required:
+        - schema_version
+        - package_id
+        - version
+        - jurisdiction
+        - evidence_class
+        - effective_at
+        - expires_at
+        - alert
+        - red_zones
+        - safe_zones
+        - approved_routes
+        - facilities
+        - instructions
+        - emergency_contacts
+        - allocation_policy
+        - checksum_sha256
+      properties:
+        schema_version: { type: string, enum: ["3.0"] }
+        package_id: { type: string }
+        version: { type: integer, minimum: 1 }
+        jurisdiction: { type: string }
+        evidence_class: { type: string }
+        effective_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        alert:
+          type: object
+          required: [identifier, sender, headline, severity, urgency, certainty, area_description]
+          properties:
+            identifier: { type: string }
+            sender: { type: string }
+            headline: { type: string }
+            severity: { type: string }
+            urgency: { type: string }
+            certainty: { type: string }
+            area_description: { type: string }
+        red_zones:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: { type: string }
+              name: { type: string }
+        safe_zones:
+          type: array
+          items:
+            type: object
+            required: [id, name, role, status, capacity_mode]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              role: { type: string }
+              status: { type: string }
+              capacity_mode: { type: string }
+        approved_routes:
+          type: array
+          items:
+            type: object
+            required: [id, name, from_zone, to_safe_zone]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              from_zone: { type: string }
+              to_safe_zone: { type: string }
+        facilities:
+          type: array
+          items:
+            type: object
+            required: [id, safe_zone_id, name]
+            properties:
+              id: { type: string }
+              safe_zone_id: { type: string }
+              name: { type: string }
+        instructions:
+          type: array
+          items:
+            type: object
+            required: [id, language, title, summary]
+            properties:
+              id: { type: string }
+              language: { type: string }
+              title: { type: string }
+              summary: { type: string }
+        emergency_contacts:
+          type: array
+          items:
+            type: object
+            required: [name, number]
+            properties:
+              name: { type: string }
+              number: { type: string }
+        allocation_policy:
+          type: object
+          required: [order]
+          properties:
+            order:
+              type: array
+              items: { type: string }
+        checksum_sha256: { type: string }
+        signature:
+          type: object
+          required: [algorithm, key_id, value]
+          properties:
+            algorithm: { type: string, enum: [Ed25519] }
+            key_id: { type: string }
+            value: { type: string }
+    # P6 — typed envelopes for the three new voice endpoints. See
+    # backend/internal/contracts/{transcription,tts,pipeline}.go for the Go
+    # types these schemas describe.
+    TranscriptionResponse:
+      type: object
+      required: [request_id, data_version, language, text, confidence, state]
+      properties:
+        request_id: { type: string }
+        data_version: { type: string }
+        language: { type: string }
+        text: { type: string }
+        confidence:
+          nullable: true
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: >-
+            Calibrated probability in [0,1] when supported by the ASR
+            artifact. null means unknown / not calibrated. An explicit zero
+            is a real zero, not "unknown".
+        alternatives:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            required: [text]
+            properties:
+              text: { type: string }
+              confidence:
+                nullable: true
+                type: number
+                format: float
+                minimum: 0
+                maximum: 1
+        state:
+          type: string
+          enum: [OK, UNSUPPORTED_LANGUAGE, AUDIO_UNAVAILABLE, TIMEOUT, UNAVAILABLE, CANCELED]
+        model_revision: { type: string }
+        artifact_digest: { type: string, description: SHA-256 of the loaded ASR artifact }
+    PipelineRequest:
+      type: object
+      required: [request_id, jurisdiction, language, input, render]
+      additionalProperties: false
+      properties:
+        request_id: { type: string }
+        jurisdiction:
+          type: string
+          description: >-
+            Required. Untrusted lookup input selecting which jurisdiction's
+            snapshot to resolve (mirrors /voice/commands semantics).
+        language:
+          type: string
+          description: >-
+            Required. Must be in the resolved ScopedContext.AllowedLanguages.
+        input:
+          type: object
+          required: [kind]
+          properties:
+            kind: { type: string, enum: [audio, transcript] }
+            content_type: { type: string, description: audio MIME when kind=audio }
+            body_b64:
+              type: string
+              description: >-
+                base64 of bounded compressed audio (≤512 KiB compressed;
+                ≤20 s decoded; 8–48 kHz; mono) when kind=audio.
+            text: { type: string, description: required when kind=transcript }
+            confidence:
+              nullable: true
+              type: number
+              format: float
+              minimum: 0
+              maximum: 1
+        render:
+          type: object
+          required: [kind]
+          properties:
+            kind: { type: string, enum: [none, tts] }
+        idempotency_key: { type: string }
+    PipelineResponse:
+      type: object
+      required: [request_id, data_version, state, validated_proposal, template]
+      properties:
+        request_id: { type: string }
+        data_version: { type: string }
+        state:
+          type: string
+          enum: [OK, CLARIFY, UNSUPPORTED, DATA_UNAVAILABLE, MODEL_UNAVAILABLE, CANCELED]
+        validated_proposal: { $ref: '#/components/schemas/ModelOutput' }
+        template:
+          type: object
+          required: [speech_key, template_version]
+          properties:
+            speech_key: { type: string }
+            template_version: { type: integer, minimum: 1 }
+            args:
+              type: array
+              items:
+                type: object
+                required: [key, value]
+                properties:
+                  key: { type: string }
+                  value: { type: string }
+        audio:
+          type: object
+          description: Present when render.kind=tts.
+          required: [audio_id, content_type, byte_size, checksum_sha256, cache_hit, language, model_revision, voice_revision, template_version, source_version, settings]
+          properties:
+            audio_id: { type: string, description: content-addressed; SHA-256 of audio bytes }
+            content_type: { type: string, enum: [audio/wav] }
+            byte_size: { type: integer, minimum: 1 }
+            checksum_sha256: { type: string }
+            cache_hit: { type: boolean }
+            language: { type: string }
+            model_revision: { type: string }
+            voice_revision: { type: string }
+            template_version: { type: integer, minimum: 1 }
+            source_version: { type: integer, minimum: 1 }
+            audio_b64: { type: string, description: Base64-encoded audio payload }
+            settings:
+              type: object
+              required: [sample_rate, bit_depth, channels]
+              properties:
+                sample_rate: { type: integer, minimum: 8000, maximum: 48000 }
+                bit_depth: { type: integer, enum: [16] }
+                channels: { type: integer, enum: [1] }
+                speaking_rate: { type: number, format: float }
+        stage_failures:
+          type: array
+          description: Stages that first failed (empty on success).
+          items:
+            type: string
+            enum: [audio, asr, context, middle, validator, template, tts]
+    TTSRequest:
+      type: object
+      required: [request_id, jurisdiction, speech_key, language, args, source_version, settings]
+      additionalProperties: false
+      properties:
+        request_id: { type: string }
+        jurisdiction: { type: string, description: must match active operational context }
+        speech_key: { type: string, description: must be in ScopedContext.TemplateKeys }
+        language: { type: string, description: must be in ScopedContext.AllowedLanguages }
+        args:
+          type: object
+          required: [args]
+          properties:
+            args:
+              type: object
+              additionalProperties: true
+              description: >-
+                Validated template arguments. Worker 4 enforces the
+                template-specific JSON Schema at the orchestrator; arbitrary
+                prose is rejected before reaching the worker.
+        source_version: { type: integer, minimum: 1 }
+        settings:
+          type: object
+          required: [sample_rate, bit_depth, channels]
+          properties:
+            sample_rate: { type: integer, minimum: 8000, maximum: 48000 }
+            bit_depth: { type: integer, enum: [16] }
+            channels: { type: integer, enum: [1] }
+            speaking_rate: { type: number, format: float }
+    TTSResponse:
+      type: object
+      required: [request_id, speech_key, language, source_version, template_version, model_revision, voice_revision, audio_id, content_type, byte_size, checksum_sha256, cache_hit, state, settings]
+      properties:
+        request_id: { type: string }
+        speech_key: { type: string }
+        language: { type: string }
+        source_version: { type: integer, minimum: 1 }
+        template_version: { type: integer, minimum: 1 }
+        model_revision: { type: string }
+        voice_revision: { type: string }
+        audio_id: { type: string }
+        audio_b64: { type: string, description: Base64-encoded audio payload }
+        content_type: { type: string, enum: [audio/wav] }
+        byte_size: { type: integer, minimum: 1 }
+        checksum_sha256: { type: string }
+        cache_hit: { type: boolean }
+        state:
+          type: string
+          enum: [OK, UNSUPPORTED_LANGUAGE, AUDIO_UNAVAILABLE, TIMEOUT, UNAVAILABLE, CANCELED]
+        settings:
+          type: object
+          required: [sample_rate, bit_depth, channels]
+          properties:
+            sample_rate: { type: integer, minimum: 8000, maximum: 48000 }
+            bit_depth: { type: integer, enum: [16] }
+            channels: { type: integer, enum: [1] }
+            speaking_rate: { type: number, format: float }
+        allocation_policy:
+          type: object
+          required: [order]
+          properties:
+            order:
+              type: array
+              items: { type: string }
+        checksum_sha256: { type: string }
+        signature:
+          type: object
+          required: [algorithm, key_id, value]
+          properties:
+            algorithm: { type: string, enum: [Ed25519] }
+            key_id: { type: string }
+            value: { type: string }

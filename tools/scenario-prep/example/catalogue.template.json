@@ -1,0 +1,23 @@
+{
+  "_comment": "DRAFT catalogue skeleton. Replace placeholders with your own user-supplied data; the tool will not choose states for you. Items prefixed with REPLACE_ME will fail validation.",
+  "catalogue_version": 1,
+  "states": [
+    {
+      "state_code": "REPLACE_ME_STATE_CODE",
+      "name": "REPLACE_ME_STATE_NAME",
+      "languages": [
+        { "language": "REPLACE_ME_LANG_BCP47", "asr_supported": false, "tts_supported": false }
+      ],
+      "scenarios": [
+        {
+          "scenario_id": "REPLACE_ME_SCENARIO_ID",
+          "state": "REPLACE_ME_STATE_CODE",
+          "evidence": "SYNTHETIC_EXERCISE",
+          "historical_event_id": "",
+          "exercise_time": "REPLACE_ME_RFC3339"
+        }
+      ]
+    }
+  ],
+  "historical_events": []
+}

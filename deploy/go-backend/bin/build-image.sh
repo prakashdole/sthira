@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# bin/build-image.sh — produce an image for the Go backend without using
+# the repository root as Docker build context. Stages only what the
+# Dockerfile needs (backend/ + deploy/go-backend/migrate) into a temporary build
+# directory whose `.dockerignore` is owned here, then invokes docker build
+# against that staged context. The root .dockerignore is intentionally not
+# modified.
+#
+# Builds both the distroless API image and the dedicated migration runner image.
+
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PACKAGE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${PACKAGE_DIR}/../.." && pwd)"
+
+# Project name overrides conventional docker compose project naming so the
+# stack never collides with another compose project on the host. Default
+# comes from compose.yml; CI may export STHIRA_DEPLOY_PROJECT.
+PROJECT_NAME="${STHIRA_DEPLOY_PROJECT:-sthira-go}"
+IMAGE_TAG="${STHIRA_DEPLOY_IMAGE:-${PROJECT_NAME}-backend:local}"
+MIGRATE_IMAGE_TAG="${STHIRA_DEPLOY_MIGRATE_IMAGE:-${PROJECT_NAME}-backend:local-migrate}"
+BUILDER="${STHIRA_DEPLOY_BUILDER:-docker}"
+
+STAGE_DIR="$(mktemp -d -t sthira-go-stage.XXXXXXXX)"
+trap 'rm -rf "${STAGE_DIR}"' EXIT
+
+# Copy only the backend tree and the migrate tree. The repository's
+# frontend, loadmodel, fixtures, raw .txt evidence, .venv, .git and
+# plan docs are not needed to compile the Go binaries and would bloat
+# the build context if included.
+mkdir -p "${STAGE_DIR}/backend" "${STAGE_DIR}/deploy/go-backend/migrate"
+rsync -a --delete \
+  --exclude='.git' \
+  --exclude='__pycache__' \
+  --exclude='*.pyc' \
+  --exclude='*.txt' \
+  --exclude='testdata/**' \
+  "${REPO_ROOT}/backend/" "${STAGE_DIR}/backend/"
+# The migrate module is stdlib-only. Keep its go.mod, go.sum (if any)
+# and cmd subdirs; nothing else needs to land in the context.
+rsync -a --delete \
+  "${REPO_ROOT}/deploy/go-backend/migrate/" \
+  "${STAGE_DIR}/deploy/go-backend/migrate/"
+
+# Owned per-package ignore: keep it next to this build script. BuildKit
+# reads .dockerignore from the build-context root, so this exact file is
+# honoured.
+cat > "${STAGE_DIR}/.dockerignore" <<'EOF'
+# Owned by deploy/go-backend/. Do not edit the repo-root .dockerignore.
+**/*.txt
+**/*.md
+**/*.json
+**/*.yml
+**/*.yaml
+**/*.sh
+**/*.git*
+.git
+.gitignore
+Dockerfile*
+.dockerignore
+testdata/
+*_test.go
+EOF
+
+GO_VER="$(grep -m1 '^go ' "${REPO_ROOT}/backend/go.mod" | awk '{print $2}')"
+
+if ! command -v "${BUILDER}" >/dev/null 2>&1; then
+    echo "CONTAINER_RUNTIME=NOT_RUN: builder '${BUILDER}' not found on PATH." >&2
+    echo "Staged build context verified at: ${STAGE_DIR}"
+    echo "Backend files staged: $(find "${STAGE_DIR}/backend" -type f | wc -l | tr -d ' ')"
+    echo "Migrate files staged: $(find "${STAGE_DIR}/deploy/go-backend/migrate" -type f | wc -l | tr -d ' ')"
+    echo "Target images would be: ${IMAGE_TAG} and ${MIGRATE_IMAGE_TAG}"
+    exit 0
+fi
+
+echo "Building API image ${IMAGE_TAG} from staged context ${STAGE_DIR}"
+"${BUILDER}" build \
+  --build-arg "GO_VERSION=${GO_VER}" \
+  --target api \
+  -f "${PACKAGE_DIR}/Dockerfile" \
+  -t "${IMAGE_TAG}" \
+  "${STAGE_DIR}"
+
+echo "Building migration image ${MIGRATE_IMAGE_TAG} from staged context ${STAGE_DIR}"
+"${BUILDER}" build \
+  --build-arg "GO_VERSION=${GO_VER}" \
+  --target migrate \
+  -f "${PACKAGE_DIR}/Dockerfile" \
+  -t "${MIGRATE_IMAGE_TAG}" \
+  "${STAGE_DIR}"
+
+echo "${IMAGE_TAG}" > "${STAGE_DIR}/.image-tag"
+cat "${STAGE_DIR}/.image-tag"

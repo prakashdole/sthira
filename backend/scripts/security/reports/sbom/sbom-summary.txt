@@ -1,0 +1,6 @@
+total 16
+drwxr-xr-x@ 5 apple  wheel   160 21 Sep 10:56 .
+drwxr-xr-x@ 4 apple  wheel   128 21 Sep 10:56 ..
+-rw-r--r--@ 1 apple  wheel  2488 21 Sep 11:31 go-mod-graph.txt
+-rw-r--r--@ 1 apple  wheel   155 21 Sep 11:31 go-mod-graph.txt.sha256
+-rw-r--r--@ 1 apple  wheel     0 21 Sep 11:31 sbom-summary.txt

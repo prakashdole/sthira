@@ -1,0 +1,116 @@
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: /Users/apple/Documents/Projects/MonitoringZ/loadmodel/k6/smoke_real.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 25 max VUs, 50s max duration (incl. graceful stop):
+              * default: 25 looping VUs for 20s (gracefulStop: 30s)
+
+
+running (01.0s), 25/25 VUs, 442 complete and 0 interrupted iterations
+default   [   5% ] 25 VUs  01.0s/20s
+
+running (02.0s), 25/25 VUs, 909 complete and 0 interrupted iterations
+default   [  10% ] 25 VUs  02.0s/20s
+
+running (03.0s), 25/25 VUs, 1394 complete and 0 interrupted iterations
+default   [  15% ] 25 VUs  03.0s/20s
+
+running (04.0s), 25/25 VUs, 1850 complete and 0 interrupted iterations
+default   [  20% ] 25 VUs  04.0s/20s
+
+running (05.0s), 25/25 VUs, 2325 complete and 0 interrupted iterations
+default   [  25% ] 25 VUs  05.0s/20s
+
+running (06.0s), 25/25 VUs, 2801 complete and 0 interrupted iterations
+default   [  30% ] 25 VUs  06.0s/20s
+
+running (07.0s), 25/25 VUs, 3276 complete and 0 interrupted iterations
+default   [  35% ] 25 VUs  07.0s/20s
+
+running (08.0s), 25/25 VUs, 3735 complete and 0 interrupted iterations
+default   [  40% ] 25 VUs  08.0s/20s
+
+running (09.0s), 25/25 VUs, 4223 complete and 0 interrupted iterations
+default   [  45% ] 25 VUs  09.0s/20s
+
+running (10.0s), 25/25 VUs, 4697 complete and 0 interrupted iterations
+default   [  50% ] 25 VUs  10.0s/20s
+
+running (11.0s), 25/25 VUs, 5173 complete and 0 interrupted iterations
+default   [  55% ] 25 VUs  11.0s/20s
+
+running (12.0s), 25/25 VUs, 5648 complete and 0 interrupted iterations
+default   [  60% ] 25 VUs  12.0s/20s
+
+running (13.0s), 25/25 VUs, 6115 complete and 0 interrupted iterations
+default   [  65% ] 25 VUs  13.0s/20s
+
+running (14.0s), 25/25 VUs, 6574 complete and 0 interrupted iterations
+default   [  70% ] 25 VUs  14.0s/20s
+
+running (15.0s), 25/25 VUs, 7045 complete and 0 interrupted iterations
+default   [  75% ] 25 VUs  15.0s/20s
+
+running (16.0s), 25/25 VUs, 7532 complete and 0 interrupted iterations
+default   [  80% ] 25 VUs  16.0s/20s
+
+running (17.0s), 25/25 VUs, 7989 complete and 0 interrupted iterations
+default   [  85% ] 25 VUs  17.0s/20s
+
+running (18.0s), 25/25 VUs, 8478 complete and 0 interrupted iterations
+default   [  90% ] 25 VUs  18.0s/20s
+
+running (19.0s), 25/25 VUs, 8939 complete and 0 interrupted iterations
+default   [  95% ] 25 VUs  19.0s/20s
+
+running (20.0s), 25/25 VUs, 9414 complete and 0 interrupted iterations
+default   [ 100% ] 25 VUs  20.0s/20s
+
+
+  █ THRESHOLDS 
+
+    http_req_duration
+    ✓ 'p(95)<1000' p(95)=1.42ms
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 47235   2355.165898/s
+    checks_succeeded...: 100.00% 47235 out of 47235
+    checks_failed......: 0.00%   0 out of 47235
+
+    ✓ live=200
+    ✓ ready=200
+    ✓ ready!=503
+    ✓ places!=5xx
+    ✓ guidance!=5xx
+
+    HTTP
+    http_req_duration..............: avg=552.34µs min=48µs    med=194µs   max=52.99ms  p(90)=691µs   p(95)=1.42ms 
+      { expected_response:true }...: avg=765.21µs min=48µs    med=237µs   max=52.99ms  p(90)=1ms     p(95)=2.88ms 
+    http_req_failed................: 50.00% 18894 out of 37788
+    http_reqs......................: 37788  1884.132719/s
+
+    EXECUTION
+    iteration_duration.............: avg=52.95ms  min=50.51ms med=51.36ms max=104.02ms p(90)=57.27ms p(95)=62.51ms
+    iterations.....................: 9447   471.03318/s
+    vus............................: 25     min=25             max=25
+    vus_max........................: 25     min=25             max=25
+
+    NETWORK
+    data_received..................: 16 MB  784 kB/s
+    data_sent......................: 7.6 MB 381 kB/s
+
+
+
+
+running (20.1s), 00/25 VUs, 9447 complete and 0 interrupted iterations
+default ✓ [ 100% ] 25 VUs  20s

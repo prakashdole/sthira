@@ -17,8 +17,8 @@
   --color-pass: oklch(48% 0.12 157);
   --color-verify: oklch(55% 0.12 78);
   --color-fail: oklch(48% 0.16 27);
-  --font-display: "Segoe UI Variable", "Noto Sans Malayalam", "Segoe UI", sans-serif;
-  --font-body: "Segoe UI Variable", "Noto Sans Malayalam", "Segoe UI", sans-serif;
+  --font-display: "Noto Sans", "Noto Sans Malayalam", "Noto Sans Devanagari", sans-serif;
+  --font-body: "Noto Sans", "Noto Sans Malayalam", "Noto Sans Devanagari", sans-serif;
   --space-2xs: 0.5rem;
   --space-xs: 0.75rem;
   --space-sm: 1rem;

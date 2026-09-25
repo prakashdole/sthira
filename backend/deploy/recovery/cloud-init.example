@@ -1,0 +1,30 @@
+# STFIRA_RECOVERY_FLAVOR=litecloud
+# Bootstraps a disposable rehearsal host with PostgreSQL 16 + the
+# recovery scripts. This is an example; production disposables should
+# follow the operations team's existing AMI/image pipeline, not this file.
+
+# Ensure PostgreSQL 16 + a non-default port is allocated.
+apt-get update
+apt-get install -y postgresql-16
+
+# Refuse default-port collision. Bind to 25432 only.
+cat >> /etc/postgresql/16/main/postgresql.conf <<EOF
+port = 25432
+listen_addresses = '127.0.0.1'
+EOF
+
+# Restart the local instance. Owned by THIS host; nothing shared.
+systemctl restart postgresql
+
+# Lay down the recovery scripts. Refuse the prefix escape hatch; refuse
+# the shared-cluster override.
+git clone <sthira-repo> /opt/sthira
+cd /opt/sthira/backend
+bash scripts/recovery/run-backup-restore.sh
+bash scripts/recovery/run-dep-outage.sh
+bash scripts/recovery/run-graceful-drain.sh
+
+# Send artifacts somewhere reviewable. Do NOT include the team's
+# cluster data; all DBs created here are r7recover_* prefixes.
+mkdir -p /var/log/sthira-recovery
+cp -r /tmp/p7-recovery/* /var/log/sthira-recovery/ || true

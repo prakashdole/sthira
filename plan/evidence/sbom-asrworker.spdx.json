@@ -1,0 +1,32 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "asrworker",
+  "documentNamespace": "https://sthira.local/spdx/asrworker-20260921T113843Z-e0d3f1c41ffc",
+  "creationInfo": {
+    "created": "2026-09-21T11:38:43Z",
+    "creators": [
+      "Tool: sthira-gen-spdx"
+    ]
+  },
+  "packages": [
+    {
+      "name": "sthira/backend/internal/asrworker",
+      "SPDXID": "SPDXRef-sthira-backend-internal-asrworker-",
+      "versionInfo": "",
+      "downloadLocation": "NOASSERTION",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "filesAnalyzed": false
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-sthira-backend-internal-asrworker-",
+      "relatedSpdxElement": "SPDXRef-Root",
+      "relationshipType": "DEPENDS_ON"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "version": 8,
+  "name": "offlineresources-test-style",
+  "sprite": "res-sprite-wayanad",
+  "glyphs": "res-glyphs-wayanad/{fontstack}/{range}.pbf",
+  "sources": {
+    "vector": {
+      "type": "vector",
+      "url": "res-vector-wayanad"
+    }
+  },
+  "layers": []
+}

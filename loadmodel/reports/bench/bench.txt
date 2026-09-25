@@ -1,0 +1,14 @@
+goos: darwin
+goarch: arm64
+pkg: sthira/backend/loadmodel/loadfixtures
+cpu: Apple M2
+BenchmarkHealthLive-8                  	   47479	     46802 ns/op	    7380 B/op	      95 allocs/op
+BenchmarkCachedReadManifest-8          	   48700	     50256 ns/op	   10927 B/op	      90 allocs/op
+BenchmarkCachedReadManifestCold-8      	     921	   2693097 ns/op	   10909 B/op	      90 allocs/op
+BenchmarkGuidanceQuery-8               	     591	   3928643 ns/op	   10912 B/op	     140 allocs/op
+BenchmarkReservationWrite-8            	   48750	     49337 ns/op	   10032 B/op	     130 allocs/op
+BenchmarkVoiceTranscriptionsNoWait-8   	   50086	     48889 ns/op	    9626 B/op	     111 allocs/op
+BenchmarkQueueSaturation-8             	      22	 101839322 ns/op	   16769 B/op	     118 allocs/op
+BenchmarkSyntheticStoreReserve-8       	12801612	       174.1 ns/op	      81 B/op	       5 allocs/op
+PASS
+ok  	sthira/backend/loadmodel/loadfixtures	21.931s

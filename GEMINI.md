@@ -41,6 +41,7 @@ The active baseline is v2. Prior permanent-relocation, land, candidate-site, sch
 - Record material technical/product decisions in `plan/decisions.md`; never bury policy assumptions in code.
 - Do not close `plan/open-decisions.md` without named-owner evidence.
 - Do not modify any `.txt` file unless explicitly asked.
+- Never create implementation plans or implementation_plan.md unless specifically asked to. Directly start executing tasks as specified in the prompt and ledger.
 
 ## Definition of honest completion
 

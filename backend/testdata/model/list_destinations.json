@@ -1,0 +1,1 @@
+{"schema_version":"3.0","request_id":"REQ-DEMO-2","data_version":"EXERCISE-7","status":"OK","intent":"LIST_DESTINATIONS","language":"hi-IN","actions":[{"type":"SHOW_CHOICES","target_ids":["FACILITY-DEMO-1","FACILITY-DEMO-2"]}],"speech_key":"destination_options","clarification_ids":[],"evidence_ids":["FACILITY-DEMO-1","FACILITY-DEMO-2"]}

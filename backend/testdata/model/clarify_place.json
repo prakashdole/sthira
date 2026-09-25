@@ -1,0 +1,1 @@
+{"schema_version":"3.0","request_id":"REQ-DEMO-3","data_version":"EXERCISE-7","status":"CLARIFY","intent":null,"language":"hi-IN","actions":[],"speech_key":"clarify_place","clarification_ids":["PLACE-DEMO-1","PLACE-DEMO-2"],"evidence_ids":["PLACE-DEMO-1","PLACE-DEMO-2"]}

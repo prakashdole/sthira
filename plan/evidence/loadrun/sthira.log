@@ -1,0 +1,4 @@
+{"time":"2026-09-24T15:52:07.291375+05:30","level":"INFO","msg":"durable store wired","schema_revision":10}
+{"time":"2026-09-24T15:52:07.291474+05:30","level":"INFO","msg":"no trusted operator identity verifier configured; operator issuance fails closed"}
+{"time":"2026-09-24T15:52:07.291495+05:30","level":"INFO","msg":"P6 voice workers not fully configured; voice pipeline stays unavailable (503)"}
+{"time":"2026-09-24T15:52:07.291678+05:30","level":"INFO","msg":"sthira backend listening","addr":"127.0.0.1:61212"}

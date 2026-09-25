@@ -1,0 +1,127 @@
+{
+  "_doc": "Redacted findings register for P7-prep (2026-09-21). This file MUST NOT contain raw secrets, credentials, or live API keys. Every finding carries a stable id, the affected revision, a reproducer path or stub, exploitability, ownership and state. Companion summary: backend/security/findings.md.",
+  "snapshot": {
+    "date": "2026-09-21",
+    "revision": "2fe0fee",
+    "host": "$(uname -sm)",
+    "go_version": "go version go1.27.1 darwin/arm64"
+  },
+  "findings": [
+    {
+      "id": "F-CAPREDIRECT-01",
+      "title": "CAP transport lacks redirect guard",
+      "revision": "2fe0fee",
+      "files": [
+        "backend/internal/capfeed/transport.go:36",
+        "backend/internal/capfeed/transport.go:91"
+      ],
+      "owner": "O08 source activation (real Fetcher impl)",
+      "exploitability": "P2",
+      "state": "ready-for-fix",
+      "reproducer": "backend/internal/capfeed/capfeed_security_test.go: TestCAPFetcherRedirectChainBounded",
+      "rationale_redacted": "follows Go default redirects in absence of CheckRedirect; relies on deployment wiring"
+    },
+    {
+      "id": "F-OUTGOINGEGRESS-01",
+      "title": "Outbound HTTP egress not allowlisted",
+      "revision": "2fe0fee",
+      "files": [
+        "backend/internal/capfeed/transport.go:91",
+        "backend/internal/offlineclient/transport.go:396",
+        "backend/internal/offlinequeue/dispatcher.go:118"
+      ],
+      "owner": "O08 / O14 deployment + Fetcher implementations",
+      "exploitability": "P2",
+      "state": "ready-for-fix",
+      "reproducer": "policy+code, see backend/security/threat-model.md T3/T5",
+      "rationale_redacted": "central egress allowlist is a deployment-time control; not in scope of code-only review"
+    },
+    {
+      "id": "F-MIDDELPROMPT-01",
+      "title": "Middle-model prompt guard layering",
+      "revision": "2fe0fee",
+      "files": [
+        "plan/voice-map-system-prompt.md",
+        "backend/internal/contracts/pipeline.go"
+      ],
+      "owner": "Worker 9 (orchestration) — validator at contract boundary",
+      "exploitability": "P2",
+      "state": "accepted",
+      "reproducer": "see Worker 5 fuzz harness + integration adversarial coverage P9 (gated by O15)",
+      "rationale_redacted": "model is non-deterministic; control is the type system + independent validator"
+    },
+    {
+      "id": "F-SESSIONLEAK-01",
+      "title": "Session leakage in logs (negative finding)",
+      "revision": "2fe0fee",
+      "files": [
+        "backend/internal/httpserver/server.go (logger wiring)",
+        "backend/internal/httpserver/audit_integration_test.go"
+      ],
+      "owner": "—",
+      "exploitability": "n/a",
+      "state": "accepted",
+      "reproducer": "audit_integration_test.go exercises redacted log paths",
+      "rationale_redacted": "current RequestLogger redacts Authorization / Cookie / X-Forwarded-*"
+    },
+    {
+      "id": "F-BEARERBP-01",
+      "title": "Bearer header parsing strictness (informational)",
+      "revision": "2fe0fee",
+      "files": [
+        "backend/internal/httpserver/auth.go:51"
+      ],
+      "owner": "—",
+      "exploitability": "P3",
+      "state": "accepted",
+      "reproducer": "operator_http_integration_test.go (Bearer + broken Bearer)",
+      "rationale_redacted": "strict HasPrefix; trim only the right"
+    },
+    {
+      "id": "F-OPSIGMAUTH-01",
+      "title": "Operator issuance fails closed (intentional)",
+      "revision": "2fe0fee",
+      "files": [
+        "backend/internal/httpserver/operator_handlers.go:42",
+        "backend/cmd/sthira/main.go"
+      ],
+      "owner": "O14 trusted IdP / MFA decision",
+      "exploitability": "n/a",
+      "state": "accepted",
+      "reproducer": "TestLegacyUnboundOperatorSessionCannotAct",
+      "rationale_redacted": "operatorVerifier nil ⇒ issuance 503 ErrDataUnavailable"
+    },
+    {
+      "id": "F-AUDITTAMPER-01",
+      "title": "Audit chain reach (negative finding)",
+      "revision": "2fe0fee",
+      "files": [
+        "backend/migrations/",
+        "backend/internal/store (ChainAuditor)"
+      ],
+      "owner": "store / migrations",
+      "exploitability": "n/a",
+      "state": "accepted",
+      "reproducer": "every operator action through ChainAuditor; SQL-up-only migrations",
+      "rationale_redacted": "up-only migrations + per-action auditable chain"
+    }
+  ],
+  "scanner_state": {
+    "go_vet":              { "status": "ran",     "result": "clean", "report": "backend/scripts/security/reports/go-vet.txt" },
+    "fuzz":                { "status": "ran",     "result": "clean", "report": "backend/scripts/security/reports/fuzz.txt" },
+    "staticcheck":         { "status": "absent",  "result": "NOT_EVALUATED" },
+    "govulncheck":         { "status": "absent",  "result": "NOT_EVALUATED" },
+    "gosec":               { "status": "absent",  "result": "NOT_EVALUATED" },
+    "gitleaks":            { "status": "absent",  "result": "NOT_EVALUATED" },
+    "trivy":               { "status": "absent",  "result": "NOT_EVALUATED" },
+    "syft":                { "status": "absent",  "result": "NOT_EVALUATED" },
+    "go_mod_graph_sbom":   { "status": "ran",     "result": "n/a",  "report": "backend/scripts/security/reports/sbom/go-mod-graph.txt" },
+    "zap":                 { "status": "absent",  "result": "NOT_EVALUATED", "reason": "no disposable staging target at P7-prep" },
+    "strix":               { "status": "absent",  "result": "NOT_EVALUATED", "reason": "O15 open" }
+  },
+  "delivery_notes": [
+    "Per the task brief, this is P7 *preparation*. No final security certificate is granted and no Gate B pass is signaled by this directory.",
+    "Scanner absences are reported as NOT_EVALUATED, never as 0/0/0. Installing the pinned tools is the team's choice at P7 body.",
+    "Reproducer paths reference narrowly assigned security test files written alongside this directory. They follow the *security_test.go naming; they live in the same package as the code they exercise."
+  ]
+}

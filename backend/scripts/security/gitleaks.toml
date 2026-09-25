@@ -1,0 +1,22 @@
+# title = "Sthira P7-prep gitleaks config"
+# description = "Repo-level rule set. Allow-list intentionally narrow:
+#                only the documented test fixtures and CI sample data are
+#                exempted, and the rationale is documented in P7 threat
+#                model. Do not blanket-disable a rule for convenience."
+
+# Built-in rules apply. Tests / docs use these predictable strings.
+allowlist = [
+  # Test fixtures are deterministic; their hashes are content-addressed
+  # for the corpus audit log. See plan/p6-evaluation/cases/real/requirements.md.
+  "PLACE-DEMO-1","PLACE-DEMO-2",
+  "FACILITY-DEMO-1","FACILITY-DEMO-2",
+  "ZONE-RED-1","ZONE-SAFE-1","ROUTE-1",
+  # Synthetic-only public placeholder strings (not real credentials).
+  "PLACEHOLDER",
+  "REPLACE_WITH",
+]
+
+# Per-rule minimum entropy threshold tuning (defaults kept).
+# Custom regexes would go here; intentionally empty for prep.
+[extend]
+useDefault = true

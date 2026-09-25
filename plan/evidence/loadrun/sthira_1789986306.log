@@ -1,0 +1,5 @@
+{"time":"2026-09-21T15:55:09.685336+05:30","level":"INFO","msg":"durable store wired","schema_revision":7}
+{"time":"2026-09-21T15:55:09.685483+05:30","level":"INFO","msg":"no trusted operator identity verifier configured; operator issuance fails closed"}
+{"time":"2026-09-21T15:55:09.68551+05:30","level":"INFO","msg":"P6 voice workers not fully configured; voice pipeline stays unavailable (503)"}
+{"time":"2026-09-21T15:55:09.685942+05:30","level":"INFO","msg":"sthira backend listening","addr":"127.0.0.1:18443"}
+{"time":"2026-09-21T15:55:09.686023+05:30","level":"ERROR","msg":"server exited","error":"listen tcp 127.0.0.1:18443: bind: address already in use"}

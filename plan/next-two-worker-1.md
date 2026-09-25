@@ -1,0 +1,49 @@
+# Worker 1 — authority corrections, publication, and final integration
+
+Repository: `/Users/apple/Documents/Projects/MonitoringZ`. This is implementation, not another planning-only task. Read applicable instructions, GEMINI.md and its listed product/rules/architecture/decisions/phase documents, then `plan/reviews/review-three-workers-2026-09-21.md` and `plan/next-action-integration-repair.md`. Read relevant callers, not huge metrics or weights. Do not start P8.
+
+Baseline: CLEAN `4095400`; repair branch `codex/p567-integration-repair` at `2e2d5c8`; model evidence `64b9ea9`; auth evidence `9c372f0`. Recheck actual refs and dirty files. Preserve all existing worktrees and unrelated edits. No main changes, pushing, reset, amend, rebase, history rewriting, shared-DB truncation, model downloads, paid inference or GPU rental. Do not modify or newly import .txt files. Commit coherent verified stages locally. Imported historical commits are not evidence of acceptance.
+
+Two workers run concurrently in isolated worktrees. Worker 1 owns shared backend authority/contracts/orchestration and final integration; Worker 2 owns inference modules, Python adapters, eval, loadmodel and operational scripts. Do not edit the other's files. If a shared contract needs changing, send the exact proposed shape and regression requirement to Worker 1 (or put it in your handoff for the user to relay); do independent work meanwhile. No duplicate final integration or competing ledger edits. Keep source/fixture evidence concise and never commit raw verbose test logs.
+
+Keep government source, route, stay-policy, map-license, translation and IdP approvals open without owner evidence. Fixed models: IndicConformer-600M-Multi, Sarvam-30B (2.4B active non-embedding parameters), Indic Parler-TTS. Missing implementation is internal work; missing weights/hardware only blocks real execution measurements. Synthetic runtime tests prove protocol, not model quality. No invented approvals, confidence, geography, capacities or routes.
+
+## 1. Establish the common integration baseline
+
+Create an isolated worktree/branch `codex/backend-authority-closure` from current CLEAN. Inspect ancestry, then cherry-pick the repair branch's actual unique commits oldest first (currently `git rev-list --reverse CLEAN..codex/p567-integration-repair`), preserving CLEAN planning files. The existing repair branch is based on b63e469 and cannot simply fast-forward CLEAN. Do not reauthor/reimplement imported commits or copy a lane's entire tree over CLEAN. Preserve commit provenance and resolve only task conflicts. Tell Worker 2 your resulting base SHA when available; it can independently branch at 2e2d5c8 meanwhile, since its owned product files have the same baseline.
+
+Read C/D evidence using their existing worktrees or `git show`; do not blindly cherry-pick D because it adds .txt files. Import useful Markdown/model probe evidence selectively with attribution and without pretending it is verified. Keep one compact acceptance table in `plan/backend-authority-handoff.md`.
+
+## 2. Repair the two confirmed authorization/replay defects first
+
+D1: `handleSourceQuarantine` currently checks jurisdiction only when `AuthorizationJurisdiction` returns has=true. Expired/absent authorization allows a foreign operator to terminally quarantine the source and its published evidence. Deny absent live authorization before replay disclosure/mutation, matching the sibling transition handler, unless an already accepted policy supplies another authoritative owner lookup. Never infer ownership from the request. Keep current-grant locking and resource-bound replay.
+
+D2: `reservationPayloadHash` omits PartySize and SnapshotVersion. Use an unambiguous deterministic encoding of all semantically discriminating request fields and actor context. Same key with changed party size or snapshot must conflict; identical replay must retain original IDs/capacity/audit. Consider existing persisted hashes explicitly: record compatibility/expiry behavior rather than silently accepting ambiguous old hashes or deleting idempotency rows. Preserve intentional identical committed-reservation replay after source withdrawal.
+
+Use Worker D's probes as evidence to translate into ordinary Go regressions; do not edit its .txt sources. Real HTTP + disposable DB assertions: absent/expired foreign authorization denied; correct jurisdiction/live grant success; denied mutation leaves source/manifests/cards/stays/capacity/audit unchanged; changed party size and version conflict; unchanged replay succeeds once. Tests must first reproduce the actual defects. Run migration/grant/legacy-session regressions affected by your fix.
+
+## 3. Complete publication acceptance from Stage 2
+
+Trace production lifecycle end to end. `WithObserver` without a production caller and an in-process bus do not implement persisted cross-instance validity. Reuse persisted authoritative checks and trusted operator boundaries; choose the simplest correct consistency mechanism rather than building another event framework.
+
+Transactionally bind publication/promotion to attributed source, package, jurisdiction, authorization, signature, effective/expiry/supersession and manifest-card versions. Reject legacy unattributed promotion with no writes. Staging a newer publication must not hide the valid current one. Preserve immutable identical retry versus conflict and coherent current selection. Restrict unchecked storage paths used by application callers.
+
+Exercise actual trusted publish/promote -> signed persistence -> cached HTTP delivery -> withdrawal/quarantine/supersession -> subsequent denial or valid signed revocation. Use independent instances, no manual cache-invalidating test calls; declare and verify consistency bounds including in-flight behavior. Prove source/package lock order using targeted backend PIDs/blocking observations. Repair A3 tests: nonexistent artifacts table, reused MNF-LEGACY-1, skip-on-connection-error, and legacy test that merely logs. Use schema-correct unique fixtures; supplied DSN errors must fail. Do not “pass” these by leaving DSN unset.
+
+## 4. Finish scoped guidance/translation authority
+
+The new migration 0008 is partial. `readApprovedSpeechKeys` filters approval language against ANY allowed language, then discards language/template version and returns bare keys; it accepts source_version <= current and never checks template_version. A Hindi approval must not authorize Malayalam just because both are allowed. An old source/template approval must not automatically approve new content. Numeric version coincidence is not source identity.
+
+Trace ScopedContext -> ProductionValidator -> registry lookup -> template rendering -> TTS -> snapshot revalidation. Preserve approval identity: exact language, actual rendered template version/content, appropriate source/package identity and version, jurisdiction, approval/revocation/effective state. Reuse existing types where adequate; coordinate any shared contract edits with Worker 2. Missing approved translations stay unavailable. Migration must work on populated revision-8 databases; add a forward migration rather than silently rewriting applied history. Revalidate approval withdrawal during inference/TTS, not just package changes.
+
+Real-boundary regressions: hi-only approval with hi+ml allowed rejects ml speech; wrong template version/content and wrong source identity rejected; revoked approval during slow inference/TTS rejected; correct exact binding succeeds; server-derived names/counts/IDs cannot be invented by speech_args. Clearly distinguish validated silent actions from authorized speech.
+
+`buildEligible` still supplies PartySize=0, a one-day interval, sorts IDs and labels them PermittedRank. Separate honest browsing/unknown suitability from accepted party/dates/policy suitability. No zero-capacity suggestion as eligible, no fabricated nearest/policy rank. Test unknown inputs, zero inventory, actual policy bounds and authoritative ordering. Keep reservations behind the existing explicit confirmation gate.
+
+## 5. Integrate Worker 2 and perform final acceptance
+
+Own backend/cmd, store, offlinedelivery, httpserver, orchestration, shared contracts/migrations and final plan ledgers. Worker 2 owns its model/protocol/eval/ops files; exchange requirements without concurrent edits. Add any actual public-handler integration tests that Worker 2 cannot place in its module. Do not close the task at Step 2 while claiming the rest external.
+
+After Worker 2 supplies verified commits, cherry-pick only its new commits onto your branch, not its shared baseline. Inspect conflicts and run final gates on the resulting exact SHA. Discover all six Go modules via their go.mod files: backend, ASR, TTS, middle, eval, loadmodel; run formatting, vet, build and tests in each. Root go test does not traverse nested modules. Run owned disposable PostgreSQL/PostGIS tests with all migrations, affected Python tests, actual-handler voice/eval conformance, IPC race/adversarial tests, bounded smoke and scanner harness tests. Process crash tests require the actual `-tags crashtest` AND STHIRA_RUN_PROCESS_TESTS=1; setting a shell variable crashtest=1 is not a build tag. Record passed/failed/skipped/uncompiled separately; clean up only owned DB/processes. No unbounded repeated suites.
+
+Correct stale ledger claims (P5 DONE and adapters described as only externally blocked). Retain history, identify internal versus external acceptance gaps, and keep Gate B NOT_READY until required evidence actually passes. Report exact SHAs, integrated versus branch-only state, failed checks, NOT_RUN real-model/scanner/load evidence, and next eligible work. Leave the result committed on your branch for review; do not move CLEAN or main. No P8 implementation. If a required external input blocks one item, finish all other independent internal items and explicitly list what remains.
