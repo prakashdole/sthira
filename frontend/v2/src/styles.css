@@ -738,6 +738,10 @@ button:active, a:active { transform: translateY(1px); }
 
 /* Component contract: dock icons are bare; sheets are rounded; route is a page. */
 @media (max-width: 47.99rem) {
+  .onboarding-primary--voice { display: grid; grid-template-columns: 1.25rem 1fr; place-items: center; min-height: 3.7rem; padding-inline: 1.15rem; font-size: 1rem; }
+  .onboarding-primary--voice svg { margin: 0; width: 1.2rem; height: 1.2rem; }
+  .onboarding-primary--voice span { justify-self: center; margin-inline-start: -.6rem; font-weight: 800; }
+
   .map-help { position: absolute; z-index: var(--z-raised); inset: var(--space-sm) auto auto var(--space-sm); display: inline-flex; align-items: center; gap: .45rem; min-height: 2.55rem; padding-inline: .8rem; color: oklch(96% .01 245); background: oklch(22% .03 250 / .96); border: 1px solid oklch(82% .02 245 / .16); border-radius: .7rem; font-size: .72rem; font-weight: 800; box-shadow: 0 .65rem 1.4rem oklch(8% .02 250 / .28); }
   .map-help svg { width: .95rem; height: .95rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
   .mobile-safety-dock--voice { grid-template-columns: 1fr; inset-inline: var(--space-sm); }
@@ -758,3 +762,14 @@ button:active, a:active { transform: translateY(1px); }
   .modal--critical { opacity: 1; background: rgb(61, 18, 18); backdrop-filter: none; -webkit-backdrop-filter: none; }
   .route-is-open .side-sheet { background: rgb(10, 20, 32); border-block-start: 0; border-radius: 0; box-shadow: none; }
 }
+
+@media (max-width: 47.99rem) {
+  .map-help { min-height: 3.25rem; padding-inline: 1rem; gap: .6rem; color: oklch(98% .01 245); background: oklch(48% .16 27); border-color: oklch(60% .16 27); font-size: .84rem; box-shadow: 0 .8rem 1.7rem oklch(26% .13 27 / .4); }
+  .map-help svg { width: 1.15rem; height: 1.15rem; }
+  .dock-action--voice-primary { position: relative; isolation: isolate; overflow: hidden; min-height: 4.6rem; background: linear-gradient(135deg, oklch(48% .15 245), oklch(37% .13 245)); }
+  .dock-action--voice-primary::before { content: ''; position: absolute; z-index: -1; width: 4rem; height: 4rem; background: oklch(80% .08 245 / .2); border-radius: 50%; animation: speak-ripple 2.4s var(--ease-out) infinite; }
+  .dock-action--voice-primary .dock-icon { padding: .35rem; border: 1px solid oklch(96% .01 245 / .28); border-radius: 50%; }
+}
+
+@keyframes speak-ripple { 0%, 100% { transform: scale(.55); opacity: .25; } 50% { transform: scale(1.35); opacity: .7; } }
+@media (prefers-reduced-motion: reduce) { .dock-action--voice-primary::before { animation: none; } }

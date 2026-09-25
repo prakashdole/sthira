@@ -120,7 +120,7 @@ function renderOnboarding() {
           <h1 id="onboarding-title">${startingStep ? t.startingVoice : languageStep ? t.onboardingLanguageTitle : t.onboardingLocationTitle}</h1>
           <p>${startingStep ? t.groundingLine : languageStep ? t.onboardingLanguageBody : t.onboardingLocationBody}</p>
         </div>
-        ${startingStep ? `<button class="onboarding-primary" type="button" data-action="onboarding-start">${icons.mic}${t.beginVoice}</button>` : languageStep ? `
+        ${startingStep ? `<button class="onboarding-primary onboarding-primary--voice" type="button" data-action="onboarding-start">${icons.mic}<span>${t.beginVoice}</span></button>` : languageStep ? `
           <div class="language-options" role="group" aria-label="${t.chooseLanguage}">
             ${(['EN', 'ML', 'HI'] as Language[]).map((code) => `<button class="${language === code ? 'is-active' : ''}" type="button" data-onboarding-language="${code}" aria-pressed="${language === code}"><strong>${code}</strong><span>${code === 'EN' ? 'English' : code === 'ML' ? 'മലയാളം' : 'हिन्दी'}</span></button>`).join('')}
           </div>

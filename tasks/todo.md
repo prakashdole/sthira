@@ -329,6 +329,18 @@ The earlier claim of absent OpenFreeMap coverage was invalid: the test used an i
 
 ## Current execution evidence — 2026-09-12
 
+## Voice and emergency emphasis correction — 2026-09-25
+
+- [x] Give the startup voice action an explicit icon/text grid so its label cannot collapse on narrow phones.
+- [x] Make Call Help a larger, high-contrast red emergency control; preserve its three dialler choices.
+- [x] Add restrained motion and mic framing to Speak without obscuring map content or ignoring reduced-motion settings.
+- [x] Verify onboarding, voice control, emergency choices, production build, geometry tests, and whitespace check.
+
+### Review — 2026-09-25
+
+- Browser verification at the default phone viewport confirms Begin remains legible, Speak opens the focused voice sheet, and Call Help opens rescue, ambulance, and 112 choices.
+- `npm run build`, `python -m pytest tests/test_v2_map_geometry.py -q`, and `git diff --check` pass.
+
 - [x] Operational-package manifest now requires authority, jurisdiction, version, effective/expiry window, checksum, facilities, allocation policy, emergency contacts, geometry, and cross-references.
 - [x] Synthetic package checksum verification, authenticated demo publication, version conflict detection, supersession, cancellation, rollback, and active-package API are covered by tests.
 - [x] Assignment API requires alert/session/idempotency linkage and rejects payload conflicts; local concurrent allocation and arrival tests pass.
