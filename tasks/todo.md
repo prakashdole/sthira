@@ -352,6 +352,16 @@ The earlier claim of absent OpenFreeMap coverage was invalid: the test used an i
 - Narrow browser verification confirms the lower Begin action no longer crowds its intro, and Speak renders as a high-contrast neon-lime voice action. Its ripple remains disabled under reduced motion.
 - `npm run build`, `python -m pytest tests/test_v2_map_geometry.py -q`, and `git diff --check` pass.
 
+## Voice color recalibration — 2026-09-25
+
+- [x] Replace the neon voice control with a moon-silver action surface that remains distinct from red emergency help.
+- [x] Verify mobile contrast, build, and map geometry tests.
+
+### Review — 2026-09-25
+
+- Narrow-browser verification confirms the calm moon-silver Speak surface has readable navy text and does not compete with red Call Help.
+- `npm run build`, `python -m pytest tests/test_v2_map_geometry.py -q`, and `git diff --check` pass.
+
 - [x] Operational-package manifest now requires authority, jurisdiction, version, effective/expiry window, checksum, facilities, allocation policy, emergency contacts, geometry, and cross-references.
 - [x] Synthetic package checksum verification, authenticated demo publication, version conflict detection, supersession, cancellation, rollback, and active-package API are covered by tests.
 - [x] Assignment API requires alert/session/idempotency linkage and rejects payload conflicts; local concurrent allocation and arrival tests pass.
