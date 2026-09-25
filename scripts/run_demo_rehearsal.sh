@@ -555,7 +555,7 @@ if [[ "$SERVE_UI" -eq 1 ]]; then
         UI_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
     fi
     echo ">> Starting Vite UI on http://127.0.0.1:$UI_PORT (proxying backend http://$ADDR)..."
-    VITE_BACKEND_URL="http://$ADDR" VITE_PORT="$UI_PORT" (cd "$FRONTEND_DIR" && npx vite --port "$UI_PORT" --host 127.0.0.1) &
+    (export VITE_BACKEND_URL="http://$ADDR" VITE_PORT="$UI_PORT" && cd "$FRONTEND_DIR" && npx vite --port "$UI_PORT" --host 127.0.0.1) &
     UI_PID=$!
     echo ">> Press Ctrl-C to terminate rehearsal runner and shutdown services."
     wait "$UI_PID"
