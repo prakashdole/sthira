@@ -26,26 +26,14 @@ import {
 } from './journey';
 import { renderOperatorView } from './operator';
 import { triggerEmergencyDial, recordEmergencyAudit } from './emergency';
+import {
+  type AudioMetadata,
+  type VoiceResponseEnvelope,
+  processVoiceEnvelope,
+  isAudioValidForReplay as isAudioReplayValid,
+} from './audioGuidance';
 
 type RuntimeState = 'checking' | 'demo' | 'blocked' | 'offline';
-type AudioMetadata = {
-  audio_b64: string;
-  content_type?: string;
-  byte_size?: number;
-  checksum_sha256?: string;
-  source_id?: string;
-  source_version?: number;
-  data_version?: string;
-  template_key?: string;
-  template_version?: number;
-  language?: string;
-  settings?: {
-    sample_rate_hz?: number;
-    channels?: number;
-    bit_depth?: number;
-    codec?: string;
-  };
-};
 type ChatMessage = { role: 'USER' | 'ASSISTANT'; text: string; audio?: AudioMetadata };
 type AmbiguousCandidate = { place_id: string; place_kind: string };
 type DestinationChoice = {
@@ -1027,12 +1015,7 @@ function startMapAnimation() {
 }
 
 function isAudioValidForReplay(audio?: AudioMetadata): boolean {
-  if (!audio || !audio.audio_b64) return false;
-  if (guidanceFreshness !== 'CURRENT') return false;
-  if (!audio.language || audio.language !== speechLanguageTag(language)) return false;
-  if (!audio.data_version || audio.data_version !== currentDataVersion) return false;
-  if (audio.source_version == null || audio.template_version == null) return false;
-  return true;
+  return isAudioReplayValid(audio, guidanceFreshness, currentDataVersion, speechLanguageTag(language));
 }
 
 let autoplayBlockedAudio: { audio: HTMLAudioElement; b64: string } | null = null;
@@ -1145,34 +1128,10 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
       throw new Error(`Voice pipeline returned ${res.status}`);
     }
 
-    const envelope = await res.json() as {
-      data?: {
-        data_version?: string;
-        validated_proposal?: unknown;
-        template?: { speech_key?: string; text?: string; template_version?: number };
-        audio?: {
-          audio_b64?: string;
-          content_type?: string;
-          byte_size?: number;
-          checksum_sha256?: string;
-          source_id?: string;
-          source_version?: number;
-          template_key?: string;
-          template_version?: number;
-          language?: string;
-          settings?: {
-            sample_rate_hz?: number;
-            channels?: number;
-            bit_depth?: number;
-            codec?: string;
-          };
-        };
-        state?: string;
-      };
-    };
+    const envelope = (await res.json()) as VoiceResponseEnvelope;
+    const outcome = processVoiceEnvelope(envelope);
 
-    const out = envelope.data;
-    if (!out?.template?.text) {
+    if (outcome.kind === 'ERROR') {
       chatPending = false;
       chatError = words[language].assistantUnavailable;
       voiceFeedbackKey = 'backendUnavailable';
@@ -1180,31 +1139,26 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
       return;
     }
 
-    const audioDataVersion = out.data_version || currentDataVersion;
-    const audioMeta: AudioMetadata | undefined = out.audio?.audio_b64
-      ? {
-          audio_b64: out.audio.audio_b64,
-          content_type: out.audio.content_type,
-          byte_size: out.audio.byte_size,
-          checksum_sha256: out.audio.checksum_sha256,
-          source_id: out.audio.source_id,
-          source_version: out.audio.source_version ?? 1,
-          data_version: audioDataVersion,
-          template_key: out.template.speech_key,
-          template_version: out.audio.template_version ?? out.template.template_version ?? 1,
-          language: out.audio.language || speechLanguageTag(language),
-          settings: out.audio.settings,
-        }
-      : undefined;
+    if (outcome.kind === 'CLARIFY') {
+      chatPending = false;
+      if (outcome.clarification_ids.length > 0) {
+        ambiguousPlaces = outcome.clarification_ids.map((id) => ({ place_id: id, place_kind: 'candidate' }));
+      }
+      if (outcome.template_text) {
+        chatMessages.push({ role: 'ASSISTANT', text: outcome.template_text });
+        voiceFeedbackKey = 'responseReady';
+      } else {
+        voiceFeedbackKey = 'micPrivacy';
+      }
+      render();
+      return;
+    }
 
-    chatMessages.push({ role: 'ASSISTANT', text: out.template.text, audio: audioMeta });
-    voiceFeedbackKey = 'responseReady';
-
-    // Execute validated map action if proposal is present
-    if (out?.validated_proposal && map) {
+    // outcome.kind === 'OK': Execute validated map action independently of speech
+    if (outcome.proposal && map) {
       executeMapActions(
         map,
-        out.validated_proposal,
+        outcome.proposal,
         motionDuration() === 0,
         (panel) => {
           if (panel === 'ROUTE_GUIDANCE' || panel === 'ROUTE_STEPS') directionsOpen = true;
@@ -1217,6 +1171,7 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
           if (newLang === 'ml-IN') language = 'ML';
           if (newLang === 'hi-IN') language = 'HI';
           if (newLang === 'en-IN') language = 'EN';
+          autoplayBlockedAudio = null;
           render();
         },
         (candidates) => {
@@ -1226,12 +1181,24 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
       );
     }
 
-    // Play verified synthesized audio if returned
-    if (audioMeta) {
-      const playRes = await verifyAndPlayAudio(audioMeta);
-      if (!playRes.success && !playRes.autoplayBlocked) {
-        chatError = `Audio verification notice: ${playRes.error}`;
+    // Process optional speech and captions
+    if (outcome.template_text) {
+      chatMessages.push({ role: 'ASSISTANT', text: outcome.template_text, audio: outcome.audio });
+      voiceFeedbackKey = 'responseReady';
+      if (outcome.audio) {
+        const playRes = await verifyAndPlayAudio(outcome.audio);
+        if (!playRes.success && !playRes.autoplayBlocked) {
+          chatError = `Audio verification notice: ${playRes.error}`;
+        }
       }
+    } else if (outcome.captionUnavailable) {
+      // Guidance speech was expected (e.g. destinations), but template text was absent:
+      // Report honest unavailable caption status without fabricating text
+      chatError = words[language].assistantUnavailable;
+      voiceFeedbackKey = 'backendUnavailable';
+    } else {
+      // Camera / silent action: no speech text expected, no error, no empty bubble
+      voiceFeedbackKey = 'responseReady';
     }
 
     chatPending = false;

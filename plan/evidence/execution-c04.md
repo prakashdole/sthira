@@ -36,14 +36,82 @@ Real weight inference on this host is blocked by external hardware and resource 
 
 ---
 
-## 3. Worker Startup Instructions & Verified Entry Points
+## 3. Worker Startup & Launch Procedures
 
-The real serving executable entry points have been implemented and verified in each worker module under `backend/internal/*/cmd/`:
+Two distinct procedures are supported:
 
-1. **ASR Worker** (`backend/internal/asrworker`):
-   - **Entry point**: `cmd/asrworker/main.go`
-   - **Build**: `cd backend/internal/asrworker && go build ./cmd/asrworker`
-   - **Run**:
+### Procedure A: Local Plumbing & Exercise Rehearsal (PLUMBING_ONLY)
+Use this procedure for local frontend + backend integration, test suites, and browser verification without GPU/cloud inference:
+
+1. **Fresh Task-Owned Disposable Database**:
+   ```bash
+   # Create a unique disposable database migrated to SchemaRevision 10
+   TEST_DB="sthira_task_$(date +%s)"
+   createdb "$TEST_DB"
+   STHIRA_DB_DSN="postgres://apple@localhost:5432/${TEST_DB}?sslmode=disable"
+   for f in $(ls -1 backend/migrations/*.sql | sort); do
+     psql "$STHIRA_DB_DSN" -v ON_ERROR_STOP=1 -q -f "$f"
+   done
+   ```
+
+2. **Mock Protocol Workers**:
+   ```bash
+   # Run the tested repository protocol mock worker on an owned ephemeral/sentinel port (e.g. 50616)
+   cd backend && go run ./cmd/mock-workers -port 50616
+   # Serves typed envelopes for IndicConformer, Sarvam-30B, and Indic Parler-TTS
+   ```
+
+3. **Exercise Backend**:
+   ```bash
+   # Start backend on owned port 8080 wiring the mock worker port
+   cd backend
+   STHIRA_DATABASE_DSN="postgres://apple@localhost:5432/${TEST_DB}?sslmode=disable" \
+   STHIRA_ADDR="127.0.0.1:8080" \
+   STHIRA_ASR_URL="http://127.0.0.1:50616" \
+   STHIRA_MIDDLE_URL="http://127.0.0.1:50616" \
+   STHIRA_TTS_URL="http://127.0.0.1:50616" \
+   STHIRA_EXERCISE_SEED=1 \
+   go run ./cmd/sthira-exercise
+   ```
+   *Persistence Check*: To verify persistence across server restarts, restart the process **without** `STHIRA_EXERCISE_SEED=1` (or rely on safe idempotent seeding) to verify clean reload of stored stays without destructive package operations.
+
+4. **Vite Frontend Proxying**:
+   ```bash
+   cd frontend/v2
+   VITE_BACKEND_URL="http://127.0.0.1:8080" npm run dev -- --port 5173
+   ```
+   Open `http://127.0.0.1:5173` to test actions, silent zoom/pan, arrival confirmation panels, and stay reservation flows.
+
+5. **Teardown**:
+   Terminate owned processes and clean up the disposable database:
+   `dropdb "$TEST_DB"`
+
+---
+
+### Procedure B: Deferred Real Models on AWS GPU (REAL_INFERENCE)
+**STRICTLY UNEXECUTED PENDING AWS RESTART AUTHORIZATION.**
+Instance `i-01d17e39266c292c2` is STOPPED in region `us-east-2`.
+Weights are preserved on root EBS volume `vol-0b4e1d279d21586e2`:
+- Sarvam-30B FP8 MoE (~37 GB)
+- IndicConformer-600M-Multi ONNX (~2.4 GB)
+- Indic Parler-TTS PyTorch (~3.6 GB)
+
+When authorized by the owner:
+1. **Discover New Public IP**:
+   AWS stop releases the previous public IP; query the new assigned IP upon authorized start:
+   ```bash
+   aws ec2 describe-instances --instance-ids i-01d17e39266c292c2 --query "Reservations[0].Instances[0].PublicIpAddress" --output text
+   ```
+
+2. **Private Upstream vLLM Service (Port 8000)**:
+   ```bash
+   vllm serve /path/to/sarvam-30b --port 8000 --max-model-len 4096 --dtype float8
+   ```
+   *Distinction*: Raw vLLM implements OpenAI-compatible `/v1/chat/completions`, NOT the private typed Sthira worker HTTP protocol.
+
+3. **Module-Aware Real Worker Binaries**:
+   Run the dedicated Go worker binaries wrapping the model runtimes on private loopback ports:
+   - **ASR Worker** (`backend/internal/asrworker/cmd/asrworker`):
      ```bash
      cd backend/internal/asrworker
      STHIRA_ASR_ADDR="127.0.0.1:8001" \
@@ -51,24 +119,16 @@ The real serving executable entry points have been implemented and verified in e
      STHIRA_ASR_ADAPTER="sthira_v2.speech_asr_adapter" \
      ./asrworker
      ```
-   - **Behavior**: Wraps `sthira_v2.speech_asr_adapter` over stdin/stdout JSONL. Calls `worker.LoadAndVerify(ctx)`. Fails closed if the Python runtime or ONNX model weights are missing or report blocked status.
-
-2. **Middle Worker** (`backend/internal/middleworker`):
-   - **Entry point**: `cmd/middleworker/main.go`
-   - **Build**: `cd backend/internal/middleworker && go build ./cmd/middleworker`
-   - **Run**:
+     *Note*: IndicConformer CPU ONNX inference is verified; language is client-passed via `speechLanguageTag` (no auto-detection).
+   - **Middle Worker** (`backend/internal/middleworker/cmd/middleworker`):
      ```bash
      cd backend/internal/middleworker
      STHIRA_MIDDLE_ADDR="127.0.0.1:8002" \
      STHIRA_VLLM_URL="http://127.0.0.1:8000" \
      ./middleworker
      ```
-   - **Behavior**: Wraps upstream private vLLM endpoint (`sarvamai/sarvam-30b` FP8 MoE) with canonical Sarvam system prompt, embedded JSON schema (`model_output.schema.json`), and 512 max output tokens.
-
-3. **TTS Worker** (`backend/internal/ttsworker`):
-   - **Entry point**: `cmd/ttsworker/main.go`
-   - **Build**: `cd backend/internal/ttsworker && go build ./cmd/ttsworker`
-   - **Run**:
+     Wraps upstream raw vLLM with canonical Sarvam prompt, embedded guided JSON schema, and strict 512 max output tokens.
+   - **TTS Worker** (`backend/internal/ttsworker/cmd/ttsworker`):
      ```bash
      cd backend/internal/ttsworker
      STHIRA_TTS_ADDR="127.0.0.1:8003" \
@@ -76,18 +136,18 @@ The real serving executable entry points have been implemented and verified in e
      STHIRA_TTS_ADAPTER="sthira_v2.speech_tts_adapter" \
      ./ttsworker
      ```
-   - **Behavior**: Wraps `sthira_v2.speech_tts_adapter` over stdin/stdout JSONL with bounded template catalog and verified WAV caching. Calls `rt.LoadModel()`. Fails closed if Parler-TTS weights or voices are missing or report blocked status.
+     Wraps Indic Parler-TTS on CUDA (`STHIRA_TTS_DEVICE=cuda`) with native 44,100 Hz WAV caching and SHA-256 integrity verification.
 
 4. **Public Backend / Exercise Wiring**:
-   - The public backend receives private worker URLs (`STHIRA_ASR_URL="http://127.0.0.1:8001"`, `STHIRA_MIDDLE_URL="http://127.0.0.1:8002"`, `STHIRA_TTS_URL="http://127.0.0.1:8003"`), not raw Python adapter or vLLM URLs.
-   - The production binary (`cmd/sthira`) rejects synthetic templates.
-   - For isolated exercise / demonstration with labelled synthetic fixtures:
-     ```bash
-     cd backend
-     STHIRA_ASR_URL="http://127.0.0.1:8001" \
-     STHIRA_MIDDLE_URL="http://127.0.0.1:8002" \
-     STHIRA_TTS_URL="http://127.0.0.1:8003" \
-     go run ./cmd/sthira-exercise
-     ```
+   The public backend receives private worker URLs (`STHIRA_ASR_URL="http://127.0.0.1:8001"`, `STHIRA_MIDDLE_URL="http://127.0.0.1:8002"`, `STHIRA_TTS_URL="http://127.0.0.1:8003"`), not raw Python adapter or vLLM URLs.
+   For isolated exercise / demonstration with labelled synthetic fixtures:
+   ```bash
+   cd backend
+   STHIRA_ASR_URL="http://127.0.0.1:8001" \
+   STHIRA_MIDDLE_URL="http://127.0.0.1:8002" \
+   STHIRA_TTS_URL="http://127.0.0.1:8003" \
+   go run ./cmd/sthira-exercise
+   ```
 
 Real inference and supported-language acceptance remain separate from launch/build checks. No instance access, spending or model download was performed by this review.
+

@@ -280,3 +280,80 @@ test('executeMapActions: dispatches actions to mock map without throwing', () =>
   assert.equal(clarifyResult, true);
   assert.deepEqual(clarifiedCandidates, [['SZDEMO-1', 'FACDEMO-1']]);
 });
+
+test('executeMapActions: dispatches ARRIVAL_CONFIRMATION panel without speech requirement or database mutation', () => {
+  const mockMap: any = {
+    setLayoutProperty() {},
+    fitBounds() {},
+    flyTo() {},
+    getZoom() { return 12; },
+    zoomTo() {},
+    getCenter() { return { toArray() { return [76.105, 11.57]; } }; },
+    easeTo() {},
+  };
+
+  const panelsOpened: string[] = [];
+  const arrivalProposal: VoiceProposal = {
+    schema_version: '3.0',
+    status: 'OK',
+    intent: 'ARRIVE',
+    actions: [{ type: 'OPEN_PANEL', panel: 'ARRIVAL_CONFIRMATION' }],
+    speech_key: null,
+  };
+
+  const result = executeMapActions(
+    mockMap,
+    arrivalProposal,
+    false,
+    (panel) => panelsOpened.push(panel)
+  );
+
+  assert.equal(result, true);
+  assert.deepEqual(panelsOpened, ['ARRIVAL_CONFIRMATION']);
+});
+
+test('executeMapActions: dispatches silent ZOOM without speech_key', () => {
+  const calls: string[] = [];
+  const mockMap: any = {
+    getZoom() { return 10; },
+    zoomTo(z: number) { calls.push(`zoomTo:${z}`); },
+  };
+
+  const zoomProposal: VoiceProposal = {
+    schema_version: '3.0',
+    status: 'OK',
+    intent: 'ZOOM',
+    actions: [{ type: 'ZOOM', direction: 'IN', steps: 1 }],
+    speech_key: null,
+  };
+
+  const result = executeMapActions(
+    mockMap,
+    zoomProposal,
+    false,
+    () => {}
+  );
+
+  assert.equal(result, true);
+  assert.deepEqual(calls, ['zoomTo:11']);
+});
+
+test('executeMapActions: does not execute map actions for non-OK status (UNSUPPORTED, DATA_UNAVAILABLE, ERROR)', () => {
+  const calls: string[] = [];
+  const mockMap: any = {
+    getZoom() { return 10; },
+    zoomTo(z: number) { calls.push(`zoomTo:${z}`); },
+  };
+
+  for (const status of ['UNSUPPORTED', 'DATA_UNAVAILABLE', 'ERROR'] as const) {
+    const nonOkProposal: VoiceProposal = {
+      schema_version: '3.0',
+      status,
+      actions: [],
+    };
+    const result = executeMapActions(mockMap, nonOkProposal, false, () => {});
+    assert.equal(result, true);
+  }
+  assert.equal(calls.length, 0);
+});
+
