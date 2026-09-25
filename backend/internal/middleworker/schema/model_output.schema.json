@@ -14,7 +14,8 @@
     "actions",
     "speech_key",
     "clarification_ids",
-    "evidence_ids"
+    "evidence_ids",
+    "intent"
   ],
   "properties": {
     "schema_version": {
@@ -43,7 +44,9 @@
     },
     "intent": {
       "oneOf": [
-        { "type": "null" },
+        {
+          "type": "null"
+        },
         {
           "type": "string",
           "enum": [
@@ -71,65 +74,283 @@
     "actions": {
       "type": "array",
       "maxItems": 5,
-      "items": { "$ref": "#/$defs/action" }
+      "items": {
+        "$ref": "#/$defs/action"
+      }
     },
     "speech_key": {
       "oneOf": [
-        { "type": "null" },
-        { "type": "string", "minLength": 1, "maxLength": 128 }
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
       ]
     },
     "clarification_ids": {
       "type": "array",
       "maxItems": 3,
-      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
     },
     "evidence_ids": {
       "type": "array",
       "maxItems": 16,
-      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
     }
   },
   "$defs": {
     "action": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["type"],
-      "properties": {
-        "type": {
-          "type": "string",
-          "enum": [
-            "FOCUS_FEATURE",
-            "SHOW_CHOICES",
-            "SHOW_ROUTE",
-            "OPEN_PANEL",
-            "ZOOM",
-            "PAN",
-            "RECENTER",
-            "SET_LANGUAGE"
-          ]
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "target_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "FOCUS_FEATURE"
+            },
+            "target_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
         },
-        "target_id":      { "type": "string", "minLength": 1, "maxLength": 128 },
-        "target_ids":     { "type": "array", "maxItems": 3, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
-        "route_id":       { "type": "string", "minLength": 1, "maxLength": 128 },
-        "panel": {
-          "type": "string",
-          "enum": [
-            "ALERT_DETAILS",
-            "DESTINATION_PREVIEW",
-            "ROUTE_STEPS",
-            "RESERVATION_CONFIRMATION",
-            "ARRIVAL_CONFIRMATION",
-            "EMERGENCY_CALL_CONFIRMATION"
-          ]
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "target_ids"
+          ],
+          "properties": {
+            "type": {
+              "const": "SHOW_CHOICES"
+            },
+            "target_ids": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 3,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          }
         },
-        "direction": {
-          "type": "string",
-          "enum": ["IN", "OUT", "NORTH", "SOUTH", "EAST", "WEST"]
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "route_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "SHOW_ROUTE"
+            },
+            "route_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
         },
-        "steps":   { "type": "integer", "minimum": 1, "maximum": 1 },
-        "language":{ "type": "string", "minLength": 1, "maxLength": 32 }
-      }
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "panel"
+          ],
+          "properties": {
+            "type": {
+              "const": "OPEN_PANEL"
+            },
+            "panel": {
+              "type": "string",
+              "enum": [
+                "ALERT_DETAILS",
+                "DESTINATION_PREVIEW",
+                "ROUTE_STEPS",
+                "RESERVATION_CONFIRMATION",
+                "ARRIVAL_CONFIRMATION",
+                "EMERGENCY_CALL_CONFIRMATION"
+              ]
+            },
+            "target_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "direction",
+            "steps"
+          ],
+          "properties": {
+            "type": {
+              "const": "ZOOM"
+            },
+            "direction": {
+              "enum": [
+                "IN",
+                "OUT"
+              ]
+            },
+            "steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "direction",
+            "steps"
+          ],
+          "properties": {
+            "type": {
+              "const": "PAN"
+            },
+            "direction": {
+              "enum": [
+                "NORTH",
+                "SOUTH",
+                "EAST",
+                "WEST"
+              ]
+            },
+            "steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "RECENTER"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "language"
+          ],
+          "properties": {
+            "type": {
+              "const": "SET_LANGUAGE"
+            },
+            "language": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "target_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "HIGHLIGHT_FEATURE"
+            },
+            "target_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "target_ids"
+          ],
+          "properties": {
+            "type": {
+              "const": "FIT_FEATURES"
+            },
+            "target_ids": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 3,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "layer",
+            "visible"
+          ],
+          "properties": {
+            "type": {
+              "const": "SET_LAYER_VISIBILITY"
+            },
+            "layer": {
+              "type": "string",
+              "enum": [
+                "RED_ZONES",
+                "SAFE_ZONES",
+                "ROUTES",
+                "MY_LOCATION"
+              ]
+            },
+            "visible": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
     }
   }
 }

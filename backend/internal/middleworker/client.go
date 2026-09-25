@@ -225,6 +225,8 @@ type ProposeInput struct {
 	ChatTemplateKwargs map[string]any
 	// MaxOutputTokens is the per-request max tokens limit, bounded by c.limits.MaxOutputTokens.
 	MaxOutputTokens int
+	// SchemaJSON optionally narrows the pinned schema to the trusted snapshot.
+	SchemaJSON []byte
 }
 
 // ProposeOutput is what the Client returns on success.
@@ -275,6 +277,10 @@ func (c *Client) Propose(ctx context.Context, in ProposeInput) (*ProposeOutput, 
 		maxTokens = in.MaxOutputTokens
 	}
 
+	schema := c.schemaBytes
+	if len(in.SchemaJSON) != 0 {
+		schema = in.SchemaJSON
+	}
 	body, err := json.Marshal(chatCompletionRequest{
 		Model: in.ModelID,
 		Messages: []chatMessage{
@@ -289,7 +295,7 @@ func (c *Client) Propose(ctx context.Context, in ProposeInput) (*ProposeOutput, 
 			JSONSchema: &jsonSchema{
 				Name:   "model_output",
 				Strict: true,
-				Schema: c.schemaBytes,
+				Schema: schema,
 			},
 		},
 		Stream: false,

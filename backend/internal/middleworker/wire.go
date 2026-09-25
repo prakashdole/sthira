@@ -21,12 +21,15 @@ type ScopedContext struct {
 	DataVersion     string `json:"data_version"`
 	Jurisdiction    string `json:"jurisdiction,omitempty"`
 	SchemaVersion   string `json:"schema_version"`
+	SourceID        string `json:"source_id,omitempty"`
 	SourceStatus    string `json:"source_status,omitempty"`
 	SourceVersion   int    `json:"source_version,omitempty"`
 	TemplateVersion int    `json:"template_version,omitempty"`
 
-	AllowedLanguages []string `json:"allowed_languages,omitempty"`
-	TemplateKeys     []string `json:"template_keys,omitempty"`
+	AllowedLanguages    []string            `json:"allowed_languages,omitempty"`
+	TemplateKeys        []string            `json:"template_keys,omitempty"`
+	ApprovedSpeechKeys  map[string][]string `json:"approved_speech_keys,omitempty"`
+	ApprovedTemplateSHA map[string]string   `json:"approved_template_sha256,omitempty"`
 
 	KnownPlaces     map[string]PlaceCandidate `json:"known_places,omitempty"`
 	KnownRedZones   map[string]ZoneRef        `json:"known_red_zones,omitempty"`

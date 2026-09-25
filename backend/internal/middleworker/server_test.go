@@ -88,6 +88,8 @@ func TestServer_ProposeRequiresAuth(t *testing.T) {
 		RequestID: "REQ-1",
 		ScopedContext: ScopedContext{
 			SchemaVersion: "3.0", DataVersion: "v1",
+			SourceID: "SRC-1", ApprovedSpeechKeys: map[string][]string{"welcome": {"en-IN"}},
+			ApprovedTemplateSHA: map[string]string{"welcome/en-IN": strings.Repeat("a", 64)},
 		},
 		Transcript: TranscriptInput{
 			RequestID: "REQ-1", Language: "en-IN", Text: "show shelter", State: "OK",

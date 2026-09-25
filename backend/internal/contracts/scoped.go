@@ -112,10 +112,10 @@ func EnforceScopedContext(out ModelOutput, sc ScopedContext) error {
 	// front.
 	for _, a := range out.Actions {
 		switch a.Type {
-		case ActionFocusFeature:
+		case ActionFocusFeature, ActionHighlightFeature:
 			if a.TargetID != "" {
 				if _, isRoute := sc.KnownRoutes[a.TargetID]; isRoute {
-					return &ErrScopedSemantic{Reason: fmt.Sprintf("FOCUS_FEATURE target_id %q is a route, not a spatial feature", a.TargetID)}
+					return &ErrScopedSemantic{Reason: fmt.Sprintf("%s target_id %q is a route, not a spatial feature", a.Type, a.TargetID)}
 				}
 			}
 		case ActionShowRoute:
@@ -130,10 +130,13 @@ func EnforceScopedContext(out ModelOutput, sc ScopedContext) error {
 		case ActionShowChoices:
 			for _, id := range a.TargetIDs {
 				if _, isRoute := sc.KnownRoutes[id]; isRoute {
-					return &ErrScopedSemantic{Reason: fmt.Sprintf("SHOW_CHOICES target_id %q is a route, not a facility", id)}
+					return &ErrScopedSemantic{Reason: fmt.Sprintf("%s target_id %q is a route, not a facility", a.Type, id)}
 				}
-				if _, isPlace := sc.KnownPlaces[id]; isPlace {
-					return &ErrScopedSemantic{Reason: fmt.Sprintf("SHOW_CHOICES target_id %q is a place, not a facility", id)}
+				if place, isPlace := sc.KnownPlaces[id]; isPlace && (place.PlaceKind != "FACILITY" || place.Jurisdiction != sc.Jurisdiction || place.PlaceID != id) {
+					return &ErrScopedSemantic{Reason: fmt.Sprintf("%s target_id %q is a place, not a facility", a.Type, id)}
+				}
+				if _, ok := sc.KnownFacilities[id]; !ok {
+					return &ErrScopedSemantic{Reason: fmt.Sprintf("%s target_id %q is not a known facility", a.Type, id)}
 				}
 			}
 		}
@@ -142,26 +145,46 @@ func EnforceScopedContext(out ModelOutput, sc ScopedContext) error {
 	// Per-action typed rules.
 	for i, a := range out.Actions {
 		switch a.Type {
-		case ActionFocusFeature:
+		case ActionFocusFeature, ActionHighlightFeature:
 			if a.TargetID == "" {
-				return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d FOCUS_FEATURE missing target_id", i)}
+				return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d %s missing target_id", i, a.Type)}
 			}
-			// FOCUS_FEATURE may target a place, a safe zone, a red zone
+			// FOCUS_FEATURE / HIGHLIGHT_FEATURE may target a place, a safe zone, a red zone
 			// or a facility — all are spatial features the model may
 			// legitimately highlight. Cross-kind collisions (route_id
 			// here) are caught above.
 			if !isSpatialFeature(sc, a.TargetID) {
-				return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d FOCUS_FEATURE target_id %q not a known spatial feature", i, a.TargetID)}
+				return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d %s target_id %q not a known spatial feature", i, a.Type, a.TargetID)}
 			}
 		case ActionShowChoices:
 			if len(a.TargetIDs) == 0 {
-				return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d SHOW_CHOICES empty", i)}
+				return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d %s empty", i, a.Type)}
 			}
 			if len(a.TargetIDs) > MaxShowChoices {
-				return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d SHOW_CHOICES exceeds %d", i, MaxShowChoices)}
+				return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d %s exceeds %d", i, a.Type, MaxShowChoices)}
 			}
 			if err := enforceChoiceOrder(a.TargetIDs, sc.EligibleDestinations); err != nil {
-				return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d SHOW_CHOICES order: %v", i, err)}
+				return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d %s order: %v", i, a.Type, err)}
+			}
+		case ActionFitFeatures:
+			if len(a.TargetIDs) == 0 {
+				return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d %s empty", i, a.Type)}
+			}
+			if len(a.TargetIDs) > MaxShowChoices {
+				return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d %s exceeds %d", i, a.Type, MaxShowChoices)}
+			}
+			seen := make(map[string]bool, len(a.TargetIDs))
+			for _, id := range a.TargetIDs {
+				if id == "" {
+					return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d %s has empty target_id", i, a.Type)}
+				}
+				if seen[id] {
+					return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d %s duplicate target_id %q", i, a.Type, id)}
+				}
+				seen[id] = true
+				if !isKnownAny(sc, id) {
+					return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d %s target_id %q not known", i, a.Type, id)}
+				}
 			}
 		case ActionShowRoute:
 			if a.RouteID == "" {
@@ -218,6 +241,15 @@ func EnforceScopedContext(out ModelOutput, sc ScopedContext) error {
 		case ActionZoom, ActionPan, ActionRecenter:
 			// Shape validation enforces the required fields; nothing
 			// more here.
+		case ActionSetLayerVisibility:
+			switch a.Layer {
+			case "RED_ZONES", "SAFE_ZONES", "ROUTES", "MY_LOCATION":
+			default:
+				return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d SET_LAYER_VISIBILITY unknown layer %q", i, a.Layer)}
+			}
+			if a.Visible == nil {
+				return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d SET_LAYER_VISIBILITY missing visible boolean", i)}
+			}
 		default:
 			return &ErrScopedSemantic{Reason: fmt.Sprintf("action %d unknown action type %q", i, a.Type)}
 		}
@@ -400,16 +432,16 @@ func isKnownStatus(s ModelStatus) bool {
 
 func validateActionShape(idx int, a Action) error {
 	switch a.Type {
-	case ActionFocusFeature:
+	case ActionFocusFeature, ActionHighlightFeature:
 		if a.TargetID == "" {
-			return fmt.Errorf("action %d FOCUS_FEATURE missing target_id", idx)
+			return fmt.Errorf("action %d %s missing target_id", idx, a.Type)
 		}
-	case ActionShowChoices:
+	case ActionShowChoices, ActionFitFeatures:
 		if len(a.TargetIDs) == 0 {
-			return fmt.Errorf("action %d SHOW_CHOICES missing target_ids", idx)
+			return fmt.Errorf("action %d %s missing target_ids", idx, a.Type)
 		}
 		if len(a.TargetIDs) > MaxShowChoices {
-			return fmt.Errorf("action %d SHOW_CHOICES exceeds max %d", idx, MaxShowChoices)
+			return fmt.Errorf("action %d %s exceeds max %d", idx, a.Type, MaxShowChoices)
 		}
 	case ActionShowRoute:
 		if a.RouteID == "" {
@@ -444,6 +476,15 @@ func validateActionShape(idx int, a Action) error {
 		}
 	case ActionRecenter:
 		// No extra fields required.
+	case ActionSetLayerVisibility:
+		switch a.Layer {
+		case "RED_ZONES", "SAFE_ZONES", "ROUTES", "MY_LOCATION":
+		default:
+			return fmt.Errorf("action %d SET_LAYER_VISIBILITY unknown layer %q", idx, a.Layer)
+		}
+		if a.Visible == nil {
+			return fmt.Errorf("action %d SET_LAYER_VISIBILITY missing visible boolean", idx)
+		}
 	default:
 		return fmt.Errorf("action %d unknown action type %q", idx, a.Type)
 	}

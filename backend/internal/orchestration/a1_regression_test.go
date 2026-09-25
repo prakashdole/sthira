@@ -904,3 +904,108 @@ func TestA1_HTTPWorkerClientConcurrently(t *testing.T) {
 		t.Errorf("got %d results, want %d", count, n)
 	}
 }
+
+func TestA1_StageTTS_LanguageBoundDigestForwarded(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	sc.AllowedLanguages = []string{"en-IN", "hi-IN"}
+	wantDigestHI := orchestrationtest.DigestString("नमस्ते")
+	sc.ApprovedSpeechKeys["welcome"] = []string{"en-IN", "hi-IN"}
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("welcome", "hi-IN")] = wantDigestHI
+
+	resolver := orchestrationtest.NewResolver(sc)
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	tpls.Add(contracts.ApprovedTemplate{
+		SpeechKey: "welcome", Language: "hi-IN", TemplateVersion: 1, SourceVersion: 1,
+		Text: "नमस्ते", SyntheticOnly: false,
+	})
+	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
+
+	var capturedReq contracts.TTSWorkerRequest
+	validWAV := makeTestWAV(t, 16000, 1)
+	tts.SetSynthesizeHook(func(_ context.Context, req contracts.TTSWorkerRequest) (contracts.TTSWorkerResponse, error) {
+		capturedReq = req
+		return contracts.TTSWorkerResponse{
+			RequestID:      req.RequestID,
+			SpeechKey:      req.SpeechKey,
+			Language:       req.Language,
+			State:          contracts.TTSOK,
+			AudioB64:       base64.StdEncoding.EncodeToString(validWAV),
+			ContentType:    "audio/wav",
+			ChecksumSHA256: sha256Hex(validWAV),
+			ModelRevision:  "r0",
+			VoiceRevision:  "v0",
+			Settings:       contracts.TTSSynthesisSettings{SampleRate: 16000, BitDepth: 16, Channels: 1},
+		}, nil
+	})
+
+	// 1. Success case: Hindi request forwards exact language-bound digest
+	intent := contracts.IntentFocusPlace
+	key := "welcome"
+	mid.SetProposeHook(func(_ context.Context, _ contracts.MiddleWorkerRequest) (contracts.MiddleWorkerResponse, error) {
+		return contracts.MiddleWorkerResponse{
+			RequestID: "R-hi",
+			Proposal: contracts.ModelOutput{
+				SchemaVersion: contracts.ModelSchemaVersion,
+				RequestID:     "R-hi",
+				DataVersion:   sc.DataVersion,
+				Status:        contracts.StatusOK,
+				Intent:        &intent,
+				Language:      "hi-IN",
+				SpeechKey:     &key,
+				Actions:       []contracts.Action{{Type: contracts.ActionRecenter}},
+				EvidenceIDs:   nil,
+			},
+		}, nil
+	})
+
+	pipeReq := transcriptPipelineRequest("JTEST", "hi-IN", "namaste")
+	pipeReq.RequestID = "R-hi"
+	pipeReq.Render.Kind = contracts.PipelineRenderTTS
+	res, err := o.Process(context.Background(), pipeReq, nil)
+	if err != nil {
+		t.Fatalf("Process failed: %v", err)
+	}
+	if capturedReq.TemplateSHA256 != wantDigestHI {
+		t.Errorf("captured TemplateSHA256 = %s, want %s", capturedReq.TemplateSHA256, wantDigestHI)
+	}
+	if res.Template.Text != "नमस्ते" {
+		t.Errorf("res.Template.Text = %q, want 'नमस्ते'", res.Template.Text)
+	}
+	if res.Audio == nil || res.Audio.ChecksumSHA256 != sha256Hex(validWAV) {
+		t.Fatalf("expected valid audio output in response: %+v", res.Audio)
+	}
+
+	// 2. Missing/wrong-language digest prevents TTS call in Process and Synthesize
+	capturedReq = contracts.TTSWorkerRequest{}
+	delete(sc.ApprovedTemplateSHA, contracts.TemplateDigestKey("welcome", "hi-IN"))
+	resolver = orchestrationtest.NewResolver(sc)
+	o = buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
+
+	res2, err := o.Process(context.Background(), pipeReq, nil)
+	if err != nil {
+		t.Fatalf("unexpected Process error: %v", err)
+	}
+	if len(res2.Stages) == 0 {
+		t.Fatalf("expected stage failure for missing language-bound digest in Process")
+	}
+	if capturedReq.SpeechKey != "" {
+		t.Fatalf("TTS worker Synthesize must NOT be called in Process when language digest is missing")
+	}
+
+	_, err = o.Synthesize(context.Background(), contracts.TTSRequest{
+		RequestID:     "R-hi-direct",
+		Jurisdiction:  "JTEST",
+		SpeechKey:     "welcome",
+		Language:      "hi-IN",
+		SourceVersion: 1,
+		Settings:      contracts.TTSSynthesisSettings{SampleRate: 16000, BitDepth: 16, Channels: 1},
+	}, nil)
+	if err == nil {
+		t.Fatalf("expected Synthesize to fail closed on missing language-bound template digest")
+	}
+	if capturedReq.SpeechKey != "" {
+		t.Fatalf("TTS worker Synthesize must NOT be called in Synthesize when language digest is missing")
+	}
+}

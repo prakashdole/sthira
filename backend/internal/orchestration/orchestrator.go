@@ -319,6 +319,7 @@ func (o *Orchestrator) Process(ctx context.Context, req contracts.PipelineReques
 		ValidatedProposal: middleResp.Proposal,
 		Template: contracts.PipelineTemplate{
 			SpeechKey:       tplOut.SpeechKey,
+			Text:            tplOut.Text,
 			TemplateVersion: tplOut.TemplateVersion,
 			Args:            tplOut.Args,
 		},
@@ -700,6 +701,10 @@ func (o *Orchestrator) stageTTS(ctx context.Context, id CorrelationID, sc contra
 	ttsCtx, cancel := StageDeadline(ctx, o.cfg.Limits.TTSDeadline)
 	defer cancel()
 	settings := contracts.TTSSynthesisSettings{SampleRate: 16000, BitDepth: 16, Channels: 1}
+	templateSHA, ok := sc.TemplateDigest(tpl.SpeechKey, language)
+	if !ok {
+		return nil, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{Stage: StageTemplate, Code: contracts.ErrValidation, Reason: "missing language-bound template digest"})
+	}
 	resp, err := o.cfg.Workers.TTS.Synthesize(ttsCtx, contracts.TTSWorkerRequest{
 		RequestID:       string(id),
 		SpeechKey:       tpl.SpeechKey,
@@ -708,6 +713,7 @@ func (o *Orchestrator) stageTTS(ctx context.Context, id CorrelationID, sc contra
 		SourceVersion:   tpl.SourceVersion,
 		TemplateVersion: tpl.TemplateVersion,
 		Settings:        settings,
+		TemplateSHA256:  templateSHA,
 		DeadlineMillis:  o.cfg.Limits.TTSDeadline.Milliseconds(),
 	})
 	if err != nil {
