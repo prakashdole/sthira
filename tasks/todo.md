@@ -383,6 +383,16 @@ The earlier claim of absent OpenFreeMap coverage was invalid: the test used an i
 - Consumer Speak no longer has a ripple. The authority view at `?view=authority` renders a synthetic incident map, operational summary, and a rescue-review queue. Marking a request only changes browser-local demo state and does not dispatch a team.
 - `npm run build`, `python -m pytest tests/test_v2_map_geometry.py -q`, and `git diff --check` pass.
 
+## Authority entry — 2026-09-25
+
+- [x] Add a separate bottom Authority sign-in entry to first-use setup.
+- [x] Verify first-use layout and build.
+
+### Review — 2026-09-25
+
+- The first-use screen shows a distinct bottom Authority sign-in entry; it routes to the synthetic authority console. No identity verification is represented as implemented.
+- `npm run build`, `python -m pytest tests/test_v2_map_geometry.py -q`, and `git diff --check` pass.
+
 - [x] Operational-package manifest now requires authority, jurisdiction, version, effective/expiry window, checksum, facilities, allocation policy, emergency contacts, geometry, and cross-references.
 - [x] Synthetic package checksum verification, authenticated demo publication, version conflict detection, supersession, cancellation, rollback, and active-package API are covered by tests.
 - [x] Assignment API requires alert/session/idempotency linkage and rejects payload conflicts; local concurrent allocation and arrival tests pass.
