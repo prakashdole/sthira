@@ -1,5 +1,7 @@
 # Phases and readiness gates
 
+> **2026-09-25 current checkpoint:** [prompt.md section 0.0](prompt.md) supersedes earlier completion claims. C02–C05 are reopened for bounded integration corrections; real instance/model tests remain separate. C06–C09 and Gate B/P8/P9 are not accepted. Preserve the roadmap; prioritize the round-two demo.
+
 > **2026-09-21 priority override:** Round-two prototype/UI/real-model demo and pitch take priority through September 28–29. Read [round-two-demo.md](round-two-demo.md) first. Frontend prototype work may proceed before Gate B; production gates and the long-term roadmap remain intact.
 
 Current execution entry point: [prompt.md](prompt.md), updated 2026-09-23. Its R/B/M/Q tasks prioritize the round-two demo, remaining backend work, P8 mobile delivery and P9 whole-system readiness; the P0–P12 roadmap below is retained. Go implementation exists; phase completion must be read from recorded evidence, not this original roadmap. Historical Python work is captured in [changes.md](changes.md).

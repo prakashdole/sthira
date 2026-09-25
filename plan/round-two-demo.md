@@ -1,8 +1,12 @@
 # Round Two: Integrated Demo Freeze and Founder Handoff (Task R07)
 
-**Document Version**: 2.0 (Integrated Demo Freeze & Engineering Acceptance)  
-**Accepted Date**: 2026-09-24  
-**Status**: `DEMO_ENGINEERING_ACCEPTED` (Plumbing & Engineering Verified; Real GPU Weights `BLOCKED_HARDWARE`)
+**Document Version**: 2.1 (Demo acceptance reopened)
+
+**Review Date**: 2026-09-25
+
+**Status**: `NOT_ACCEPTED` — C02–C05 integration corrections remain; real instance/model execution is separately NOT_VERIFIED.
+
+> **Current acceptance override:** Read [prompt.md section 0.0](prompt.md) and the [2026-09-25 review](reviews/review-recovery-2026-09-25.md). The architecture and demo narrative below are targets, not proof of shipped behavior. Browser map/MIME contracts, reservation restoration, freshness/capture/audio handling, worker launch and rehearsal ownership need correction. Earlier freeze/acceptance assertions are superseded. User is provisioning instances; model success, runtime versions and measured hardware capacity must still be established. Native clients and full production gates remain unfinished.
 
 ---
 

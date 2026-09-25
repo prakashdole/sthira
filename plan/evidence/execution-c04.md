@@ -1,5 +1,7 @@
 # Task C04 Evidence — Wire Selected Models into Isolated Demo & Verification
 
+> **2026-09-25 review — PARTIAL / REOPENED.** Shared API-to-fake-worker plumbing and isolated templates are implemented; real worker executable composition and browser codec/map integration remain engineering work. Actual models are NOT_VERIFIED; user provisioning is in progress. See [review](../reviews/review-recovery-2026-09-25.md) and [prompt section 0.0](../prompt.md). Tests returning model-name strings do not prove the selected models ran.
+
 **Task**: C04 — Wire the selected models into the isolated demo (inference; C03 integrated)
 **Lane**: Backend (`cmd/sthira`, `cmd/sthira-exercise`, `internal/httpserver`, `internal/orchestration`)
 **Host Environment**: macOS (Darwin arm64), Go 1.27.1, PostgreSQL 18.6 (`STHIRA_TEST_ADMIN_DSN="postgres://apple@localhost:5432/postgres?sslmode=disable"`)
@@ -34,71 +36,16 @@ Real weight inference on this host is blocked by external hardware and resource 
 
 ---
 
-## 3. Runnable Worker Startup Instructions
+## 3. Worker startup instructions — withdrawn pending correction
 
-### Mode A: Development / Protocol Testing (Loopback HTTP Workers)
+The former commands were not runnable evidence and must not be used for deployment:
 
-For local development and automated plumbing verification, run the private protocol workers:
+- `speech_asr_adapter.py` and `speech_tts_adapter.py` speak JSON lines over stdin/stdout; they do not expose the claimed `--port` HTTP server interface.
+- Raw vLLM exposes an OpenAI-compatible API, not Sthira's typed middle-worker request/response/health contract. `STHIRA_MIDDLE_URL` must point to the private Sthira wrapper, whose upstream is vLLM.
+- Repository Go ASR/TTS/middle worker packages exist, but no real serving executable entry points were found in this review. `cmd/mock-workers` and dummy/eval drivers cannot substitute for those services.
+- `go run ./loadmodel/...` and `go run ./cmd/sthira-exercise` refer to different module working directories. Each replacement command must specify its actual module path and validated flags.
+- The production binary rejects synthetic templates. Use the explicitly isolated exercise binary/database for a labelled synthetic-case demonstration; do not disable production checks.
 
-```bash
-# 1. Start private loopback workers on separate ports
-# ASR worker (port 7101)
-go run ./loadmodel/cmd/dummyd --kind asr --addr 127.0.0.1:7101 &
-PID_ASR=$!
+C04 must reuse the existing runtime and HTTP server implementations to supply minimal launch entry points with private binding, auth, required artifact configuration, load/warm health, bounded lifecycle and clean shutdown. Test build/startup failure without weights; then provide actual authorized instance commands with pinned runtime/artifact details. No speculative A100/H100/MLX compatibility claim substitutes for that evidence. The public backend receives private worker URLs, not Python adapter or raw vLLM URLs. Keep secrets out of documentation and output.
 
-# Middle worker (port 7201)
-go run ./loadmodel/cmd/dummyd --kind middle --addr 127.0.0.1:7201 &
-PID_MID=$!
-
-# TTS worker (port 7301)
-go run ./loadmodel/cmd/dummyd --kind tts --addr 127.0.0.1:7301 &
-PID_TTS=$!
-
-# 2. Export worker endpoints
-export STHIRA_ASR_URL="http://127.0.0.1:7101"
-export STHIRA_MIDDLE_URL="http://127.0.0.1:7201"
-export STHIRA_TTS_URL="http://127.0.0.1:7301"
-
-# 3. Start exercise server
-export STHIRA_DATABASE_DSN="postgres://apple@localhost:5432/sthira_dev?sslmode=disable"
-export STHIRA_EXERCISE_SEED=1
-go run ./cmd/sthira-exercise
-```
-
-### Mode B: GPU Deployment with Real Model Weights (Authorized Hardware)
-
-When authorized GPU hardware and weights are provisioned:
-
-```bash
-# 1. Start ASR Worker (IndicConformer-600M-Multi ONNX)
-python3 -m sthira_v2.speech_asr_adapter \
-    --model-dir /opt/models/indic-conformer-600m-multilingual \
-    --port 7101 \
-    --token "$STHIRA_ASR_TOKEN" &
-
-# 2. Start Middle Worker (Sarvam-30B MoE FP8 via vLLM)
-vllm serve sarvamai/sarvam-30b \
-    --host 127.0.0.1 \
-    --port 7201 \
-    --tensor-parallel-size 1 \
-    --kv-cache-dtype fp8 \
-    --max-model-len 4096 \
-    --chat-template-kwargs '{"enable_thinking":false}' \
-    --api-key "$STHIRA_MIDDLE_TOKEN" &
-
-# 3. Start TTS Worker (Indic Parler-TTS)
-python3 -m sthira_v2.speech_tts_adapter \
-    --model-dir /opt/models/indic-parler-tts \
-    --port 7301 \
-    --token "$STHIRA_TTS_TOKEN" &
-
-# 4. Start Production Backend
-export STHIRA_ASR_URL="http://127.0.0.1:7101"
-export STHIRA_ASR_TOKEN="$STHIRA_ASR_TOKEN"
-export STHIRA_MIDDLE_URL="http://127.0.0.1:7201"
-export STHIRA_MIDDLE_TOKEN="$STHIRA_MIDDLE_TOKEN"
-export STHIRA_TTS_URL="http://127.0.0.1:7301"
-export STHIRA_TTS_TOKEN="$STHIRA_TTS_TOKEN"
-export STHIRA_DATABASE_DSN="postgres://user:pass@db:5432/sthira_prod?sslmode=verify-full"
-./bin/sthira
-```
+Real inference and supported-language acceptance remain separate from launch/build checks. No instance access, spending or model download was performed by this review.

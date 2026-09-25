@@ -1,5 +1,7 @@
 # Sthira delivery plan
 
+> **2026-09-25 current checkpoint:** [prompt.md section 0.0](prompt.md) supersedes earlier completion claims. C02–C05 are reopened for bounded integration corrections; real instance/model tests remain separate. C06–C09 and Gate B/P8/P9 are not accepted. Preserve the roadmap; prioritize the round-two demo.
+
 Updated 2026-09-19. **Planning baseline; no Go migration or production-readiness claim.** This revision implements the user's production-preparation pivot and subsequent answers. It supersedes the old hackathon roadmap. Historical work stays in Git and [changes.md](changes.md), not the active backlog.
 
 ## Outcome and limits
