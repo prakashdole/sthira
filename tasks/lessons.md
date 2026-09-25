@@ -27,3 +27,4 @@
 - Do not force a bright novelty color into a safety-critical primary control; a calm, high-contrast neutral can carry voice focus while red retains emergency meaning.
 - When a color direction is rejected, change the hue family rather than merely adjusting lightness or saturation of the same treatment.
 - When the user explicitly selects an established color direction, use it cleanly and consistently rather than adding novelty treatments.
+- When a user asks for the original treatment, restore its exact previous token values rather than an approximation of its color family.

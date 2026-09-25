@@ -364,7 +364,7 @@ The earlier claim of absent OpenFreeMap coverage was invalid: the test used an i
 
 ## Voice color refinement — 2026-09-25
 
-- [x] Replace alternate color experiments with a single solid blue Speak surface; retain red emergency separation.
+- [x] Restore the original blue gradient Speak surface; retain red emergency separation.
 - [x] Verify narrow mobile rendering and build.
 
 ### Review — 2026-09-25

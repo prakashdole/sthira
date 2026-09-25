@@ -766,9 +766,9 @@ button:active, a:active { transform: translateY(1px); }
 @media (max-width: 47.99rem) {
   .map-help { min-height: 3.25rem; padding-inline: 1rem; gap: .6rem; color: oklch(98% .01 245); background: oklch(48% .16 27); border-color: oklch(60% .16 27); font-size: .84rem; box-shadow: 0 .8rem 1.7rem oklch(26% .13 27 / .4); }
   .map-help svg { width: 1.15rem; height: 1.15rem; }
-  .dock-action--voice-primary { position: relative; isolation: isolate; overflow: hidden; min-height: 4.6rem; color: oklch(97% .01 245); background: oklch(48% .15 245); border-color: oklch(58% .14 245); box-shadow: 0 .8rem 1.9rem oklch(24% .11 245 / .34); }
-  .dock-action--voice-primary::before { content: ''; position: absolute; z-index: -1; width: 4rem; height: 4rem; background: oklch(86% .09 245 / .22); border-radius: 50%; animation: speak-ripple 2.4s var(--ease-out) infinite; }
-  .dock-action--voice-primary .dock-icon { padding: .35rem; border: 1px solid oklch(97% .01 245 / .28); border-radius: 50%; }
+  .dock-action--voice-primary { position: relative; isolation: isolate; overflow: hidden; min-height: 4.6rem; color: oklch(96% .01 245); background: linear-gradient(135deg, oklch(48% .15 245), oklch(37% .13 245)); border-color: oklch(52% .13 245); box-shadow: 0 .8rem 1.75rem oklch(20% .1 245 / .32); }
+  .dock-action--voice-primary::before { content: ''; position: absolute; z-index: -1; width: 4rem; height: 4rem; background: oklch(80% .08 245 / .2); border-radius: 50%; animation: speak-ripple 2.4s var(--ease-out) infinite; }
+  .dock-action--voice-primary .dock-icon { padding: .35rem; border: 1px solid oklch(96% .01 245 / .28); border-radius: 50%; }
 }
 
 @keyframes speak-ripple { 0%, 100% { transform: scale(.55); opacity: .25; } 50% { transform: scale(1.35); opacity: .7; } }
