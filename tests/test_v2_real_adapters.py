@@ -228,8 +228,12 @@ class TestASRRealAdapter:
         assert lines.count("run:ctc_decoder.onnx") >= 1
         assert lines.index("run:ctc_decoder.onnx") < len(lines)
 
-    def test_transcribe_real_decode_path_no_confidence(self, tmp_path, fake_dir):
+    @pytest.mark.parametrize("vocab_layout", ["mapping", "list"])
+    def test_transcribe_real_decode_path_no_confidence(self, tmp_path, fake_dir, vocab_layout):
         art = _make_asr_artifact(tmp_path)
+        if vocab_layout == "list":
+            (art / "assets" / "vocab.json").write_text(
+                json.dumps({"hi": ["a", "b", "c", "d", "<blk>"]}))
         # argmax path: a, blank(4), b, b, c, d, d -> collapse -> a b? no:
         # [0,4,1,2,3] minus blank -> a,b,c,d -> "abcd" (no spaces)
         res, _, proc = _run(

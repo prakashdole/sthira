@@ -198,6 +198,10 @@ class _ASREngine:
         table = self.vocab[iso]
 
         def _tok(idx: int) -> str:
+            if isinstance(table, list):
+                if not 0 <= idx < len(table):
+                    raise ValueError("decoded token outside artifact vocabulary")
+                return str(table[idx])
             # JSON objects have string keys; the reference decoder
             # indexes by int. Accept either layout without assuming
             # which the (gated) artifact ships.
