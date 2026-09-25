@@ -51,8 +51,13 @@ func main() {
 		Module:  module,
 		Workdir: workdir,
 	})
+	if err := rt.LoadModel(); err != nil {
+		log.Fatalf("failed to load asr adapter: %v", err)
+	}
+	defer rt.Close()
 
 	worker, err := asrworker.NewWorker(asrworker.Config{
+		Inventory:   asrworker.Inventory{AllowedLanguages: rt.SupportedLanguages(), LastScannedAt: time.Now()},
 		Runtime:     rt,
 		QueueDepth:  queueDepth,
 		MaxInFlight: maxInflight,
@@ -70,8 +75,8 @@ func main() {
 	}
 
 	srv, err := asrworker.NewServer(asrworker.ServerConfig{
-		Address:   addr,
-		Token:     tok,
+		Address: addr,
+		Token:   tok,
 	}, worker)
 	if err != nil {
 		log.Fatalf("failed to create asr server: %v", err)

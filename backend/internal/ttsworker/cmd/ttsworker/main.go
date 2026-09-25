@@ -4,7 +4,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +20,10 @@ import (
 )
 
 func main() {
+	// Built-in translations are synthetic fixtures, not authority approval.
+	if os.Getenv("STHIRA_TTS_SYNTHETIC_EXERCISE") != "1" {
+		log.Fatal("built-in template worker requires STHIRA_TTS_SYNTHETIC_EXERCISE=1; operational catalog is not configured")
+	}
 	addr := os.Getenv("STHIRA_TTS_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:8003"
@@ -118,6 +124,33 @@ func main() {
 
 	if err := rt.LoadModel(); err != nil {
 		log.Fatalf("failed to load tts model (failing closed): %v", err)
+	}
+	defer rt.Close()
+	// Generate the finite demo catalog before serving. The request path
+	// remains cache-only and cannot synthesize arbitrary model/user prose.
+	for _, tpl := range defaultTemplates {
+		for _, lang := range rt.Languages() {
+			text, ok := tpl.Translations[lang]
+			if !ok {
+				continue
+			}
+			result, err := rt.Synthesize(ttsworker.RequestContext{DeadlineMillis: time.Now().Add(15 * time.Second).UnixMilli()}, text, lang, rt.Voice(lang))
+			if err != nil || result == nil || result.Empty {
+				log.Fatalf("pre-generate %s/%s: %v", tpl.Key, lang, err)
+			}
+			id := ttsworker.CacheIdentity{
+				Text: text, TemplateKey: string(tpl.Key), TemplateVersion: tpl.Version,
+				SourceVersion: sourceVersion, TemplateSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(text))),
+				Language: lang, ModelRevision: rt.Revision(), VoiceRevision: rt.Voice(lang),
+				SynthesisSettings: ttsworker.SynthesisSettings{SampleRate: rt.NativeSampleRate(), BitDepth: 16, Channels: 1},
+			}
+			if err := id.Validate(); err != nil {
+				log.Fatal(err)
+			}
+			if err := codec.Put(id, result.WavBytes); err != nil {
+				log.Fatal(err)
+			}
+		}
 	}
 
 	var voiceNames []string

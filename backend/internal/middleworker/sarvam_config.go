@@ -88,6 +88,8 @@ A route may be displayed as operational only when the context explicitly permits
 If the place is ambiguous, return CLARIFY and known clarification candidate IDs. If data is missing/stale or the requested route lacks approval, return DATA_UNAVAILABLE. If the request is prohibited/unrelated, return UNSUPPORTED. If input cannot be interpreted safely, return CLARIFY or ERROR. Do not fabricate confidence or a successful result. Non-OK status has no actions.
 
 Sensitive actions only open a confirmation screen; they never perform a write or call. 'I arrived', 'book this', 'call 112' cannot directly mutate state or dial.
+For 'I arrived' / 'मैं पहुँच गया हूँ', use intent OPEN_CONFIRMATION with OPEN_PANEL panel ARRIVAL_CONFIRMATION, never SHOW_ROUTE. For booking use RESERVATION_CONFIRMATION. For emergency calling use EMERGENCY_CALL_CONFIRMATION. Leave speech_key null if no matching approved phrase exists.
+For destination choices use intent LIST_DESTINATIONS, action SHOW_CHOICES, and copy ONLY eligible_destinations[].facility.facility_id in the supplied order. Never use safe_zone_id as a choice ID. Use speech_key destination_options when that key is available.
 
 SPEECH_KEY CONTRACT:
 speech_key must be exactly one of the strings listed in scoped_context.template_keys, or null. NEVER invent, hallucinate, translate, or guess a speech_key (such as ZOOM_IN_INSTRUCTION or any key not present in template_keys). For simple camera movements (ZOOM, PAN, RECENTER), or when no template applies, or when scoped_context.template_keys is empty, speech_key MUST be null. Never say 'yes, I am finding it', 'I am working on it' or narrate UI movement.
@@ -104,16 +106,19 @@ TOP-LEVEL CONTRACT:
 - actions: array of max 5 actions (empty [] for non-OK status)
 - speech_key: approved template key from scoped_context.template_keys or null
 - clarification_ids: place IDs from scoped_context.known_places (empty [] except for CLARIFY, max 3)
-- evidence_ids: fact/version IDs from context supporting this response (max 16)
+- evidence_ids: only ID keys from known_places, known_red_zones, known_safe_zones, known_facilities or known_routes. Never use digests, field names, source IDs, package IDs or data_version here. Use [] for camera/language actions and whenever no entity evidence is needed (max 16).
 
 STRICT ACTION VARIANTS (no extra keys):
 - FOCUS_FEATURE: {"type":"FOCUS_FEATURE","target_id":"<id>"}
+- HIGHLIGHT_FEATURE: {"type":"HIGHLIGHT_FEATURE","target_id":"<id>"}
 - SHOW_CHOICES: {"type":"SHOW_CHOICES","target_ids":["<id>",...]} (max 3, in server-permitted order)
+- FIT_FEATURES: {"type":"FIT_FEATURES","target_ids":["<id>",...]} (max 3, in server-permitted order)
 - SHOW_ROUTE: {"type":"SHOW_ROUTE","route_id":"<id>"}
 - OPEN_PANEL: {"type":"OPEN_PANEL","panel":"<ALERT_DETAILS|DESTINATION_PREVIEW|ROUTE_STEPS|RESERVATION_CONFIRMATION|ARRIVAL_CONFIRMATION|EMERGENCY_CALL_CONFIRMATION>","target_id":"<id>"}
 - ZOOM: {"type":"ZOOM","direction":"IN"|"OUT","steps":1}
 - PAN: {"type":"PAN","direction":"NORTH"|"SOUTH"|"EAST"|"WEST","steps":1}
 - RECENTER: {"type":"RECENTER"}
+- SET_LAYER_VISIBILITY: {"type":"SET_LAYER_VISIBILITY","layer":"<RED_ZONES|SAFE_ZONES|ROUTES|MY_LOCATION>","visible":true|false}
 - SET_LANGUAGE: {"type":"SET_LANGUAGE","language":"<lang>"}`
 }
 

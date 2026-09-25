@@ -52,6 +52,7 @@ func main() {
 	client, err := middleworker.NewClient(middleworker.ClientConfig{
 		BaseURL:    vllmURL,
 		SchemaJSON: middleworker.DefaultModelOutputSchema(),
+		Limits:     middleworker.SarvamLimits(),
 	})
 	if err != nil {
 		log.Fatalf("failed to create middle client: %v", err)

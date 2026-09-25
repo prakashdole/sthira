@@ -375,6 +375,13 @@ func (r *AdapterSubprocessRuntime) Close() error {
 }
 
 // Languages implements Runtime.
+func (r *AdapterSubprocessRuntime) NativeSampleRate() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.sampleRate
+}
+
+// Languages implements Runtime.
 func (r *AdapterSubprocessRuntime) Languages() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()

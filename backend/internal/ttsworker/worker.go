@@ -450,6 +450,12 @@ func (w *Worker) handleJob(j *job) {
 		w.processed.Add(1)
 		return
 	}
+	settings := toWorkerSettings(j.req.Settings)
+	// The real adapter generates at its negotiated native rate; do not
+	// label that waveform with the caller's preferred rate.
+	if rt, ok := w.runtime.(*AdapterSubprocessRuntime); ok {
+		settings.SampleRate = rt.NativeSampleRate()
+	}
 	id := CacheIdentity{
 		Text:              j.req.Text,
 		TemplateKey:       string(j.req.SpeechKey),
@@ -459,7 +465,7 @@ func (w *Worker) handleJob(j *job) {
 		Language:          j.req.Language,
 		ModelRevision:     w.runtime.Revision(),
 		VoiceRevision:     voiceRev,
-		SynthesisSettings: toWorkerSettings(j.req.Settings),
+		SynthesisSettings: settings,
 	}
 	if err := id.Validate(); err != nil {
 		w.emit(j, errorResponse(j.req, StateAudioUnavailable, err.Error()))

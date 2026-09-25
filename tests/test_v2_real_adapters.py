@@ -389,6 +389,9 @@ class _Batch:
     def __init__(self, n):
         self.input_ids = _np.arange(n).reshape(1, n)
         self.attention_mask = _np.ones((1, n))
+    def to(self, device):
+        _log("batch.to:" + device)
+        return self
 
 class FakeTokenizer:
     def __init__(self, kind):
@@ -409,7 +412,11 @@ class ParlerTTSForConditionalGeneration:
         m = ParlerTTSForConditionalGeneration()
         m.config = _Cfg(sr)
         return m
-    def __init__(self): pass
+    def __init__(self): self.device = "cpu"
+    def to(self, device):
+        _log("model.to:" + device)
+        self.device = device
+        return self
     def eval(self): _log("eval")
     def generate(self, input_ids=None, attention_mask=None,
                  prompt_input_ids=None, prompt_attention_mask=None,
@@ -454,20 +461,23 @@ class TestTTSRealAdapter:
             e.update(extra)
         return e
 
-    def test_load_warm_ready_ordering_and_native_rate(self, tmp_path, fake_dir):
+    @pytest.mark.parametrize("device", ["cpu", "cuda:0"])
+    def test_load_warm_ready_ordering_and_native_rate(self, tmp_path, fake_dir, device):
         (fake_dir / "parler_tts.py").write_text(FAKE_TTS_MODEL)
         (fake_dir / "transformers.py").write_text(
             "from parler_tts import AutoTokenizer\n")
         art, voices = _make_tts_artifact(tmp_path)
         res, trace, proc = _run(
             "sthira_v2.speech_tts_adapter", [{"op": "ready"}],
-            tmp_path, fake_dir, self._env(art, voices))
+            tmp_path, fake_dir, self._env(art, voices, {"STHIRA_TTS_DEVICE": device}))
         ready = res[0]
         assert ready["status"] == "ready", ready
         assert ready["sample_rate"] == 44100
         assert {"language": "hi-IN", "name": "Rohit",
                 "revision": "approved-v1"} in ready["voices"]
         lines = open(trace).read().splitlines()
+        assert lines.index("model.to:" + device) < lines.index("generate")
+        assert lines.count("batch.to:" + device) == 2
         assert lines.index("load:parler") < lines.index("generate")
         assert lines.index("generate") < len(lines)  # warm-up before ready
 
