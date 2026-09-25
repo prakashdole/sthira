@@ -2,7 +2,7 @@
 
 2026-09-25. Baseline inspected: `ef20c4a`, branch `CLEAN`.
 
-**Status: NOT_RUN against the instance.** User reports all three models uploaded and available. Connection details, actual serving commands, model revisions and real inference responses still need verification. Uploaded weights, `/health` success and mock-worker tests are not inference acceptance.
+**Status: PARTIAL / FAIL for complete voice acceptance.** Real bounded probes now ran; see [live-inference-2026-09-25.md](evidence/live-inference-2026-09-25.md). ASR vocabulary decoding was corrected, Parler generated audio, but Sarvam action output and ASR silence handling failed acceptance. Browser integration remains blocked. Uploaded weights, `/health` success and mock-worker tests are not inference acceptance.
 
 Use this checklist alongside `prompt.md` section 0.0. Preserve production gates and use an isolated, visibly synthetic exercise database. Do not restart an existing model service, download weights, create another instance, change firewall rules or stop the paid instance as part of a probe. Coordinate any necessary disruptive step with the owner. Never store credentials, raw voice recordings or large logs in Git.
 
