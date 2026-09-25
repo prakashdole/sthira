@@ -15,7 +15,7 @@ import '@fontsource/noto-sans-devanagari/700.css';
 
 type RuntimeState = 'checking' | 'demo' | 'blocked' | 'offline';
 type VoiceStatus = { data?: { ready?: boolean; supported_languages?: string[] } };
-type OnboardingStep = 'language' | 'location' | null;
+type OnboardingStep = 'starting' | 'language' | 'location' | null;
 type LocationStatus = 'idle' | 'checking' | 'ready' | 'unavailable';
 
 const icons: Record<string, string> = {
@@ -40,7 +40,7 @@ function savedOnboardingStep(): OnboardingStep {
   // Setup is deliberately shown on every fresh app load. In an emergency, this
   // keeps the spoken language and location choice visible instead of hiding them
   // behind a previous browser session.
-  return 'language';
+  return 'starting';
 }
 
 let language: Language = savedLanguage();
@@ -109,17 +109,18 @@ function requestLocation() {
 function renderOnboarding() {
   const t = words[language];
   document.documentElement.lang = language === 'ML' ? 'ml' : language === 'HI' ? 'hi' : 'en';
+  const startingStep = onboardingStep === 'starting';
   const languageStep = onboardingStep === 'language';
   document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <main class="onboarding" aria-labelledby="onboarding-title">
       <section class="onboarding-card">
         <a class="brand onboarding-brand" href="/" aria-label="${t.brandHome}"><span class="brand-mark">സ്</span><span><strong>Sthira</strong><small>${t.tagline}</small></span></a>
         <div class="onboarding-copy">
-          <span>${t.onboardingKicker}</span>
-          <h1 id="onboarding-title">${languageStep ? t.onboardingLanguageTitle : t.onboardingLocationTitle}</h1>
-          <p>${languageStep ? t.onboardingLanguageBody : t.onboardingLocationBody}</p>
+          <span>${startingStep ? t.startingVoice : t.onboardingKicker}</span>
+          <h1 id="onboarding-title">${startingStep ? t.startingVoice : languageStep ? t.onboardingLanguageTitle : t.onboardingLocationTitle}</h1>
+          <p>${startingStep ? t.groundingLine : languageStep ? t.onboardingLanguageBody : t.onboardingLocationBody}</p>
         </div>
-        ${languageStep ? `
+        ${startingStep ? `<button class="onboarding-primary" type="button" data-action="onboarding-start">${icons.mic}${t.beginVoice}</button>` : languageStep ? `
           <div class="language-options" role="group" aria-label="${t.chooseLanguage}">
             ${(['EN', 'ML', 'HI'] as Language[]).map((code) => `<button class="${language === code ? 'is-active' : ''}" type="button" data-onboarding-language="${code}" aria-pressed="${language === code}"><strong>${code}</strong><span>${code === 'EN' ? 'English' : code === 'ML' ? 'മലയാളം' : 'हिन्दी'}</span></button>`).join('')}
           </div>
@@ -138,6 +139,7 @@ function renderOnboarding() {
     try { localStorage.setItem('sthira-language', language); } catch { /* Continue without storage. */ }
     renderOnboarding();
   }));
+  document.querySelector<HTMLButtonElement>('[data-action="onboarding-start"]')?.addEventListener('click', () => { onboardingStep = 'language'; renderOnboarding(); });
   document.querySelector<HTMLButtonElement>('[data-action="onboarding-language-next"]')?.addEventListener('click', () => { onboardingStep = 'location'; renderOnboarding(); });
   document.querySelector<HTMLButtonElement>('[data-action="location-request"]')?.addEventListener('click', requestLocation);
   document.querySelectorAll<HTMLButtonElement>('[data-action="onboarding-complete"]').forEach((button) => button.addEventListener('click', completeOnboarding));
@@ -176,15 +178,16 @@ function render() {
         <section class="map-surface" aria-label="${t.mapAria}">
           <div id="map-canvas"></div>
           <div class="map-loading" role="status">${mapTilted ? t.loadingTerrain : t.mapLoading}</div>
+          <button class="map-help" type="button" data-action="assist-open">${icons.phone}<span>${t.callHelp}</span></button>
           <div class="map-controls"><div class="map-toolbar" aria-label="${t.mapTools}"><button class="${mapTilted ? 'is-active' : ''}" type="button" data-action="toggle-3d" aria-label="${t.map3d}" aria-pressed="${mapTilted}"><span class="map-toolbar__perspective-label">${t.map3d}</span><span class="map-toolbar__perspective-short" aria-hidden="true">3D</span></button><button type="button" data-action="recenter" aria-label="${t.myLocation}">${icons.locate}<span>${t.myLocation}</span></button><button class="${layersOpen ? 'is-active' : ''}" type="button" data-action="toggle-layers" aria-label="${t.mapLayers}" aria-expanded="${layersOpen}">${icons.info}<span>${t.mapLayers}</span></button></div>${layersOpen ? `<div class="layer-switcher" aria-label="${t.mapLayers}"><button class="zone-toggle zone-toggle--danger ${redZonesVisible ? 'is-active' : ''}" type="button" data-action="toggle-red-zones" aria-pressed="${redZonesVisible}"><i></i><span>${t.redZones}</span></button><button class="zone-toggle zone-toggle--relocation ${relocationZonesVisible ? 'is-active' : ''}" type="button" data-action="toggle-relocation-zones" aria-pressed="${relocationZonesVisible}"><i></i><span>${t.relocationZones}</span></button></div>` : ''}</div>
           <div class="map-key"><span class="${redZonesVisible ? '' : 'is-muted'}"><i class="hazard-key"></i>${t.redZone}</span><span><i class="route-key"></i>${t.approvedRoute}</span><span class="${relocationZonesVisible ? '' : 'is-muted'}"><i class="relocation-key"></i>${t.relocationZone}</span><span><i class="shelter-key"></i>${t.safeShelter}</span></div>
           <div class="map-disclaimer">${t.imagery} <a href="https://www.esri.com/" target="_blank" rel="noreferrer">© Esri</a> · ${t.buildingContext} · ${t.overlays}</div>
-          <nav class="mobile-safety-dock" aria-label="${t.emergencyAssistance}"><button class="dock-action dock-action--emergency" type="button" data-action="assist-open"><span class="dock-icon" aria-hidden="true">${icons.phone}</span><span>${t.emergencyCall}</span></button><button class="dock-action dock-action--voice ${voiceListening ? 'is-listening' : ''}" type="button" data-action="voice-open" aria-expanded="${voiceOpen}"><span class="dock-icon" aria-hidden="true">${icons.mic}</span><span>${t.voicePrompt}</span></button><button class="dock-action" type="button" data-action="start-route"><span class="dock-icon" aria-hidden="true">${icons.route}</span><span>${routeStarted ? t.routeActive : t.routeShort}</span></button></nav>
+          <nav class="mobile-safety-dock mobile-safety-dock--voice" aria-label="${t.voicePrompt}"><button class="dock-action dock-action--voice dock-action--voice-primary ${voiceListening ? 'is-listening' : ''}" type="button" data-action="voice-open" aria-expanded="${voiceOpen}"><span class="dock-icon" aria-hidden="true">${icons.mic}</span><span>${t.voicePrompt}</span></button></nav>
         </section>
       </main>
       <aside class="voice-console ${voiceOpen ? 'is-open' : ''}" role="dialog" aria-modal="false" aria-labelledby="voice-title" ${voiceOpen ? '' : 'hidden'}>
         <div class="voice-head"><div><span>${t.assistant}</span><h2 id="voice-title">${t.askSituation}</h2></div><button class="icon-button" type="button" data-action="voice-close" aria-label="${t.closeAssistant}">${icons.close}</button></div>
-        <div class="voice-stage ${voiceListening ? 'is-listening' : ''}"><div class="voice-orb" aria-hidden="true">${icons.mic}<i></i><i></i><i></i></div><div><strong>${voiceListening ? t.listening : commandPending ? t.checkingGuidance : t.ready}</strong><span>${voiceListening ? t.speakNaturally : t[voiceFeedbackKey]}</span></div></div>
+        <div class="voice-stage ${voiceListening ? 'is-listening' : ''}"><div class="voice-orb" aria-hidden="true">${icons.mic}<i></i><i></i><i></i></div><div><strong>${voiceListening ? t.listening : commandPending ? t.checkingGuidance : t.ready}</strong><span>${t.speakNaturally}</span></div></div>
         ${voiceTranscript || commandPending || commandResponse !== words[language].voiceReady ? `<div class="command-result" aria-live="polite" aria-busy="${commandPending}"><span>${t.voiceResult}</span><p>${escapeHtml(commandResponse)}</p>${voiceTranscript ? `<small>${t.you}: ${escapeHtml(voiceTranscript)}</small>` : ''}${commandPending ? `<div class="command-thinking"><i></i><i></i><i></i><span>${t.checkingExercise}</span></div>` : ''}</div>` : ''}
         ${commandError ? `<p class="command-error" role="alert">${escapeHtml(commandError)}</p>` : ''}
         <div class="voice-suggestions" aria-label="${t.suggestedQuestions}">${commandSuggestions.map((suggestion) => `<button type="button" data-command="${escapeHtml(suggestion)}">${escapeHtml(suggestion)}</button>`).join('')}</div>
@@ -194,7 +197,7 @@ function render() {
       </aside>
       ${directionsOpen ? `<aside class="side-sheet" aria-labelledby="directions-title"><div class="sheet-head"><div><span>${t.routeKicker}</span><h2 id="directions-title">${t.routeTitle}</h2></div><button class="icon-button" data-action="directions-close" aria-label="${t.closeDirections}">${icons.close}</button></div><ol><li><b>1</b><p>${t.routeStep1}<small>${t.routeStep1Note}</small></p></li><li><b>2</b><p>${t.routeStep2}<small>${t.routeStep2Note}</small></p></li><li><b>3</b><p>${t.routeStep3}<small>${t.routeStep3Note}</small></p></li></ol></aside>` : ''}
       ${detailsOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.sourceFreshness}</span><h2>${t.alertDetails}</h2></div><button class="icon-button" data-action="details-close" aria-label="${t.closeDetails}">${icons.close}</button></div><p>${t.demoNotice}</p><dl><div><dt>${t.authorityFormat}</dt><dd>NDMA SACHET / CAP</dd></div><div><dt>${t.issued}</dt><dd>11 Sep 2026, 4:00 PM</dd></div><div><dt>${t.expires}</dt><dd>11 Sep 2026, 6:00 PM</dd></div><div><dt>${t.backend}</dt><dd>${runtimeCopy()}</dd></div></dl></dialog>` : ''}
-      ${assistanceOpen ? `<dialog class="modal modal--critical" open><div class="sheet-head"><div><span>${t.emergencyAssistance}</span><h2>${t.call112Question}</h2></div><button class="icon-button" data-action="assist-close" aria-label="${t.close}">${icons.close}</button></div><p>${t.assistNotice}</p><a class="primary-action" href="tel:112">${t.call112Now}</a></dialog>` : ''}
+      ${assistanceOpen ? `<dialog class="modal modal--critical" open><div class="sheet-head"><div><span>${t.emergencyAssistance}</span><h2>${t.callHelp}</h2></div><button class="icon-button" data-action="assist-close" aria-label="${t.close}">${icons.close}</button></div><p>${t.assistNotice}</p><div class="help-actions"><a class="primary-action" href="tel:112">${t.callRescue}</a><a class="primary-action" href="tel:112">${t.callAmbulance}</a><a class="primary-action" href="tel:112">${t.call112Now}</a></div></dialog>` : ''}
       ${audioOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.listen}</span><h2>${t.approvedAudioUnavailable}</h2></div><button class="icon-button" data-action="audio-close" aria-label="${t.close}">${icons.close}</button></div><p>${t.summary}</p></dialog>` : ''}
       ${islOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.isl}</span><h2>${t.islTitle}</h2></div><button class="icon-button" data-action="isl-close" aria-label="${t.close}">${icons.close}</button></div><p>${t.islPending}</p><p>${t.summary}</p></dialog>` : ''}
       <div class="toast" role="status" aria-live="polite" hidden></div>
@@ -220,7 +223,7 @@ async function initMap(renderVersion: number) {
     ] } },
     route: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: mapData.route }, properties: {} } },
     roads: { type: 'geojson', data: { type: 'FeatureCollection', features: mapData.roads.map((coordinates) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates }, properties: {} })) } },
-    places: { type: 'geojson', data: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: mapData.user }, properties: { label: t.userMapLabel, kind: 'user' } }, { type: 'Feature', geometry: { type: 'Point', coordinates: mapData.shelter }, properties: { label: t.shelterMapLabel, kind: 'shelter' } }, ...(deviceLocation ? [{ type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: deviceLocation }, properties: { label: t.deviceMapLabel, kind: 'device' } }] : [])] } },
+    places: { type: 'geojson', data: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: mapData.user }, properties: { label: t.userMapLabel, kind: 'user' } }, { type: 'Feature', geometry: { type: 'Point', coordinates: mapData.shelter }, properties: { label: t.shelterMapLabel, kind: 'shelter' } }, { type: 'Feature', geometry: { type: 'Point', coordinates: mapData.hospital }, properties: { label: t.hospitalMapLabel, kind: 'hospital' } }, ...(deviceLocation ? [{ type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: deviceLocation }, properties: { label: t.deviceMapLabel, kind: 'device' } }] : [])] } },
   }, layers: [
     { id: 'background', type: 'background', paint: { 'background-color': mapColor('--map-color-surface') } },
     { id: 'basemap', type: 'raster', source: 'basemap', paint: { 'raster-opacity': 0.92, 'raster-saturation': -0.12, 'raster-contrast': 0.14, 'raster-brightness-max': 0.82 } },
@@ -235,9 +238,12 @@ async function initMap(renderVersion: number) {
     { id: 'approved-route', type: 'line', source: 'route', paint: { 'line-color': mapColor('--map-color-accent'), 'line-width': 5, 'line-opacity': 0.98 } },
     { id: 'route-motion', type: 'line', source: 'route', paint: { 'line-color': mapColor('--map-color-paper'), 'line-width': 2, 'line-opacity': routeStarted ? 0.9 : 0, 'line-dasharray': [0.2, 2.4, 1.6] } },
     { id: 'shelter-pulse', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'shelter'], paint: { 'circle-radius': 15, 'circle-color': mapColor('--map-color-success'), 'circle-opacity': 0.24 } },
+    { id: 'hospital-pulse', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'hospital'], layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'circle-radius': 16, 'circle-color': mapColor('--map-color-paper'), 'circle-opacity': 0.28 } },
     { id: 'device-pulse', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'device'], paint: { 'circle-radius': 17, 'circle-color': mapColor('--map-color-accent'), 'circle-opacity': 0 } },
-    { id: 'place-points', type: 'circle', source: 'places', paint: { 'circle-radius': ['case', ['==', ['get', 'kind'], 'device'], 7, 8], 'circle-color': ['case', ['==', ['get', 'kind'], 'device'], mapColor('--map-color-paper'), mapColor('--map-color-accent')], 'circle-stroke-color': ['case', ['==', ['get', 'kind'], 'device'], mapColor('--map-color-accent'), mapColor('--map-color-paper')], 'circle-stroke-width': 3 } },
-    { id: 'place-labels', type: 'symbol', source: 'places', filter: ['!=', ['get', 'kind'], 'device'], layout: { 'text-field': ['get', 'label'], 'text-size': 13, 'text-offset': [0, 1.5], 'text-anchor': 'top' }, paint: { 'text-color': mapColor('--map-color-paper'), 'text-halo-color': mapColor('--map-color-surface'), 'text-halo-width': 2 } },
+    { id: 'place-points', type: 'circle', source: 'places', filter: ['!=', ['get', 'kind'], 'hospital'], paint: { 'circle-radius': ['case', ['==', ['get', 'kind'], 'device'], 7, 8], 'circle-color': ['case', ['==', ['get', 'kind'], 'device'], mapColor('--map-color-paper'), mapColor('--map-color-accent')], 'circle-stroke-color': ['case', ['==', ['get', 'kind'], 'device'], mapColor('--map-color-accent'), mapColor('--map-color-paper')], 'circle-stroke-width': 3 } },
+    { id: 'hospital-point', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'hospital'], layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'circle-radius': 8, 'circle-color': mapColor('--map-color-paper'), 'circle-stroke-color': mapColor('--map-color-success'), 'circle-stroke-width': 3 } },
+    { id: 'place-labels', type: 'symbol', source: 'places', filter: ['all', ['!=', ['get', 'kind'], 'device'], ['!=', ['get', 'kind'], 'hospital']], layout: { 'text-field': ['get', 'label'], 'text-size': 13, 'text-offset': [0, 1.5], 'text-anchor': 'top' }, paint: { 'text-color': mapColor('--map-color-paper'), 'text-halo-color': mapColor('--map-color-surface'), 'text-halo-width': 2 } },
+    { id: 'hospital-label', type: 'symbol', source: 'places', filter: ['==', ['get', 'kind'], 'hospital'], layout: { visibility: relocationZonesVisible ? 'visible' : 'none', 'text-field': ['get', 'label'], 'text-size': 13, 'text-offset': [0, 1.5], 'text-anchor': 'top' }, paint: { 'text-color': mapColor('--map-color-paper'), 'text-halo-color': mapColor('--map-color-surface'), 'text-halo-width': 2 } },
   ] } });
   perspectiveCamera = null;
   map.on('idle', () => {

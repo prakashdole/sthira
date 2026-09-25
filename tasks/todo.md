@@ -115,6 +115,19 @@
 - Red zones use a strong dashed perimeter and red atmospheric pulse. Relocation zones use a softer green dashed boundary and slower pulse. Both remain synthetic exercise overlays, not live forecasts.
 - Narrow-browser confirmation shows the red-zone boundary and layer toggle. Animation is bypassed when reduced motion is active. `npm run build`, geometry tests (2 passed), and `git diff --check` pass.
 
+## Current frontend task - voice-first shell
+
+- [x] Add startup screen, single bottom Speak action, top-left Call Help, and three call choices.
+- [x] Remove consumer-facing local-model wording from the voice surface.
+- [x] Add explicitly synthetic hospital marker to the synthetic relocation area.
+- [ ] Add spoken language selection once backend supports language detection before transcription.
+
+### Review - 2026-09-25
+
+- Voice-first shell now starts before language and location setup, and map controls use one large Speak action. Call Help exposes rescue, ambulance, and 112 handoffs.
+- The existing backend transcriber requires a preselected Malayalam or Hindi language and rejects English microphone capture, so spoken language selection cannot be truthfully connected yet.
+- Hospital data is absent from the current synthetic package. The rendered point is named `Synthetic hospital`; replace it with approved backend coordinates before operational use. Build and geometry tests (2 passed) pass.
+
 
 ## Current frontend task - 3D map perspective
 

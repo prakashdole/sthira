@@ -738,6 +738,14 @@ button:active, a:active { transform: translateY(1px); }
 
 /* Component contract: dock icons are bare; sheets are rounded; route is a page. */
 @media (max-width: 47.99rem) {
+  .map-help { position: absolute; z-index: var(--z-raised); inset: var(--space-sm) auto auto var(--space-sm); display: inline-flex; align-items: center; gap: .45rem; min-height: 2.55rem; padding-inline: .8rem; color: oklch(96% .01 245); background: oklch(22% .03 250 / .96); border: 1px solid oklch(82% .02 245 / .16); border-radius: .7rem; font-size: .72rem; font-weight: 800; box-shadow: 0 .65rem 1.4rem oklch(8% .02 250 / .28); }
+  .map-help svg { width: .95rem; height: .95rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+  .mobile-safety-dock--voice { grid-template-columns: 1fr; inset-inline: var(--space-sm); }
+  .dock-action--voice-primary { min-height: 4.25rem; font-size: .9rem; color: oklch(96% .01 245); background: oklch(42% .13 245); border-color: oklch(52% .13 245); box-shadow: 0 .8rem 1.75rem oklch(20% .1 245 / .32); }
+  .dock-action--voice-primary .dock-icon, .dock-action--voice-primary .dock-icon svg { width: 1.25rem; height: 1.25rem; }
+  .help-actions { display: grid; gap: .6rem; margin-block-start: 1rem; }
+  .modal--critical .help-actions .primary-action { justify-content: center; }
+
   .dock-icon { display: grid; place-items: center; width: 1.1rem; height: 1.1rem; background: transparent; border: 0; border-radius: 0; }
   .dock-icon svg { width: 1.05rem; height: 1.05rem; }
 
