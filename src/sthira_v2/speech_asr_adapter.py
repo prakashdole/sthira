@@ -175,13 +175,23 @@ class _ASREngine:
                 self.iso_to_bcp47[iso] = tag
         self.languages = sorted(self.iso_to_bcp47.values())
 
-    def decode(self, samples: list[float], sample_rate: int, lang_bcp47: str) -> dict[str, Any]:
+    def decode(self, samples: list[float], sample_rate: int, lang_bcp47: str, is_warmup: bool = False) -> dict[str, Any]:
         import numpy as np
+        import math
         iso = next((k for k, v in self.iso_to_bcp47.items() if v == lang_bcp47), None)
         if iso is None:
             return {"error": f"language {lang_bcp47!r} not in loaded+approved {self.languages}"}
         if sample_rate != TARGET_SAMPLE_RATE:
             return {"error": f"sample_rate {sample_rate} not supported; adapter requires {TARGET_SAMPLE_RATE} Hz"}
+        if len(samples) == 0:
+            return {"text": "", "confidence": None}
+        for s in samples:
+            if not math.isfinite(s):
+                return {"error": "audio contains non-finite samples"}
+        if not is_warmup and _is_exact_silence(samples):
+            # Suppress exact/negligible digital silence without an aggressive energy threshold.
+            # Preserves quiet legitimate speech; noisy/non-speech detection remains explicitly unverified.
+            return {"text": "", "confidence": None}
         import torch
         wav = torch.from_numpy(np.asarray(samples, dtype="float32")).reshape(1, -1)
         audio_signal, length = self.preprocessor(input_signal=wav, length=torch.tensor([wav.shape[-1]]))
@@ -213,6 +223,18 @@ class _ASREngine:
         text = text.replace("▁", " ").strip()
         # The model returns no score; confidence stays unknown.
         return {"text": text, "confidence": None}
+
+
+def _is_exact_silence(samples: list[float]) -> bool:
+    """Exact/negligible silence check (abs(s) <= 1e-6).
+
+    Preserves quiet legitimate speech by avoiding an aggressive energy threshold.
+    Noisy/non-speech detection remains explicitly unverified without a verified VAD model.
+    """
+    for s in samples:
+        if abs(s) > 1e-6:
+            return False
+    return True
 
 
 def _discover_io(session, expected_in: tuple[str, ...], expected_out: tuple[str, ...]) -> None:
@@ -277,9 +299,10 @@ def _try_load() -> tuple[_ASREngine | None, str]:
             return None, ("no approved language is present in the artifact "
                           f"(approved={_approved_languages()}, artifact vocab keys={sorted(vocab)[:8]}…)")
         # Bounded warm-up: 0.16 s of zeros through the full graph.
+        # is_warmup=True ensures the forward inference path is fully exercised.
         import numpy as np
         warm = np.zeros(int(TARGET_SAMPLE_RATE * 0.16), dtype="float32").tolist()
-        engine.decode(warm, TARGET_SAMPLE_RATE, engine.languages[0])
+        engine.decode(warm, TARGET_SAMPLE_RATE, engine.languages[0], is_warmup=True)
     except Exception as exc:  # malformed weights, IO drift, torch/ONNX errors
         return None, f"artifact load/warm-up failed: {type(exc).__name__}: {exc}"
     elapsed = time.monotonic() - started
@@ -339,11 +362,19 @@ def _handle_transcribe(msg: dict[str, Any], engine: _ASREngine | None, reason: s
     if len(raw) % 4 != 0:
         return {"request_id": rid, "error": "samples_b64 byte length not multiple of 4"}
     n = len(raw) // 4
+    if n == 0:
+        return {
+            "request_id": rid,
+            "text": "",
+            "confidence": None,
+            "alternatives": [],
+            "duration_secs": 0.0,
+        }
     samples = list(struct.unpack("<%df" % n, raw))
     if n > 320000:  # 20 s @ 16 kHz, the Go bounded-input ceiling
         return {"request_id": rid, "error": "decoded samples exceed limit"}
     lang = msg.get("language") or ""
-    result = engine.decode(samples, int(msg.get("sample_rate", 0) or 0), lang)
+    result = engine.decode(samples, int(msg.get("sample_rate", 0) or 0), lang, is_warmup=False)
     if "error" in result:
         return {"request_id": rid, "error": result["error"]}
     return {

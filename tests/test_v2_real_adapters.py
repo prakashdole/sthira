@@ -294,6 +294,68 @@ class TestASRRealAdapter:
              "STHIRA_ASR_APPROVED_LANGUAGES": "hi-IN"})
         assert "not in loaded+approved" in res[0]["error"]
 
+    def test_transcribe_exact_silence_produces_empty_text(self, tmp_path, fake_dir):
+        art = _make_asr_artifact(tmp_path)
+        # 1 second of exact silence (16000 float32 zeros).
+        silence_b64 = base64.b64encode(struct.pack("<%df" % 16000, *([0.0] * 16000))).decode("ascii")
+        res, _, _ = _run(
+            "sthira_v2.speech_asr_adapter",
+            [{"op": "transcribe", "request_id": "R-silence",
+              "samples_b64": silence_b64, "sample_rate": 16000,
+              "language": "hi-IN"}],
+            tmp_path, fake_dir,
+            {"STHIRA_ASR_ARTIFACT_DIR": str(art),
+             "STHIRA_FAKE_CTC_ARGMAX": "[0]"})
+        tr = res[0]
+        assert tr["request_id"] == "R-silence"
+        assert tr["text"] == "", f"silence must produce empty text, got {tr.get('text')!r}"
+        assert tr["confidence"] is None
+
+    def test_transcribe_empty_input_produces_empty_text(self, tmp_path, fake_dir):
+        art = _make_asr_artifact(tmp_path)
+        res, _, _ = _run(
+            "sthira_v2.speech_asr_adapter",
+            [{"op": "transcribe", "request_id": "R-empty",
+              "samples_b64": "", "sample_rate": 16000,
+              "language": "hi-IN"}],
+            tmp_path, fake_dir,
+            {"STHIRA_ASR_ARTIFACT_DIR": str(art)})
+        tr = res[0]
+        assert tr["request_id"] == "R-empty"
+        assert tr["text"] == ""
+        assert tr["confidence"] is None
+
+    def test_transcribe_nonfinite_fails_safely(self, tmp_path, fake_dir):
+        art = _make_asr_artifact(tmp_path)
+        nan_b64 = base64.b64encode(struct.pack("<f", float("nan"))).decode("ascii")
+        res, _, _ = _run(
+            "sthira_v2.speech_asr_adapter",
+            [{"op": "transcribe", "request_id": "R-nan",
+              "samples_b64": nan_b64, "sample_rate": 16000,
+              "language": "hi-IN"}],
+            tmp_path, fake_dir,
+            {"STHIRA_ASR_ARTIFACT_DIR": str(art)})
+        tr = res[0]
+        assert tr["request_id"] == "R-nan"
+        assert "non-finite" in tr.get("error", "")
+
+    def test_transcribe_quiet_speech_preserved(self, tmp_path, fake_dir):
+        art = _make_asr_artifact(tmp_path)
+        # Low amplitude signal (0.001) is above silence epsilon (1e-6) and must not be suppressed.
+        quiet_b64 = base64.b64encode(struct.pack("<8f", *([0.001] * 8))).decode("ascii")
+        res, _, _ = _run(
+            "sthira_v2.speech_asr_adapter",
+            [{"op": "transcribe", "request_id": "R-quiet",
+              "samples_b64": quiet_b64, "sample_rate": 16000,
+              "language": "hi-IN"}],
+            tmp_path, fake_dir,
+            {"STHIRA_ASR_ARTIFACT_DIR": str(art),
+             "STHIRA_FAKE_CTC_ARGMAX": "[0]"})
+        tr = res[0]
+        assert tr["request_id"] == "R-quiet"
+        assert tr["text"] == "a"
+
+
 
 # ---------------- TTS fakes ----------------
 

@@ -394,13 +394,32 @@ func resampleLinear(samples []float32, srcRate, dstRate int) []float32 {
 	return out
 }
 
-// SilenceDetector reports whether the buffer is all-zero or
-// numerically negligible. Used by the stub runtime only to produce
-// a "no speech detected" response when silence is the entire input.
-// This is a band-aid for the stub path; a real runtime performs its
-// own silence / VAD detection and would never go through this.
-func SilenceDetector(samples []float32) bool {
+// IsFinite reports whether all samples in the buffer are finite numbers
+// (neither NaN nor +/-Inf).
+func IsFinite(samples []float32) bool {
 	for _, s := range samples {
+		if math.IsNaN(float64(s)) || math.IsInf(float64(s), 0) {
+			return false
+		}
+	}
+	return true
+}
+
+// SilenceDetector reports whether the buffer is all-zero or
+// numerically negligible (abs(s) <= 1e-6). Non-finite samples return false
+// so they are caught by validity checks.
+//
+// This suppresses exact and near-zero digital silence without an aggressive
+// energy threshold, preserving quiet legitimate speech. Noisy or non-speech
+// acoustic detection remains explicitly unverified without a verified VAD model.
+func SilenceDetector(samples []float32) bool {
+	if len(samples) == 0 {
+		return true
+	}
+	for _, s := range samples {
+		if math.IsNaN(float64(s)) || math.IsInf(float64(s), 0) {
+			return false
+		}
 		if math.Abs(float64(s)) > 1e-6 {
 			return false
 		}

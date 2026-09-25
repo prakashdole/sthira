@@ -174,6 +174,27 @@ func (o *Orchestrator) Process(ctx context.Context, req contracts.PipelineReques
 		return o.fail(id, scoped.DataVersion, err)
 	}
 
+	if strings.TrimSpace(asrResp.Text) == "" {
+		// Empty/all-zero input must not become a successful spoken command.
+		// Return CLARIFY with no actions.
+		proposal := contracts.ModelOutput{
+			SchemaVersion:    contracts.ModelSchemaVersion,
+			RequestID:        string(id),
+			DataVersion:      scoped.DataVersion,
+			Status:           contracts.StatusClarify,
+			Language:         req.Language,
+			Actions:          []contracts.Action{},
+			ClarificationIDs: []string{},
+			EvidenceIDs:      []string{},
+		}
+		return PipelineOutput{
+			RequestID:         id,
+			DataVersion:       scoped.DataVersion,
+			State:             contracts.PipelineClarify,
+			ValidatedProposal: proposal,
+		}, nil
+	}
+
 	// 4. STAGE: MIDDLE (typed proposal).
 	middleResp, err := o.stageMiddle(runCtx, id, scoped, asrResp, req)
 	if err != nil {

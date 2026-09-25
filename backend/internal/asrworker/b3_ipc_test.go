@@ -347,10 +347,14 @@ func TestB3_ASR_LargeValidAudioAccepted(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = rt.Close() })
 
+	largeSamples := make([]float32, 22050*12)
+	for i := range largeSamples {
+		largeSamples[i] = 0.01 // non-silent so SilenceDetector does not short-circuit
+	}
 	res, err := rt.Transcribe(context.Background(), TranscribeRequest{
 		RequestID:  "R-large",
 		Language:   "hi-IN",
-		Samples:    make([]float32, 22050*12),
+		Samples:    largeSamples,
 		SampleRate: 22050,
 	})
 	if err != nil {

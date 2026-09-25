@@ -405,6 +405,11 @@ func (s *Server) handleTranscribe(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if !IsFinite(decoded.Samples) {
+		WipeBuffer(decoded.Samples)
+		writeTypedError(w, req.RequestID, req.Language, "audio contains non-finite samples")
+		return
+	}
 	// Build a request with the samples. We will wipe after the call.
 	deadline := time.Now().Add(time.Duration(req.DeadlineMillis) * time.Millisecond)
 	tr := TranscribeRequest{

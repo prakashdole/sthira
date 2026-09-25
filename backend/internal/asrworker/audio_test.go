@@ -332,3 +332,41 @@ func TestWipeBuffer_ZerosAll(t *testing.T) {
 		}
 	}
 }
+
+// TestSilenceDetector_ExactAndQuiet tests exact silence vs quiet speech vs non-finite samples.
+func TestSilenceDetector_ExactAndQuiet(t *testing.T) {
+	if !SilenceDetector(nil) {
+		t.Errorf("nil samples must be detected as silence")
+	}
+	if !SilenceDetector([]float32{}) {
+		t.Errorf("empty samples must be detected as silence")
+	}
+	if !SilenceDetector([]float32{0, 0, 0, 1e-7, -1e-7}) {
+		t.Errorf("negligible samples (<= 1e-6) must be detected as silence")
+	}
+	if SilenceDetector([]float32{0.001}) {
+		t.Errorf("quiet speech (0.001 > 1e-6) must NOT be detected as silence")
+	}
+	if SilenceDetector([]float32{float32(math.NaN())}) {
+		t.Errorf("NaN must NOT be detected as silence")
+	}
+	if SilenceDetector([]float32{float32(math.Inf(1))}) {
+		t.Errorf("+Inf must NOT be detected as silence")
+	}
+}
+
+// TestIsFinite_ValidatesSamples checks that NaN and Inf are detected.
+func TestIsFinite_ValidatesSamples(t *testing.T) {
+	if !IsFinite([]float32{0.0, -0.5, 0.5, 1.0}) {
+		t.Errorf("normal samples must be finite")
+	}
+	if IsFinite([]float32{0.0, float32(math.NaN())}) {
+		t.Errorf("NaN must not be finite")
+	}
+	if IsFinite([]float32{float32(math.Inf(1)), 0.0}) {
+		t.Errorf("+Inf must not be finite")
+	}
+	if IsFinite([]float32{float32(math.Inf(-1)), 0.0}) {
+		t.Errorf("-Inf must not be finite")
+	}
+}

@@ -127,6 +127,45 @@ func TestProcess_AudioPathCallsASR(t *testing.T) {
 	}
 }
 
+// TestProcess_SilenceOrEmptyTranscript_ReturnsClarifyNoActions verifies that
+// empty or silent input does not become a successful spoken command and
+// returns CLARIFY with no actions.
+func TestProcess_SilenceOrEmptyTranscript_ReturnsClarifyNoActions(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	resolver := orchestrationtest.NewResolver(orchestrationtest.BuildScopedContext("JTEST", "en-IN"))
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
+
+	// ASR returns empty transcript (silence)
+	asr.SetTranscribeHook(func(ctx context.Context, req contracts.ASRWorkerRequest) (contracts.ASRWorkerResponse, error) {
+		return contracts.ASRWorkerResponse{
+			RequestID: req.RequestID,
+			Language:  req.Language,
+			Text:      "",
+			State:     contracts.TranscriptionOK,
+		}, nil
+	})
+
+	req := audioPipelineRequest("JTEST", "en-IN", "audio/wav", "AAAAAA==")
+	out, err := o.Process(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("Process: unexpected error: %v", err)
+	}
+	if out.State != contracts.PipelineClarify {
+		t.Errorf("State = %s, want CLARIFY", out.State)
+	}
+	if out.ValidatedProposal.Status != contracts.StatusClarify {
+		t.Errorf("Proposal Status = %s, want CLARIFY", out.ValidatedProposal.Status)
+	}
+	if len(out.ValidatedProposal.Actions) != 0 {
+		t.Errorf("Actions length = %d, want 0", len(out.ValidatedProposal.Actions))
+	}
+	if mid.ProposeCalls() != 0 {
+		t.Errorf("middle called %d times for empty transcript; want 0", mid.ProposeCalls())
+	}
+}
+
 // TestProcess_RejectsStaleSnapshot runs the pipeline and verifies a
 // stale SnapshotRevalidate response fails the run with STALE_SNAPSHOT.
 func TestProcess_RejectsStaleSnapshot(t *testing.T) {
