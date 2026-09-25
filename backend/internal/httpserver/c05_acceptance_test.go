@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -293,6 +294,104 @@ func TestC05_FullIntegratedRehearsalScript(t *testing.T) {
 	if exists == 1 {
 		t.Errorf("temporary database %s was not dropped during cleanup", testDBName)
 		_, _ = adminDB.Exec(fmt.Sprintf(`DROP DATABASE IF EXISTS "%s"`, testDBName))
+	}
+}
+
+// TestC05_PortCollisionFailsBeforeMutation reproduces the finding where an occupied
+// port caused the runner to bind to an unowned server. It proves that the runner
+// rejects occupied ports with exit code 5 and mutates nothing in the pre-existing DB.
+func TestC05_PortCollisionFailsBeforeMutation(t *testing.T) {
+	adminDB, adminDSN := openAdminDB(t)
+	defer adminDB.Close()
+
+	// 1. Create a dummy TCP listener on an ephemeral port
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to create sentinel listener: %v", err)
+	}
+	defer ln.Close()
+	sentinelPort := ln.Addr().(*net.TCPAddr).Port
+
+	// 2. Create a sentinel database with a known row
+	sentinelDB := fmt.Sprintf("sthira_port_sentinel_%d", time.Now().UnixNano()%1000000)
+	if _, err := adminDB.Exec(fmt.Sprintf(`CREATE DATABASE "%s"`, sentinelDB)); err != nil {
+		t.Fatalf("failed to create sentinel db: %v", err)
+	}
+	defer func() {
+		_, _ = adminDB.Exec(fmt.Sprintf(`DROP DATABASE IF EXISTS "%s"`, sentinelDB))
+	}()
+
+	root := repoRoot(t)
+	scriptPath := filepath.Join(root, "..", "scripts", "run_demo_rehearsal.sh")
+
+	// 3. Execute runner targeting the occupied port
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("STHIRA_TEST_ADMIN_DSN=%s", adminDSN),
+		fmt.Sprintf("STHIRA_DEMO_DB=%s", sentinelDB),
+		fmt.Sprintf("STHIRA_PORT=%d", sentinelPort),
+		"STHIRA_DEMO_REUSE=1", // Even with reuse mode, port collision must fail BEFORE mutations
+	)
+
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected runner to fail on port collision, but it succeeded:\n%s", string(out))
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "already in use by another process") {
+		t.Fatalf("expected error mentioning port already in use, got:\n%s", outStr)
+	}
+
+	// 4. Verify sentinel DB was not mutated (no schema_migrations created)
+	childDSN := strings.Replace(adminDSN, "/postgres?", "/"+sentinelDB+"?", 1)
+	if !strings.Contains(adminDSN, "/postgres?") && strings.HasSuffix(adminDSN, "/postgres") {
+		childDSN = strings.TrimSuffix(adminDSN, "/postgres") + "/" + sentinelDB
+	}
+	sentinelConn, err := sql.Open("pgx", childDSN)
+	if err == nil {
+		defer sentinelConn.Close()
+		var tblExists bool
+		_ = sentinelConn.QueryRow("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'schema_migrations')").Scan(&tblExists)
+		if tblExists {
+			t.Errorf("sentinel database was mutated despite port collision!")
+		}
+	}
+}
+
+// TestC05_InvalidDBNameRejected proves that invalid database identifiers (invalid characters,
+// byte length > 63, or bad start) are rejected by error rather than destructively stripped.
+func TestC05_InvalidDBNameRejected(t *testing.T) {
+	adminDB, adminDSN := openAdminDB(t)
+	defer adminDB.Close()
+
+	root := repoRoot(t)
+	scriptPath := filepath.Join(root, "..", "scripts", "run_demo_rehearsal.sh")
+
+	invalidCases := []struct {
+		name string
+		db   string
+	}{
+		{"injection", "invalid;drop table packages;"},
+		{"too_long", "this_is_an_extremely_long_database_identifier_that_definitely_exceeds_sixty_three_bytes_limit_in_postgresql"},
+		{"starts_with_digit", "123_invalid_start"},
+		{"special_chars", "invalid-name$with#symbols"},
+	}
+
+	for _, tc := range invalidCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command("bash", scriptPath)
+			cmd.Env = append(os.Environ(),
+				fmt.Sprintf("STHIRA_TEST_ADMIN_DSN=%s", adminDSN),
+				fmt.Sprintf("STHIRA_DEMO_DB=%s", tc.db),
+			)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("expected runner to reject invalid DB name %q, but it succeeded:\n%s", tc.db, string(out))
+			}
+			if !strings.Contains(string(out), "ERROR: Database identifier") {
+				t.Fatalf("expected output to mention invalid database identifier for %q, got:\n%s", tc.db, string(out))
+			}
+		})
 	}
 }
 

@@ -344,6 +344,9 @@ func main() {
 		httpserver.WithPersistedContextResolver(st),
 		httpserver.WithSyntheticExercise(httpserver.StaticSyntheticExercise(true)),
 	}
+	if instID := os.Getenv("STHIRA_INSTANCE_ID"); instID != "" {
+		opts = append(opts, httpserver.WithInstanceID(instID))
+	}
 	opts = append(opts, voiceOpts...)
 	if os.Getenv("STHIRA_ENABLE_ACCESS_LOG") == "1" {
 		opts = append(opts, httpserver.WithAccessLog(true))

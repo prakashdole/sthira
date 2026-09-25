@@ -18,23 +18,54 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend/v2"
 
-PORT="${STHIRA_PORT:-8080}"
-ADDR="127.0.0.1:$PORT"
 ADMIN_DSN="${STHIRA_TEST_ADMIN_DSN:-postgres://localhost:5432/postgres?sslmode=disable}"
 
 RUN_ID="$(date -u +%Y%m%dT%H%M%S)_$$_$(python3 -c 'import secrets;print(secrets.token_hex(3))' 2>/dev/null || echo "$$")"
 DEFAULT_DB="sthira_rehearsal_${RUN_ID}"
 DB_NAME="${STHIRA_DEMO_DB:-$DEFAULT_DB}"
-DB_NAME="$(printf %s "$DB_NAME" | tr "[:upper:]" "[:lower:]" | tr -cd "a-z0-9_")"
+
+# Validate database identifier by rejection, not destructive character stripping (enforcing PostgreSQL 63-byte limit)
+python3 -c '
+import sys, re
+db = sys.argv[1]
+b = db.encode("utf-8")
+if len(b) < 1 or len(b) > 63:
+    sys.stderr.write(f"ERROR: Database identifier \"{db}\" exceeds PostgreSQL byte length limit (1-63 bytes, got {len(b)})\n")
+    sys.exit(1)
+if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", db):
+    sys.stderr.write(f"ERROR: Database identifier \"{db}\" contains invalid characters. Must match ^[a-zA-Z_][a-zA-Z0-9_]*$\n")
+    sys.exit(1)
+' "$DB_NAME" || exit 1
 DB_CREATED=0
 
-# Derive DEMO_DSN consistently from ADMIN_DSN
+# Derive DEMO_DSN safely from ADMIN_DSN
 DEMO_DSN="$(python3 -c '
 import sys, urllib.parse
-u = urllib.parse.urlparse(sys.argv[1])
-path = "/" + sys.argv[2]
-print(urllib.parse.urlunparse((u.scheme, u.netloc, path, u.params, u.query, u.fragment)))
-' "$ADMIN_DSN" "$DB_NAME")"
+admin_dsn = sys.argv[1]
+db = sys.argv[2]
+u = urllib.parse.urlparse(admin_dsn)
+if u.scheme not in ("postgres", "postgresql"):
+    sys.stderr.write(f"ERROR: Invalid admin DSN scheme \"{u.scheme}\". Expected postgres or postgresql.\n")
+    sys.exit(1)
+if not u.hostname:
+    sys.stderr.write("ERROR: Admin DSN must specify a hostname.\n")
+    sys.exit(1)
+print(urllib.parse.urlunparse((u.scheme, u.netloc, "/" + db, u.params, u.query, u.fragment)))
+' "$ADMIN_DSN" "$DB_NAME")" || exit 1
+
+# Port allocation: fail before any scenario/mutation requests on port collision
+if [[ -n "${STHIRA_PORT:-}" ]]; then
+    PORT="$STHIRA_PORT"
+    if python3 -c "import socket; s = socket.socket(); s.settimeout(0.5); res = s.connect_ex(('127.0.0.1', int('$PORT'))); s.close(); exit(0 if res == 0 else 1)"; then
+        echo "ERROR: Port $PORT is already in use by another process. Refusing to bind or mutate against an unowned server." >&2
+        exit 5
+    fi
+else
+    # Allocate an owned available ephemeral port
+    PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+fi
+ADDR="127.0.0.1:$PORT"
+INSTANCE_ID="sthira-inst-${RUN_ID}"
 
 TEMP_DIR="/tmp/sthira_rehearsal_${RUN_ID}"
 mkdir -p "$TEMP_DIR"
@@ -84,7 +115,8 @@ cleanup() {
         kill "$WORKERS_PID" 2>/dev/null || true
         wait "$WORKERS_PID" 2>/dev/null || true
     fi
-    if [[ -n "$UI_PID" ]] && kill -0 "$UI_PID" 2>/dev/null; then
+    if [[ -n "$UI_PID" ]]; then
+        pkill -P "$UI_PID" 2>/dev/null || true
         kill "$UI_PID" 2>/dev/null || true
         wait "$UI_PID" 2>/dev/null || true
     fi
@@ -141,7 +173,8 @@ if [[ -z "$WORKER_URL" ]]; then
     cat "$WORKERS_LOG"
     exit 1
 fi
-echo "   Mock protocol workers ready at $WORKER_URL (PLUMBING_ONLY)"
+WORKER_PORT="$(echo "$WORKER_URL" | sed -E 's|.*:([0-9]+).*|\1|')"
+echo "   Mock protocol workers ready at $WORKER_URL (PLUMBING_ONLY, port: $WORKER_PORT)"
 
 echo ">> Step 1b: Building and starting cmd/sthira-exercise..."
 (cd "$BACKEND_DIR" && go build -o "$EXERCISE_BIN" ./cmd/sthira-exercise)
@@ -149,6 +182,7 @@ echo ">> Step 1b: Building and starting cmd/sthira-exercise..."
 STHIRA_ADDR="$ADDR" \
 STHIRA_DATABASE_DSN="$DEMO_DSN" \
 STHIRA_EXERCISE_SEED="1" \
+STHIRA_INSTANCE_ID="$INSTANCE_ID" \
 STHIRA_ASR_URL="$WORKER_URL" \
 STHIRA_MIDDLE_URL="$WORKER_URL" \
 STHIRA_TTS_URL="$WORKER_URL" \
@@ -157,20 +191,33 @@ EXERCISE_PID=$!
 
 echo "   Waiting for backend readiness on http://$ADDR/health/ready..."
 READY=0
-for i in $(seq 1 30); do
-    if curl -s "http://$ADDR/health/ready" | grep -q '"status":"READY"'; then
-        READY=1
-        break
+for i in $(seq 1 40); do
+    if ! kill -0 "$EXERCISE_PID" 2>/dev/null; then
+        echo "ERROR: Backend child process $EXERCISE_PID died unexpectedly on startup. Logs:" >&2
+        cat "$EXERCISE_LOG" >&2
+        exit 1
     fi
-    sleep 0.2
+    LIVE_RESP=$(curl -s "http://$ADDR/health/live" 2>/dev/null || true)
+    if [[ -n "$LIVE_RESP" ]]; then
+        RESP_INST=$(echo "$LIVE_RESP" | sed -n 's/.*"instance_id":"\([^"]*\)".*/\1/p')
+        if [[ -n "$RESP_INST" && "$RESP_INST" != "$INSTANCE_ID" ]]; then
+            echo "ERROR: Server on $ADDR responded with instance_id '$RESP_INST', expected '$INSTANCE_ID'. Port collision with unowned server!" >&2
+            exit 5
+        fi
+        if curl -s "http://$ADDR/health/ready" | grep -q '"status":"READY"'; then
+            READY=1
+            break
+        fi
+    fi
+    sleep 0.15
 done
 
 if [[ "$READY" -ne 1 ]]; then
-    echo "ERROR: Backend failed to become ready within 6s. Logs:"
-    cat "$EXERCISE_LOG"
+    echo "ERROR: Backend failed to become ready within timeout. Logs:" >&2
+    cat "$EXERCISE_LOG" >&2
     exit 1
 fi
-echo "   Backend READY and verified at SchemaRevision 10 with SYNTHETIC_DEMO seed."
+echo "   Backend READY and verified at SchemaRevision 10 with SYNTHETIC_DEMO seed (instance: $INSTANCE_ID)."
 
 # ------------------------------------------------------------------------------
 # 2. Acceptance Journey 1: Exercise Label & Component Status
@@ -338,9 +385,11 @@ echo "   Restarting backend process to verify persistence across process death..
 kill -TERM "$EXERCISE_PID" 2>/dev/null || true
 wait "$EXERCISE_PID" 2>/dev/null || true
 
+RESTART_INSTANCE_ID="sthira-inst-${RUN_ID}-restart"
 STHIRA_ADDR="$ADDR" \
 STHIRA_DATABASE_DSN="$DEMO_DSN" \
 STHIRA_EXERCISE_SEED="0" \
+STHIRA_INSTANCE_ID="$RESTART_INSTANCE_ID" \
 STHIRA_ASR_URL="$WORKER_URL" \
 STHIRA_MIDDLE_URL="$WORKER_URL" \
 STHIRA_TTS_URL="$WORKER_URL" \
@@ -348,16 +397,29 @@ STHIRA_TTS_URL="$WORKER_URL" \
 EXERCISE_PID=$!
 
 READY=0
-for i in $(seq 1 30); do
-    if curl -s "http://$ADDR/health/ready" | grep -q '"status":"READY"'; then
-        READY=1
-        break
+for i in $(seq 1 40); do
+    if ! kill -0 "$EXERCISE_PID" 2>/dev/null; then
+        echo "ERROR: Restarted backend child process died unexpectedly. Logs:" >&2
+        cat "$EXERCISE_LOG" >&2
+        exit 1
     fi
-    sleep 0.2
+    LIVE_RESP=$(curl -s "http://$ADDR/health/live" 2>/dev/null || true)
+    if [[ -n "$LIVE_RESP" ]]; then
+        RESP_INST=$(echo "$LIVE_RESP" | sed -n 's/.*"instance_id":"\([^"]*\)".*/\1/p')
+        if [[ -n "$RESP_INST" && "$RESP_INST" != "$RESTART_INSTANCE_ID" ]]; then
+            echo "ERROR: Restarted server on $ADDR responded with instance_id '$RESP_INST', expected '$RESTART_INSTANCE_ID'." >&2
+            exit 5
+        fi
+        if curl -s "http://$ADDR/health/ready" | grep -q '"status":"READY"'; then
+            READY=1
+            break
+        fi
+    fi
+    sleep 0.15
 done
 if [[ "$READY" -ne 1 ]]; then
-    echo "ERROR: Backend failed to become ready after restart. Logs:"
-    cat "$EXERCISE_LOG"
+    echo "ERROR: Backend failed to become ready after restart. Logs:" >&2
+    cat "$EXERCISE_LOG" >&2
     exit 1
 fi
 
@@ -441,11 +503,24 @@ if ! echo "$TEXT_GUIDANCE" | grep -q '"place_id":"SZDEMO-1"'; then
 fi
 echo "   [PASS] Text guidance and place resolution resilient to voice model outage."
 
-# Re-establish mock workers if serving UI
-if [[ "$SERVE_UI" -eq 1 ]]; then
-    "$WORKERS_BIN" -port 0 > "$WORKERS_LOG" 2>&1 &
-    WORKERS_PID=$!
+# Re-establish mock workers on the SAME port so backend retaining old URL remains healthy
+echo "   Restoring mock workers on port $WORKER_PORT to restore healthy pipeline..."
+"$WORKERS_BIN" -port "$WORKER_PORT" > "$WORKERS_LOG" 2>&1 &
+WORKERS_PID=$!
+for i in $(seq 1 30); do
+    if curl -s "http://127.0.0.1:$WORKER_PORT/health" | grep -q '"ready":true'; then
+        break
+    fi
+    sleep 0.1
+done
+VOICE_RESTORED_RESP=$(curl -s -X POST "http://$ADDR/api/v3/voice/process" \
+    -H "Content-Type: application/json" \
+    -d "$VOICE_PROC_PAYLOAD")
+if ! echo "$VOICE_RESTORED_RESP" | grep -q '"state":"OK"'; then
+    echo "ERROR: Voice pipeline failed to recover after worker restoration: $VOICE_RESTORED_RESP" >&2
+    exit 1
 fi
+echo "   [PASS] Worker restored on port $WORKER_PORT; voice pipeline verified healthy after outage test."
 
 # ------------------------------------------------------------------------------
 # 8. Acceptance Journey 7: Rehearsal Backup Asset & Status Disclosure
@@ -475,8 +550,12 @@ echo "DEMO_ENGINEERING_ACCEPTED: CONDITIONAL (Plumbing and deterministic contrac
 echo "======================================================================"
 
 if [[ "$SERVE_UI" -eq 1 ]]; then
-    echo ">> Starting Vite UI on http://127.0.0.1:5173..."
-    (cd "$FRONTEND_DIR" && npm run dev) &
+    UI_PORT="${STHIRA_UI_PORT:-5173}"
+    if python3 -c "import socket; s = socket.socket(); s.settimeout(0.5); res = s.connect_ex(('127.0.0.1', int('$UI_PORT'))); s.close(); exit(0 if res == 0 else 1)"; then
+        UI_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+    fi
+    echo ">> Starting Vite UI on http://127.0.0.1:$UI_PORT (proxying backend http://$ADDR)..."
+    VITE_BACKEND_URL="http://$ADDR" VITE_PORT="$UI_PORT" (cd "$FRONTEND_DIR" && npx vite --port "$UI_PORT" --host 127.0.0.1) &
     UI_PID=$!
     echo ">> Press Ctrl-C to terminate rehearsal runner and shutdown services."
     wait "$UI_PID"

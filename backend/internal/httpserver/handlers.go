@@ -13,10 +13,14 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 	if !s.requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	s.writeData(w, r, http.StatusOK, "none", contracts.FreshnessUnknown, map[string]any{
+	data := map[string]any{
 		"status":     "LIVE",
 		"started_at": s.startedAt.Format("2006-01-02T15:04:05Z07:00"),
-	})
+	}
+	if s.instanceID != "" {
+		data["instance_id"] = s.instanceID
+	}
+	s.writeData(w, r, http.StatusOK, "none", contracts.FreshnessUnknown, data)
 }
 
 // handleReady reports dependency/source readiness with structured subsystem breakdown.

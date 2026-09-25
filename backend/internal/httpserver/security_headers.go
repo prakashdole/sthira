@@ -28,6 +28,9 @@ func (s *Server) withSecurityHeaders(next http.Handler) http.Handler {
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		h.Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
 		h.Set("X-XSS-Protection", "0")
+		if s.instanceID != "" {
+			h.Set("X-Sthira-Instance-Id", s.instanceID)
+		}
 
 		path := r.URL.Path
 		if isSensitiveRoute(path) {

@@ -93,6 +93,13 @@ type Server struct {
 	trustForwardedFor bool
 	securityAuditor   *SecurityAuditor
 	allowedOrigins    []string
+	instanceID        string
+}
+
+// WithInstanceID sets the task-owned instance identifier reported by /health/live
+// and X-Sthira-Instance-Id.
+func WithInstanceID(id string) Option {
+	return func(s *Server) { s.instanceID = id }
 }
 
 // WithVoiceProcess wires the voice process handler for the /api/v3/voice/{transcriptions,process,speech} routes.
