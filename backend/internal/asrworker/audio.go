@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"mime"
 )
 
 // Wire formats this worker actually decodes. The private protocol
@@ -111,7 +112,12 @@ func (e *DecodeError) Unwrap() error { return e.Cause }
 //   - errors.Is(err, ErrUnsupportedCodec) when content_type is not in
 //     WorkerSupportedContentTypes.
 func DecodeWAV(audioBytes []byte, contentType string, limits AudioDecodeLimits) (*AudioDecodeResult, error) {
-	if contentType != "audio/wav" {
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil || mediaType != "audio/wav" {
+		if contentType != "audio/wav" {
+			return nil, fmt.Errorf("%w: %s", ErrUnsupportedCodec, contentType)
+		}
+	} else if codec, ok := params["codecs"]; ok && codec != "" && codec != "1" && codec != "pcm" {
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedCodec, contentType)
 	}
 	if int64(len(audioBytes)) > limits.CompressedBytes {
@@ -162,13 +168,27 @@ func DecodeWAV(audioBytes []byte, contentType string, limits AudioDecodeLimits) 
 // maps this to TranscriptionAudioUnavailable.
 var ErrUnsupportedCodec = errors.New("unsupported audio codec")
 
-func isWorkerSupportedCodec(ct string) bool {
-	for _, t := range WorkerSupportedContentTypes {
-		if t == ct {
-			return true
-		}
+func isWorkerSupportedCodec(rawCT string) bool {
+	mediaType, params, err := mime.ParseMediaType(rawCT)
+	if err != nil {
+		return false
 	}
-	return false
+	switch mediaType {
+	case "audio/wav":
+		if codec, ok := params["codecs"]; ok && codec != "" && codec != "1" && codec != "pcm" {
+			return false
+		}
+		return true
+	case "audio/webm", "audio/ogg":
+		if codec, ok := params["codecs"]; ok && codec != "" && codec != "opus" {
+			return false
+		}
+		return true
+	case "audio/opus":
+		return true
+	default:
+		return false
+	}
 }
 
 // wavUnknownChunkSize is the sentinel value used by WAV producers

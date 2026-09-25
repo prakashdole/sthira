@@ -134,3 +134,42 @@ func TestLimitedWriter_TruncatesAndReportsFull(t *testing.T) {
 		t.Errorf("buf: got %q want %q", got, "ABCDE")
 	}
 }
+
+func TestIsWorkerSupportedCodec_BrowserMIMETypes(t *testing.T) {
+	valid := []string{
+		"audio/wav",
+		"audio/webm",
+		"audio/webm;codecs=opus",
+		"audio/webm; codecs=opus",
+		"audio/webm; codecs=\"opus\"",
+		"audio/ogg",
+		"audio/ogg;codecs=opus",
+		"audio/ogg; codecs=opus",
+		"audio/opus",
+	}
+	for _, ct := range valid {
+		if !isWorkerSupportedCodec(ct) {
+			t.Errorf("expected %q to be supported by worker", ct)
+		}
+	}
+
+	invalid := []string{
+		"audio/webm;codecs=vorbis",
+		"audio/aac",
+		"audio/mp3",
+		"audio/mp4",
+		"text/plain",
+	}
+	for _, ct := range invalid {
+		if isWorkerSupportedCodec(ct) {
+			t.Errorf("expected %q to be rejected by worker", ct)
+		}
+	}
+}
+
+func TestDecodeAudio_RejectsUnsupportedCodecParam(t *testing.T) {
+	_, err := DecodeAudio([]byte{1, 2, 3}, "audio/webm;codecs=vorbis", DefaultDecodeLimits())
+	if !errors.Is(err, ErrUnsupportedCodec) {
+		t.Errorf("expected ErrUnsupportedCodec for vorbis, got %v", err)
+	}
+}

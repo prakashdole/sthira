@@ -36,16 +36,58 @@ Real weight inference on this host is blocked by external hardware and resource 
 
 ---
 
-## 3. Worker startup instructions — withdrawn pending correction
+## 3. Worker Startup Instructions & Verified Entry Points
 
-The former commands were not runnable evidence and must not be used for deployment:
+The real serving executable entry points have been implemented and verified in each worker module under `backend/internal/*/cmd/`:
 
-- `speech_asr_adapter.py` and `speech_tts_adapter.py` speak JSON lines over stdin/stdout; they do not expose the claimed `--port` HTTP server interface.
-- Raw vLLM exposes an OpenAI-compatible API, not Sthira's typed middle-worker request/response/health contract. `STHIRA_MIDDLE_URL` must point to the private Sthira wrapper, whose upstream is vLLM.
-- Repository Go ASR/TTS/middle worker packages exist, but no real serving executable entry points were found in this review. `cmd/mock-workers` and dummy/eval drivers cannot substitute for those services.
-- `go run ./loadmodel/...` and `go run ./cmd/sthira-exercise` refer to different module working directories. Each replacement command must specify its actual module path and validated flags.
-- The production binary rejects synthetic templates. Use the explicitly isolated exercise binary/database for a labelled synthetic-case demonstration; do not disable production checks.
+1. **ASR Worker** (`backend/internal/asrworker`):
+   - **Entry point**: `cmd/asrworker/main.go`
+   - **Build**: `cd backend/internal/asrworker && go build ./cmd/asrworker`
+   - **Run**:
+     ```bash
+     cd backend/internal/asrworker
+     STHIRA_ASR_ADDR="127.0.0.1:8001" \
+     STHIRA_ASR_PYTHON="python3" \
+     STHIRA_ASR_ADAPTER="sthira_v2.speech_asr_adapter" \
+     ./asrworker
+     ```
+   - **Behavior**: Wraps `sthira_v2.speech_asr_adapter` over stdin/stdout JSONL. Calls `worker.LoadAndVerify(ctx)`. Fails closed if the Python runtime or ONNX model weights are missing or report blocked status.
 
-C04 must reuse the existing runtime and HTTP server implementations to supply minimal launch entry points with private binding, auth, required artifact configuration, load/warm health, bounded lifecycle and clean shutdown. Test build/startup failure without weights; then provide actual authorized instance commands with pinned runtime/artifact details. No speculative A100/H100/MLX compatibility claim substitutes for that evidence. The public backend receives private worker URLs, not Python adapter or raw vLLM URLs. Keep secrets out of documentation and output.
+2. **Middle Worker** (`backend/internal/middleworker`):
+   - **Entry point**: `cmd/middleworker/main.go`
+   - **Build**: `cd backend/internal/middleworker && go build ./cmd/middleworker`
+   - **Run**:
+     ```bash
+     cd backend/internal/middleworker
+     STHIRA_MIDDLE_ADDR="127.0.0.1:8002" \
+     STHIRA_VLLM_URL="http://127.0.0.1:8000" \
+     ./middleworker
+     ```
+   - **Behavior**: Wraps upstream private vLLM endpoint (`sarvamai/sarvam-30b` FP8 MoE) with canonical Sarvam system prompt, embedded JSON schema (`model_output.schema.json`), and 512 max output tokens.
+
+3. **TTS Worker** (`backend/internal/ttsworker`):
+   - **Entry point**: `cmd/ttsworker/main.go`
+   - **Build**: `cd backend/internal/ttsworker && go build ./cmd/ttsworker`
+   - **Run**:
+     ```bash
+     cd backend/internal/ttsworker
+     STHIRA_TTS_ADDR="127.0.0.1:8003" \
+     STHIRA_TTS_PYTHON="python3" \
+     STHIRA_TTS_ADAPTER="sthira_v2.speech_tts_adapter" \
+     ./ttsworker
+     ```
+   - **Behavior**: Wraps `sthira_v2.speech_tts_adapter` over stdin/stdout JSONL with bounded template catalog and verified WAV caching. Calls `rt.LoadModel()`. Fails closed if Parler-TTS weights or voices are missing or report blocked status.
+
+4. **Public Backend / Exercise Wiring**:
+   - The public backend receives private worker URLs (`STHIRA_ASR_URL="http://127.0.0.1:8001"`, `STHIRA_MIDDLE_URL="http://127.0.0.1:8002"`, `STHIRA_TTS_URL="http://127.0.0.1:8003"`), not raw Python adapter or vLLM URLs.
+   - The production binary (`cmd/sthira`) rejects synthetic templates.
+   - For isolated exercise / demonstration with labelled synthetic fixtures:
+     ```bash
+     cd backend
+     STHIRA_ASR_URL="http://127.0.0.1:8001" \
+     STHIRA_MIDDLE_URL="http://127.0.0.1:8002" \
+     STHIRA_TTS_URL="http://127.0.0.1:8003" \
+     go run ./cmd/sthira-exercise
+     ```
 
 Real inference and supported-language acceptance remain separate from launch/build checks. No instance access, spending or model download was performed by this review.
