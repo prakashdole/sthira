@@ -334,7 +334,8 @@ func readAliases(ctx context.Context, db DBTX, jurisdiction string) ([]PlaceCand
 //   - source_id must be non-NULL and exactly equal to sourceID;
 //   - language must be non-NULL (no wildcard) and in the allowed set;
 //   - template_sha256 must be non-NULL (64-hex digest) and is returned
-//     as speech_key -> digest for the orchestrator's template check.
+//     bound to the speech_key/language tuple for the orchestrator's template check;
+//   - conflicting active approvals for the same tuple fail closed deterministically.
 func readApprovedSpeechKeys(ctx context.Context, db DBTX, jurisdiction string, sourceVersion, templateVersion int, sourceID string, now time.Time, allowed map[string]struct{}) ([]string, map[string][]string, map[string]string, error) {
 	if sourceID == "" {
 		return nil, nil, map[string]string{}, nil
@@ -370,10 +371,15 @@ func readApprovedSpeechKeys(ctx context.Context, db DBTX, jurisdiction string, s
 		if _, ok := allowed[lang]; !ok {
 			continue
 		}
-		approvedLangs[key] = append(approvedLangs[key], lang)
-		if digest != "" {
-			digests[key] = digest
+		tupleKey := contracts.TemplateDigestKey(key, lang)
+		if existing, ok := digests[tupleKey]; ok {
+			if existing != digest {
+				return nil, nil, nil, fmt.Errorf("store: conflicting active approvals for speech key %q language %q (%s vs %s)", key, lang, existing, digest)
+			}
+			continue
 		}
+		digests[tupleKey] = digest
+		approvedLangs[key] = append(approvedLangs[key], lang)
 		if _, dup := seen[key]; !dup {
 			seen[key] = struct{}{}
 			out = append(out, key)

@@ -610,7 +610,7 @@ func (o *Orchestrator) stageTemplate(ctx context.Context, sc contracts.ScopedCon
 	}
 	// B01: approved template identity is the SHA-256 of the canonical
 	// template bytes (tpl.Text), not the rendered substitution output.
-	wantSHA, ok := sc.ApprovedTemplateSHA[speechKey]
+	wantSHA, ok := sc.TemplateDigest(speechKey, proposal.Language)
 	if !ok || wantSHA == "" {
 		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
 			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template digest not approved for language", Retryable: false,

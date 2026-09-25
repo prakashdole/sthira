@@ -200,7 +200,7 @@ func (o *Orchestrator) Synthesize(ctx context.Context, req contracts.TTSRequest,
 		})
 	}
 	// B01: digest over approved canonical template bytes, not rendered text.
-	wantSHA, ok := sc.ApprovedTemplateSHA[req.SpeechKey]
+	wantSHA, ok := sc.TemplateDigest(req.SpeechKey, req.Language)
 	if !ok || wantSHA == "" {
 		return contracts.TTSResponse{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
 			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template digest not approved for language", Retryable: false,

@@ -80,8 +80,11 @@ func TestB01_ExactApprovalAuthorizes(t *testing.T) {
 	if !sc.IsSpeechKeyApprovedForLanguage("welcome", "en-IN") {
 		t.Fatalf("exact complete approval must authorize")
 	}
-	if sc.ApprovedTemplateSHA["welcome"] != dig {
-		t.Fatalf("ApprovedTemplateSHA welcome = %q want %q", sc.ApprovedTemplateSHA["welcome"], dig)
+	if sc.ApprovedTemplateSHA["welcome/en-IN"] != dig {
+		t.Fatalf("ApprovedTemplateSHA welcome/en-IN = %q want %q", sc.ApprovedTemplateSHA["welcome/en-IN"], dig)
+	}
+	if gotDig, ok := sc.TemplateDigest("welcome", "en-IN"); !ok || gotDig != dig {
+		t.Fatalf("TemplateDigest welcome/en-IN = %q want %q", gotDig, dig)
 	}
 	if !contains(sc.TemplateKeys, "welcome") {
 		t.Fatalf("TemplateKeys must include welcome, got %v", sc.TemplateKeys)
