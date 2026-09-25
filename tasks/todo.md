@@ -110,6 +110,62 @@ Python.
 
 The current application is a locally runnable synthetic emergency-guidance demo and must not be represented as a live emergency system.
 
+## Frontend integration pass — 2026-09-24
+
+- [x] Replace the chat-first interaction with constrained Voice Map Control.
+- [x] Connect the interface to documented voice-command, assignment, and arrival contracts with safe degraded states; expose the approved-audio and ISL pending states without inventing a backend endpoint.
+- [x] Preserve text, keyboard, and reduced-motion paths and localize every new interface string.
+- [x] Verify TypeScript build, targeted map/action checks, and the browser control flow.
+
+### Review — 2026-09-24
+
+- `npm run build` passes and `tests/test_v2_map_geometry.py` passes (2 tests).
+- Browser checks confirm the voice-control sheet, unavailable-command handling, Malayalam localization, ISL text fallback, and honest arrival failure state.
+- The frontend is prepared for `/api/v2/voice/commands` and assignment/arrival routes, which are not exposed by the currently running backend process.
+
+## Mobile emergency experience redesign — planned
+
+- [x] Audit the current Vite mobile layout, bundle, and non-map fallback before changing the flow.
+- [x] Add a first-run onboarding flow: language selection, clear location consent, and an equally clear manual-location path when permission is denied or unavailable.
+- [x] Make the post-onboarding screen map-first, with a persistent voice launcher at the bottom and a compact emergency-action tray.
+- [x] Replace the current "I reached the shelter" interaction with the user-approved next emergency action; preserve the backend arrival contract until its removal is explicitly confirmed.
+- [x] Evolve Voice Map Control from a launcher into a guided, accessible voice interaction while retaining transcription, text, and no-microphone fallbacks.
+- [x] Keep the desktop layout compatible without making it the primary design target.
+- [x] Add lightweight, feedback-only motion and reduced-motion support; do not add real-time claims or unsupported feeds.
+- [x] Measure the production build and verify the primary flows at a narrow mobile viewport and a desktop viewport.
+
+### Success criteria
+
+- First use selects a language and makes location use understandable and optional.
+- The emergency map, one prominent voice action, and urgent actions are reachable with one hand on a phone.
+- No screen promises live, official, or safety-critical guidance that the backend cannot verify.
+- The interface remains usable with location denied, microphone denied, a failed map, and reduced motion.
+- The redesign introduces no unapproved external API or heavy visual runtime.
+
+### Review — 2026-09-25
+
+- First use now requires a language selection, then offers browser location permission with an explicit continue-without-location path. Device coordinates are not mixed into the synthetic route.
+- Mobile is a full-map emergency surface with a compact route brief, 112 action, central voice action, and route control. The full guidance panel remains on desktop.
+- The visible arrival flow was removed. Its backend API contract was not changed.
+- MapLibre is dynamically imported only after onboarding. The entry JavaScript is now 66.81 kB (17.93 kB gzip); MapLibre remains a deferred 279.98 kB gzip map chunk.
+- Verified in-browser at the default narrow viewport and at 1366×900, then restored the default viewport. `npm run build`, `tests/test_v2_map_geometry.py`, and `git diff --check` pass.
+
+## Visual-system correction — in progress
+
+- [x] Replace the template-like desktop panel and generic map control styling with one intentional emergency visual system.
+- [x] Recompose first-use language and location setup so it feels like part of the product, not a generic form.
+- [x] Use browser geolocation coordinates for the user's own map recenter action without falsely connecting them to the synthetic route.
+- [x] Re-verify phone, laptop, language, location-denied, and reduced-motion paths.
+- [x] Commit the completed frontend redesign on `CLEAN`.
+
+### Review — 2026-09-25
+
+- Replaced the dashboard visual language with a cohesive civic-night frame, calm off-white guidance surface, direct route hierarchy, connected map controls, and a single dominant action.
+- First-use language and location screens now use the same visual system rather than generic form cards.
+- Browser location coordinates remain in memory only. When consent succeeds, the map adds a distinct device marker and “My location” recentres to it. The synthetic exercise route remains separately labelled. When consent is denied or unavailable, the interface says so directly.
+- Verified the mobile map surface, desktop sidebar composition, voice panel, Malayalam localization, and location-unavailable path in browser. `npm run build`, `tests/test_v2_map_geometry.py`, and `git diff --check` pass.
+
+
 ## Current execution evidence — 2026-09-12
 
 - [x] Operational-package manifest now requires authority, jurisdiction, version, effective/expiry window, checksum, facilities, allocation policy, emergency contacts, geometry, and cross-references.

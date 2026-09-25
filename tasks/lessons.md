@@ -10,3 +10,5 @@
 - ASL and ISL are different languages. For an Indian pilot, provide reviewed ISL media and never call translated text “sign language.”
 - Official catalog discovery is not operational API readiness; prove access, coverage, freshness, permission, and failure behavior.
 - Open-source models can satisfy a government-data-only policy when self-hosted, but their outputs are still AI-generated interface artifacts.
+- A mobile emergency interface must make language and location setup explicit before guidance begins, while always keeping manual, text-first, and permission-denied paths available.
+- An emergency interface cannot stop at functional controls: hierarchy, material, and typography must make the one urgent action unmistakable without turning the rest of the screen into dashboard clutter.
