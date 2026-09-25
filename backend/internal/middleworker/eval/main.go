@@ -119,7 +119,7 @@ func writeManifest(out string) {
 		os.Exit(1)
 	}
 	if out != "" {
-		if err := os.WriteFile(out, bs, 0o644); err != nil {
+		if err := os.WriteFile(out, bs, 0o600); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

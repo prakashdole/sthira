@@ -20,6 +20,19 @@ func mkScoped() ScopedContext {
 		TemplateVersion:  7,
 		AllowedLanguages: []string{"ml-IN", "en-IN"},
 		TemplateKeys:     []string{"destination_options", "clarify_place", "verified_route_unavailable"},
+		ApprovedSpeechKeys: map[string][]string{
+			"destination_options":        {"ml-IN", "en-IN"},
+			"clarify_place":              {"ml-IN", "en-IN"},
+			"verified_route_unavailable": {"ml-IN", "en-IN"},
+		},
+		ApprovedTemplateSHA: map[string]string{
+			"destination_options/ml-IN":        "x",
+			"destination_options/en-IN":        "x",
+			"clarify_place/ml-IN":              "x",
+			"clarify_place/en-IN":              "x",
+			"verified_route_unavailable/ml-IN": "x",
+			"verified_route_unavailable/en-IN": "x",
+		},
 		KnownPlaces: map[string]PlaceCandidate{
 			"PLACE-1": {PlaceID: "PLACE-1", PlaceKind: "ADMIN", Name: "Ward 8", Jurisdiction: "KL"},
 		},
@@ -587,5 +600,234 @@ func TestEnforce_SilentActionDoesNotRequireSpeechApproval(t *testing.T) {
 
 	if err := EnforceScopedContext(out, sc); err != nil {
 		t.Fatalf("silent action must succeed even when no speech keys are approved: %v", err)
+	}
+}
+
+func TestScoped_ShowChoices_FacilityPlaceAlias(t *testing.T) {
+	intent := IntentListDestinations
+	makeProposal := func(sc ScopedContext, targetID string) ModelOutput {
+		return ModelOutput{
+			SchemaVersion: "3.0",
+			RequestID:     "REQ-1",
+			DataVersion:   sc.DataVersion,
+			Status:        StatusOK,
+			Intent:        &intent,
+			Language:      "ml-IN",
+			Actions:       []Action{{Type: ActionShowChoices, TargetIDs: []string{targetID}}},
+			SpeechKey:     nil,
+		}
+	}
+
+	// 1. Valid same-jurisdiction facility alias in KnownPlaces: ACCEPTED
+	sc := mkScoped()
+	sc.KnownPlaces["FAC-1"] = PlaceCandidate{PlaceID: "FAC-1", PlaceKind: "FACILITY", Jurisdiction: sc.Jurisdiction}
+	if err := EnforceScopedContext(makeProposal(sc, "FAC-1"), sc); err != nil {
+		t.Fatalf("valid same-jurisdiction facility alias must be accepted: %v", err)
+	}
+
+	// 2. Wrong place kind (e.g. ADMIN/VILLAGE, not FACILITY): REJECTED
+	sc = mkScoped()
+	sc.KnownPlaces["FAC-1"] = PlaceCandidate{PlaceID: "FAC-1", PlaceKind: "ADMIN", Jurisdiction: sc.Jurisdiction}
+	if err := EnforceScopedContext(makeProposal(sc, "FAC-1"), sc); err == nil {
+		t.Fatalf("expected reject for place with non-FACILITY kind")
+	}
+
+	// 3. Wrong jurisdiction: REJECTED
+	sc = mkScoped()
+	sc.KnownPlaces["FAC-1"] = PlaceCandidate{PlaceID: "FAC-1", PlaceKind: "FACILITY", Jurisdiction: "WRONG-JURISDICTION"}
+	if err := EnforceScopedContext(makeProposal(sc, "FAC-1"), sc); err == nil {
+		t.Fatalf("expected reject for facility alias with wrong jurisdiction")
+	}
+
+	// 4. Wrong ID: REJECTED
+	sc = mkScoped()
+	sc.KnownPlaces["FAC-1"] = PlaceCandidate{PlaceID: "OTHER-ID", PlaceKind: "FACILITY", Jurisdiction: sc.Jurisdiction}
+	if err := EnforceScopedContext(makeProposal(sc, "FAC-1"), sc); err == nil {
+		t.Fatalf("expected reject for facility alias with mismatched ID")
+	}
+
+	// 5. Unknown facility (not in KnownFacilities): REJECTED
+	sc = mkScoped()
+	delete(sc.KnownFacilities, "FAC-1")
+	if err := EnforceScopedContext(makeProposal(sc, "FAC-1"), sc); err == nil {
+		t.Fatalf("expected reject for target_id not in KnownFacilities")
+	}
+
+	// 6. Route collision (target_id is a route): REJECTED
+	sc = mkScoped()
+	sc.KnownRoutes["FAC-1"] = RouteRef{RouteID: "FAC-1", Status: RouteStatusVerified, Verified: true}
+	if err := EnforceScopedContext(makeProposal(sc, "FAC-1"), sc); err == nil {
+		t.Fatalf("expected reject for route collision in SHOW_CHOICES")
+	}
+}
+
+func TestScoped_NewActionVariants(t *testing.T) {
+	sc := mkScoped()
+	visible := true
+
+	// HIGHLIGHT_FEATURE on spatial feature (SZ-1)
+	intentFocus := IntentFocusPlace
+	outHighlight := ModelOutput{
+		SchemaVersion: "3.0",
+		RequestID:     "REQ-1",
+		DataVersion:   sc.DataVersion,
+		Status:        StatusOK,
+		Intent:        &intentFocus,
+		Language:      "ml-IN",
+		Actions:       []Action{{Type: ActionHighlightFeature, TargetID: "SZ-1"}},
+		SpeechKey:     nil,
+	}
+	if err := EnforceScopedContext(outHighlight, sc); err != nil {
+		t.Fatalf("HIGHLIGHT_FEATURE on valid spatial feature should pass: %v", err)
+	}
+
+	// FIT_FEATURES on eligible facility (FAC-1)
+	intentList := IntentListDestinations
+	outFit := ModelOutput{
+		SchemaVersion: "3.0",
+		RequestID:     "REQ-1",
+		DataVersion:   sc.DataVersion,
+		Status:        StatusOK,
+		Intent:        &intentList,
+		Language:      "ml-IN",
+		Actions:       []Action{{Type: ActionFitFeatures, TargetIDs: []string{"FAC-1"}}},
+		SpeechKey:     nil,
+	}
+	if err := EnforceScopedContext(outFit, sc); err != nil {
+		t.Fatalf("FIT_FEATURES on valid facility choice should pass: %v", err)
+	}
+
+	// SET_LAYER_VISIBILITY on valid layer
+	outLayer := ModelOutput{
+		SchemaVersion: "3.0",
+		RequestID:     "REQ-1",
+		DataVersion:   sc.DataVersion,
+		Status:        StatusOK,
+		Intent:        &intentFocus,
+		Language:      "ml-IN",
+		Actions:       []Action{{Type: ActionSetLayerVisibility, Layer: "RED_ZONES", Visible: &visible}},
+		SpeechKey:     nil,
+	}
+	if err := EnforceScopedContext(outLayer, sc); err != nil {
+		t.Fatalf("SET_LAYER_VISIBILITY on valid layer should pass: %v", err)
+	}
+}
+
+func TestScoped_FitFeatures_Validation(t *testing.T) {
+	sc := mkScoped()
+	intentFocus := IntentFocusPlace
+
+	// 1. FIT_FEATURES on non-facility spatial features & routes: ACCEPTED
+	outNonFacility := ModelOutput{
+		SchemaVersion: "3.0",
+		RequestID:     "REQ-1",
+		DataVersion:   sc.DataVersion,
+		Status:        StatusOK,
+		Intent:        &intentFocus,
+		Language:      "ml-IN",
+		Actions: []Action{
+			{Type: ActionFitFeatures, TargetIDs: []string{"SZ-1", "RZ-1", "ROUTE-1"}},
+		},
+	}
+	if err := EnforceScopedContext(outNonFacility, sc); err != nil {
+		t.Fatalf("FIT_FEATURES on non-facility spatial features and routes should pass: %v", err)
+	}
+
+	// 2. FIT_FEATURES when sc.EligibleDestinations is EMPTY: ACCEPTED
+	scNoDest := mkScoped()
+	scNoDest.EligibleDestinations = nil
+	outNoDest := ModelOutput{
+		SchemaVersion: "3.0",
+		RequestID:     "REQ-1",
+		DataVersion:   scNoDest.DataVersion,
+		Status:        StatusOK,
+		Intent:        &intentFocus,
+		Language:      "ml-IN",
+		Actions: []Action{
+			{Type: ActionFitFeatures, TargetIDs: []string{"SZ-1"}},
+		},
+	}
+	if err := EnforceScopedContext(outNoDest, scNoDest); err != nil {
+		t.Fatalf("FIT_FEATURES should pass when EligibleDestinations is empty: %v", err)
+	}
+
+	// 3. FIT_FEATURES with unknown target_id: REJECTED
+	outUnknown := ModelOutput{
+		SchemaVersion: "3.0",
+		RequestID:     "REQ-1",
+		DataVersion:   sc.DataVersion,
+		Status:        StatusOK,
+		Intent:        &intentFocus,
+		Language:      "ml-IN",
+		Actions: []Action{
+			{Type: ActionFitFeatures, TargetIDs: []string{"UNKNOWN-ID"}},
+		},
+	}
+	if err := EnforceScopedContext(outUnknown, sc); err == nil {
+		t.Fatalf("FIT_FEATURES with unknown target_id should be rejected")
+	}
+
+	// 4. FIT_FEATURES with duplicate target_ids: REJECTED
+	outDup := ModelOutput{
+		SchemaVersion: "3.0",
+		RequestID:     "REQ-1",
+		DataVersion:   sc.DataVersion,
+		Status:        StatusOK,
+		Intent:        &intentFocus,
+		Language:      "ml-IN",
+		Actions: []Action{
+			{Type: ActionFitFeatures, TargetIDs: []string{"SZ-1", "SZ-1"}},
+		},
+	}
+	if err := EnforceScopedContext(outDup, sc); err == nil {
+		t.Fatalf("FIT_FEATURES with duplicate target_ids should be rejected")
+	}
+
+	// 5. FIT_FEATURES with empty target_ids: REJECTED
+	outEmpty := ModelOutput{
+		SchemaVersion: "3.0",
+		RequestID:     "REQ-1",
+		DataVersion:   sc.DataVersion,
+		Status:        StatusOK,
+		Intent:        &intentFocus,
+		Language:      "ml-IN",
+		Actions: []Action{
+			{Type: ActionFitFeatures, TargetIDs: []string{}},
+		},
+	}
+	if err := EnforceScopedContext(outEmpty, sc); err == nil {
+		t.Fatalf("FIT_FEATURES with empty target_ids should be rejected")
+	}
+
+	// 6. FIT_FEATURES with > 3 target_ids: REJECTED
+	outTooMany := ModelOutput{
+		SchemaVersion: "3.0",
+		RequestID:     "REQ-1",
+		DataVersion:   sc.DataVersion,
+		Status:        StatusOK,
+		Intent:        &intentFocus,
+		Language:      "ml-IN",
+		Actions: []Action{
+			{Type: ActionFitFeatures, TargetIDs: []string{"SZ-1", "RZ-1", "ROUTE-1", "FAC-1"}},
+		},
+	}
+	if err := EnforceScopedContext(outTooMany, sc); err == nil {
+		t.Fatalf("FIT_FEATURES with > 3 target_ids should be rejected")
+	}
+
+	// 7. SHOW_CHOICES on non-facility spatial feature (SZ-1): REJECTED
+	outShowNonFac := ModelOutput{
+		SchemaVersion: "3.0",
+		RequestID:     "REQ-1",
+		DataVersion:   sc.DataVersion,
+		Status:        StatusOK,
+		Intent:        &intentFocus,
+		Language:      "ml-IN",
+		Actions: []Action{
+			{Type: ActionShowChoices, TargetIDs: []string{"SZ-1"}},
+		},
+	}
+	if err := EnforceScopedContext(outShowNonFac, sc); err == nil {
+		t.Fatalf("SHOW_CHOICES on non-facility feature should be rejected")
 	}
 }

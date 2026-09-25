@@ -175,49 +175,6 @@ func buildSignedManifest(t *testing.T, priv ed25519.PrivateKey, keyID, jur, pkgI
 	return m, raw
 }
 
-// buildSignedCard produces a card signed with the given key. Mirrors the
-// manifest builder.
-func buildSignedCard(t *testing.T, priv ed25519.PrivateKey, keyID, pkgID, jur string, version int, mutator func(*offlinepkg.PublicIncidentCard)) (*offlinepkg.PublicIncidentCard, []byte) {
-	t.Helper()
-	c := &offlinepkg.PublicIncidentCard{
-		SchemaVersion: "3.0",
-		PackageID:     pkgID,
-		Version:       version,
-		Jurisdiction:  jur,
-		EvidenceClass: "AUTHORIZED_OPERATIONAL",
-		EffectiveAt:   "2026-09-21T00:00:00Z",
-		ExpiresAt:     "2026-09-22T00:00:00Z",
-		Alert: offlinepkg.AlertCard{
-			Identifier: "alt-1", Sender: "snd-1", Headline: "Headline",
-			Severity: "Severe", Urgency: "Immediate", Certainty: "Observed",
-		},
-		RedZones: []offlinepkg.RedZoneCard{{ID: "rz-1"}},
-		SafeZones: []offlinepkg.SafeZoneCard{
-			{ID: "sz-1", Name: "sz-1", Role: "EMERGENCY_SHELTER", Status: "OPEN", CapacityMode: "DEFINED"},
-		},
-		ApprovedRoutes: []offlinepkg.RouteCard{},
-		Facilities: []offlinepkg.FacilityCard{
-			{ID: "fac-1", SafeZoneID: "sz-1", Name: "fac-1"},
-		},
-		Instructions: []offlinepkg.InstructionCard{
-			{ID: "ins-1", Language: "en-IN", Title: "Move to safety", Summary: "Move"},
-		},
-		EmergencyContacts: []offlinepkg.EmergencyContact{{Name: "Emergency", Number: "112"}},
-		AllocationPolicy:  offlinepkg.PolicyCard{Order: []string{"sz-1"}},
-	}
-	if mutator != nil {
-		mutator(c)
-	}
-	if err := signCardInPlace(c, priv, keyID); err != nil {
-		t.Fatalf("sign card: %v", err)
-	}
-	raw, err := json.Marshal(c)
-	if err != nil {
-		t.Fatalf("marshal card: %v", err)
-	}
-	return c, raw
-}
-
 func signInPlace(m *offlinepkg.Manifest, priv ed25519.PrivateKey, keyID string) error {
 	can, err := offlinepkg.CanonicalBytes(m)
 	if err != nil {

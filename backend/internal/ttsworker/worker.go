@@ -25,33 +25,40 @@ const (
 // SynthesizeRequest is the worker-side mirror of
 // contracts.TTSWorkerRequest.
 type SynthesizeRequest struct {
-	RequestID       string            `json:"request_id"`
-	SpeechKey       templates.Key     `json:"speech_key"`
-	Language        string            `json:"language"`
-	Text            string            `json:"text"` // rendered template text only
-	SourceVersion   int               `json:"source_version"`
-	TemplateVersion int               `json:"template_version"`
-	Settings        SynthesisSettings `json:"settings"`
-	DeadlineMillis  int64             `json:"deadline_ms"`
+	RequestID       string        `json:"request_id"`
+	SpeechKey       templates.Key `json:"speech_key"`
+	Language        string        `json:"language"`
+	Text            string        `json:"text"` // rendered template text only
+	SourceVersion   int           `json:"source_version"`
+	TemplateVersion int           `json:"template_version"`
+	// TemplateSHA256 is the approved canonical template digest (B01).
+	TemplateSHA256 string            `json:"template_sha256"`
+	Settings       SynthesisSettings `json:"settings"`
+	DeadlineMillis int64             `json:"deadline_ms"`
 	// Voice is the explicit voice selection (optional). The default
 	// voice for the language is used when empty.
 	Voice string `json:"voice,omitempty"`
 }
 
 // SynthesizeResponse is the worker-side mirror of
-// contracts.TTSWorkerResponse.
+// contracts.TTSWorkerResponse. Settings carries the synthesis
+// parameters that produced the returned audio (filled from the
+// cache identity on hit); the orchestrator propagates these into
+// PipelineAudio so the client sees the ACTUAL sample rate /
+// bit depth / channels, never a value declared by the request.
 type SynthesizeResponse struct {
-	RequestID      string   `json:"request_id"`
-	SpeechKey      string   `json:"speech_key"`
-	Language       string   `json:"language"`
-	State          TTSState `json:"state"`
-	AudioB64       string   `json:"audio_b64,omitempty"`    // base64 of PCM/WAV bytes when state == OK
-	ContentType    string   `json:"content_type,omitempty"` // audio/wav
-	ChecksumSHA256 string   `json:"checksum_sha256,omitempty"`
-	ModelRevision  string   `json:"model_revision,omitempty"`
-	VoiceRevision  string   `json:"voice_revision,omitempty"`
-	CacheHit       bool     `json:"cache_hit"`
-	ByteSize       int64    `json:"byte_size,omitempty"`
+	RequestID      string            `json:"request_id"`
+	SpeechKey      string            `json:"speech_key"`
+	Language       string            `json:"language"`
+	State          TTSState          `json:"state"`
+	AudioB64       string            `json:"audio_b64,omitempty"`    // base64 of PCM/WAV bytes when state == OK
+	ContentType    string            `json:"content_type,omitempty"` // audio/wav
+	ChecksumSHA256 string            `json:"checksum_sha256,omitempty"`
+	ModelRevision  string            `json:"model_revision,omitempty"`
+	VoiceRevision  string            `json:"voice_revision,omitempty"`
+	Settings       SynthesisSettings `json:"settings,omitempty"`
+	CacheHit       bool              `json:"cache_hit"`
+	ByteSize       int64             `json:"byte_size,omitempty"`
 }
 
 // Worker is the TTS worker lifecycle. It owns the bounded queue, the
@@ -443,15 +450,22 @@ func (w *Worker) handleJob(j *job) {
 		w.processed.Add(1)
 		return
 	}
+	settings := toWorkerSettings(j.req.Settings)
+	// The real adapter generates at its negotiated native rate; do not
+	// label that waveform with the caller's preferred rate.
+	if rt, ok := w.runtime.(*AdapterSubprocessRuntime); ok {
+		settings.SampleRate = rt.NativeSampleRate()
+	}
 	id := CacheIdentity{
 		Text:              j.req.Text,
 		TemplateKey:       string(j.req.SpeechKey),
 		TemplateVersion:   j.req.TemplateVersion,
 		SourceVersion:     j.req.SourceVersion,
+		TemplateSHA256:    j.req.TemplateSHA256,
 		Language:          j.req.Language,
 		ModelRevision:     w.runtime.Revision(),
 		VoiceRevision:     voiceRev,
-		SynthesisSettings: toWorkerSettings(j.req.Settings),
+		SynthesisSettings: settings,
 	}
 	if err := id.Validate(); err != nil {
 		w.emit(j, errorResponse(j.req, StateAudioUnavailable, err.Error()))
@@ -474,8 +488,13 @@ func (w *Worker) handleJob(j *job) {
 			ChecksumSHA256: entry.ChecksumSHA256,
 			ModelRevision:  id.ModelRevision,
 			VoiceRevision:  id.VoiceRevision,
-			CacheHit:       true,
-			ByteSize:       entry.ByteSize,
+			// SynthesizeResponse.Settings must mirror the actual
+			// synthesis that produced the cached bytes; the cache
+			// identity is the source of truth for "what rate / depth /
+			// channels produced this WAV".
+			Settings: id.SynthesisSettings,
+			CacheHit: true,
+			ByteSize: entry.ByteSize,
 		})
 		w.processed.Add(1)
 		return

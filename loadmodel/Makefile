@@ -14,7 +14,7 @@ build:
 	cd $(ROOT) && $(GO) build -o bin/voiceloadd ./cmd/voiceloadd
 
 bench:
-	cd $(ROOT) && $(GO) test -bench=. -benchmem -benchtime=2s -run=^$ ./loadfixtures/
+	cd $(ROOT) && $(GO) test -bench=. -benchmem -benchtime=2s -run=^$$ ./loadfixtures/
 
 test:
 	cd $(ROOT) && $(GO) test -count=1 -race ./...

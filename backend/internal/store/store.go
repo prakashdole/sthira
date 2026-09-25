@@ -41,7 +41,12 @@ var ErrNotFound = errors.New("store: not found")
 // the single source of truth the readiness prober checks schema_migrations
 // against; bump it when a new migration is added (0001 -> 1, 0002 -> 2, ...).
 // Readiness fails on an outdated database rather than assuming revision 1.
-const SchemaRevision = 7
+//
+// Current value matches backend/migrations/0010_p6_template_binding_quarantine.sql;
+// the binary's queries depend on the source_id / template_sha256 columns and
+// active-row completeness added by migrations 0008–0010. A DB at revision < 10
+// must not pass readiness.
+const SchemaRevision = 10
 
 // DBTX is the minimal database/sql surface the layer needs, satisfied by both
 // *sql.DB and *sql.Tx. This keeps every repository method runnable inside or

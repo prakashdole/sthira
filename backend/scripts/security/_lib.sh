@@ -73,7 +73,8 @@ print_safe() {
 # user, date, host, go-version. The reports directory is the audit
 # trail; findings reference the snapshot.
 snapshot_metadata() {
-    local snap="{
+    local snap
+    snap="{
       \"snapshot_date\": \"${SNAPSHOT_DATE}\",
       \"run_date\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
       \"host\": \"${SNAPSHOT_HOST}\",

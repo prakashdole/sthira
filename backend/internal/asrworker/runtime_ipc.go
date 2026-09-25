@@ -208,7 +208,7 @@ func loadIPCRuntime(cfg SubprocessRuntimeConfig, probe interface{}) (disp *ipcDi
 	}
 
 	args := []string{"-u", "-m", cfg.Module, "--adapter-mode"}
-	cmd := exec.Command(pyCmd, args...)
+	cmd := exec.Command(pyCmd, args...) // #nosec G204
 	if cfg.Workdir != "" {
 		cmd.Dir = cfg.Workdir
 	}

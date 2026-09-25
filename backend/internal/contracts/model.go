@@ -51,14 +51,17 @@ var validIntents = map[Intent]bool{
 type ActionType string
 
 const (
-	ActionFocusFeature ActionType = "FOCUS_FEATURE"
-	ActionShowChoices  ActionType = "SHOW_CHOICES"
-	ActionShowRoute    ActionType = "SHOW_ROUTE"
-	ActionOpenPanel    ActionType = "OPEN_PANEL"
-	ActionZoom         ActionType = "ZOOM"
-	ActionPan          ActionType = "PAN"
-	ActionRecenter     ActionType = "RECENTER"
-	ActionSetLanguage  ActionType = "SET_LANGUAGE"
+	ActionFocusFeature       ActionType = "FOCUS_FEATURE"
+	ActionHighlightFeature   ActionType = "HIGHLIGHT_FEATURE"
+	ActionShowChoices        ActionType = "SHOW_CHOICES"
+	ActionFitFeatures        ActionType = "FIT_FEATURES"
+	ActionShowRoute          ActionType = "SHOW_ROUTE"
+	ActionOpenPanel          ActionType = "OPEN_PANEL"
+	ActionZoom               ActionType = "ZOOM"
+	ActionPan                ActionType = "PAN"
+	ActionRecenter           ActionType = "RECENTER"
+	ActionSetLanguage        ActionType = "SET_LANGUAGE"
+	ActionSetLayerVisibility ActionType = "SET_LAYER_VISIBILITY"
 )
 
 // Panel is the allowed confirmation/detail panel enum.
@@ -79,9 +82,9 @@ var validPanels = map[Panel]bool{
 }
 
 var validActionTypes = map[ActionType]bool{
-	ActionFocusFeature: true, ActionShowChoices: true, ActionShowRoute: true,
-	ActionOpenPanel: true, ActionZoom: true, ActionPan: true,
-	ActionRecenter: true, ActionSetLanguage: true,
+	ActionFocusFeature: true, ActionHighlightFeature: true, ActionShowChoices: true, ActionFitFeatures: true,
+	ActionShowRoute: true, ActionOpenPanel: true, ActionZoom: true, ActionPan: true,
+	ActionRecenter: true, ActionSetLanguage: true, ActionSetLayerVisibility: true,
 }
 
 // IsValidIntent reports whether i is an allowed middle-model intent.
@@ -119,6 +122,8 @@ type Action struct {
 	Direction string     `json:"direction,omitempty"`
 	Steps     int        `json:"steps,omitempty"`
 	Language  string     `json:"language,omitempty"`
+	Layer     string     `json:"layer,omitempty"`
+	Visible   *bool      `json:"visible,omitempty"`
 }
 
 // ModelOutput is the exact top-level middle-model output object.
@@ -210,11 +215,11 @@ func ValidateModelOutput(out ModelOutput, requestID, dataVersion string, known m
 
 func validateAction(a Action, known knownIDs) error {
 	switch a.Type {
-	case ActionFocusFeature:
+	case ActionFocusFeature, ActionHighlightFeature:
 		return requireKnownID("target_id", a.TargetID, known)
-	case ActionShowChoices:
+	case ActionShowChoices, ActionFitFeatures:
 		if len(a.TargetIDs) == 0 || len(a.TargetIDs) > MaxShowChoices {
-			return fmt.Errorf("SHOW_CHOICES requires 1..%d target_ids", MaxShowChoices)
+			return fmt.Errorf("%s requires 1..%d target_ids", a.Type, MaxShowChoices)
 		}
 		for _, id := range a.TargetIDs {
 			if err := requireKnownID("target_ids", id, known); err != nil {
@@ -249,6 +254,16 @@ func validateAction(a Action, known knownIDs) error {
 	case ActionSetLanguage:
 		if a.Language == "" {
 			return fmt.Errorf("SET_LANGUAGE requires language")
+		}
+		return nil
+	case ActionSetLayerVisibility:
+		switch a.Layer {
+		case "RED_ZONES", "SAFE_ZONES", "ROUTES", "MY_LOCATION":
+		default:
+			return fmt.Errorf("unknown layer %q", a.Layer)
+		}
+		if a.Visible == nil {
+			return fmt.Errorf("SET_LAYER_VISIBILITY requires visible boolean")
 		}
 		return nil
 	default:

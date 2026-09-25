@@ -228,8 +228,12 @@ class TestASRRealAdapter:
         assert lines.count("run:ctc_decoder.onnx") >= 1
         assert lines.index("run:ctc_decoder.onnx") < len(lines)
 
-    def test_transcribe_real_decode_path_no_confidence(self, tmp_path, fake_dir):
+    @pytest.mark.parametrize("vocab_layout", ["mapping", "list"])
+    def test_transcribe_real_decode_path_no_confidence(self, tmp_path, fake_dir, vocab_layout):
         art = _make_asr_artifact(tmp_path)
+        if vocab_layout == "list":
+            (art / "assets" / "vocab.json").write_text(
+                json.dumps({"hi": ["a", "b", "c", "d", "<blk>"]}))
         # argmax path: a, blank(4), b, b, c, d, d -> collapse -> a b? no:
         # [0,4,1,2,3] minus blank -> a,b,c,d -> "abcd" (no spaces)
         res, _, proc = _run(
@@ -290,6 +294,68 @@ class TestASRRealAdapter:
              "STHIRA_ASR_APPROVED_LANGUAGES": "hi-IN"})
         assert "not in loaded+approved" in res[0]["error"]
 
+    def test_transcribe_exact_silence_produces_empty_text(self, tmp_path, fake_dir):
+        art = _make_asr_artifact(tmp_path)
+        # 1 second of exact silence (16000 float32 zeros).
+        silence_b64 = base64.b64encode(struct.pack("<%df" % 16000, *([0.0] * 16000))).decode("ascii")
+        res, _, _ = _run(
+            "sthira_v2.speech_asr_adapter",
+            [{"op": "transcribe", "request_id": "R-silence",
+              "samples_b64": silence_b64, "sample_rate": 16000,
+              "language": "hi-IN"}],
+            tmp_path, fake_dir,
+            {"STHIRA_ASR_ARTIFACT_DIR": str(art),
+             "STHIRA_FAKE_CTC_ARGMAX": "[0]"})
+        tr = res[0]
+        assert tr["request_id"] == "R-silence"
+        assert tr["text"] == "", f"silence must produce empty text, got {tr.get('text')!r}"
+        assert tr["confidence"] is None
+
+    def test_transcribe_empty_input_produces_empty_text(self, tmp_path, fake_dir):
+        art = _make_asr_artifact(tmp_path)
+        res, _, _ = _run(
+            "sthira_v2.speech_asr_adapter",
+            [{"op": "transcribe", "request_id": "R-empty",
+              "samples_b64": "", "sample_rate": 16000,
+              "language": "hi-IN"}],
+            tmp_path, fake_dir,
+            {"STHIRA_ASR_ARTIFACT_DIR": str(art)})
+        tr = res[0]
+        assert tr["request_id"] == "R-empty"
+        assert tr["text"] == ""
+        assert tr["confidence"] is None
+
+    def test_transcribe_nonfinite_fails_safely(self, tmp_path, fake_dir):
+        art = _make_asr_artifact(tmp_path)
+        nan_b64 = base64.b64encode(struct.pack("<f", float("nan"))).decode("ascii")
+        res, _, _ = _run(
+            "sthira_v2.speech_asr_adapter",
+            [{"op": "transcribe", "request_id": "R-nan",
+              "samples_b64": nan_b64, "sample_rate": 16000,
+              "language": "hi-IN"}],
+            tmp_path, fake_dir,
+            {"STHIRA_ASR_ARTIFACT_DIR": str(art)})
+        tr = res[0]
+        assert tr["request_id"] == "R-nan"
+        assert "non-finite" in tr.get("error", "")
+
+    def test_transcribe_quiet_speech_preserved(self, tmp_path, fake_dir):
+        art = _make_asr_artifact(tmp_path)
+        # Low amplitude signal (0.001) is above silence epsilon (1e-6) and must not be suppressed.
+        quiet_b64 = base64.b64encode(struct.pack("<8f", *([0.001] * 8))).decode("ascii")
+        res, _, _ = _run(
+            "sthira_v2.speech_asr_adapter",
+            [{"op": "transcribe", "request_id": "R-quiet",
+              "samples_b64": quiet_b64, "sample_rate": 16000,
+              "language": "hi-IN"}],
+            tmp_path, fake_dir,
+            {"STHIRA_ASR_ARTIFACT_DIR": str(art),
+             "STHIRA_FAKE_CTC_ARGMAX": "[0]"})
+        tr = res[0]
+        assert tr["request_id"] == "R-quiet"
+        assert tr["text"] == "a"
+
+
 
 # ---------------- TTS fakes ----------------
 
@@ -323,6 +389,9 @@ class _Batch:
     def __init__(self, n):
         self.input_ids = _np.arange(n).reshape(1, n)
         self.attention_mask = _np.ones((1, n))
+    def to(self, device):
+        _log("batch.to:" + device)
+        return self
 
 class FakeTokenizer:
     def __init__(self, kind):
@@ -343,7 +412,11 @@ class ParlerTTSForConditionalGeneration:
         m = ParlerTTSForConditionalGeneration()
         m.config = _Cfg(sr)
         return m
-    def __init__(self): pass
+    def __init__(self): self.device = "cpu"
+    def to(self, device):
+        _log("model.to:" + device)
+        self.device = device
+        return self
     def eval(self): _log("eval")
     def generate(self, input_ids=None, attention_mask=None,
                  prompt_input_ids=None, prompt_attention_mask=None,
@@ -388,20 +461,23 @@ class TestTTSRealAdapter:
             e.update(extra)
         return e
 
-    def test_load_warm_ready_ordering_and_native_rate(self, tmp_path, fake_dir):
+    @pytest.mark.parametrize("device", ["cpu", "cuda:0"])
+    def test_load_warm_ready_ordering_and_native_rate(self, tmp_path, fake_dir, device):
         (fake_dir / "parler_tts.py").write_text(FAKE_TTS_MODEL)
         (fake_dir / "transformers.py").write_text(
             "from parler_tts import AutoTokenizer\n")
         art, voices = _make_tts_artifact(tmp_path)
         res, trace, proc = _run(
             "sthira_v2.speech_tts_adapter", [{"op": "ready"}],
-            tmp_path, fake_dir, self._env(art, voices))
+            tmp_path, fake_dir, self._env(art, voices, {"STHIRA_TTS_DEVICE": device}))
         ready = res[0]
         assert ready["status"] == "ready", ready
         assert ready["sample_rate"] == 44100
         assert {"language": "hi-IN", "name": "Rohit",
                 "revision": "approved-v1"} in ready["voices"]
         lines = open(trace).read().splitlines()
+        assert lines.index("model.to:" + device) < lines.index("generate")
+        assert lines.count("batch.to:" + device) == 2
         assert lines.index("load:parler") < lines.index("generate")
         assert lines.index("generate") < len(lines)  # warm-up before ready
 

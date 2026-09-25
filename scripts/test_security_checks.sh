@@ -85,7 +85,12 @@ EOF
 
 # ---- fake tool factory ---------------------------------------------
 FAKEBIN="$WORK/fakebin"
-mkdir -p "$FAKEBIN"
+SYSBIN="$WORK/sysbin"
+mkdir -p "$FAKEBIN" "$SYSBIN"
+ln -sf "$(command -v go)" "$SYSBIN/go"
+ln -sf "$(command -v gofmt)" "$SYSBIN/gofmt"
+ln -sf "$(command -v python3)" "$SYSBIN/python3"
+
 make_fake() { # make_fake <name> <rc> <stdout-text>
   local name="$1" rc="$2" text="$3"
   cat > "$FAKEBIN/$name" <<EOF
@@ -100,7 +105,7 @@ EOF
 run_harness() { # run_harness <tag> -> sets RC + JSON paths
   local tag="$1"
   set +e
-  PATH="$FAKEBIN:$PATH" \
+  PATH="$FAKEBIN:$SYSBIN:/usr/bin:/bin" \
   STHIRA_SECURITY_MD="$WORK/out_$tag.md" \
   STHIRA_SECURITY_JSON="$WORK/out_$tag.json" \
     bash "$WORK/scripts/run_security_checks.sh" --json > "$WORK/log_$tag.txt" 2>&1

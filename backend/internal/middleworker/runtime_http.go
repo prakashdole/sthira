@@ -85,12 +85,18 @@ func (h *HTTPClientRuntime) Propose(ctx context.Context, req RequestEnvelope) (*
 	if err != nil {
 		return nil, err
 	}
+	schema, err := scopedModelOutputSchema(req)
+	if err != nil {
+		return nil, err
+	}
 	return h.client.Propose(ctx, ProposeInput{
 		ModelID:            h.modelID,
 		RequestID:          req.RequestID,
 		SystemPrompt:       h.system,
 		UserPayload:        payload,
 		ChatTemplateKwargs: h.chatKwargs,
+		MaxOutputTokens:    req.MaxOutputTokens,
+		SchemaJSON:         schema,
 	})
 }
 

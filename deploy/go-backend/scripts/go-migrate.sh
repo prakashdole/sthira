@@ -3,8 +3,8 @@
 # backend deployment package.
 #
 # Strategy:
-#   1. Decide whether to run sthmigrate in the package's image
-#      (`docker compose run --rm api sthmigrate up`) or directly on the
+#   1. Decide whether to run sthmigrate in the package's dedicated migration
+#      image (`docker compose run --rm migrate up`) or directly on the
 #      host (when Docker is unavailable, as a CI/operator workflow).
 #      Either way, the migration is a single, atomic, advisory-lock-
 #      protected pass.
@@ -14,7 +14,7 @@
 #
 # Usage:
 #   go-migrate.sh up        # apply all pending migrations
-#   go-migrate.sh up 7      # apply up to and including revision 7
+#   go-migrate.sh up 9      # apply up to and including revision 9
 #   go-migrate.sh status    # print applied revisions
 #   go-migrate.sh verify    # parse pending files without committing
 
@@ -22,12 +22,14 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${PACKAGE_DIR}/../.." && pwd)"
 
 "${PACKAGE_DIR}/bin/env-preflight.sh"
 
 PROJECT_NAME="${STHIRA_DEPLOY_PROJECT:-sthira-go}"
 export STHIRA_DEPLOY_PROJECT="${PROJECT_NAME}"
 export STHIRA_DEPLOY_IMAGE="${STHIRA_DEPLOY_IMAGE:-${PROJECT_NAME}-backend:local}"
+export STHIRA_DEPLOY_MIGRATE_IMAGE="${STHIRA_DEPLOY_MIGRATE_IMAGE:-${PROJECT_NAME}-backend:local-migrate}"
 
 SUBCMD="${1:-up}"
 shift || true
@@ -39,12 +41,11 @@ run_via_docker() {
     # default for `compose run` in Compose v2.
     "${COMPOSE[@]}" run --rm --no-deps \
         -e "STHIRA_DATABASE_DSN=${STHIRA_DATABASE_DSN}" \
-        --entrypoint "/usr/local/bin/sthmigrate" \
-        api "${SUBCMD}" "$@"
+        migrate "${SUBCMD}" "$@"
 }
 
 run_on_host() {
-    # Used when Docker is unavailable. Requires `psql` on PATH and Go 1.27+
+    # Used when Docker is unavailable. Requires `psql` on PATH and Go
     # for the binary build (or a pre-built sthmigrate at STHIRA_MIGRATE_BIN).
     local bin="${STHIRA_MIGRATE_BIN:-}"
     if [[ -z "${bin}" || ! -x "${bin}" ]]; then
@@ -58,18 +59,22 @@ run_on_host() {
         fi
         bin="$(mktemp -t sthmigrate.XXXXXX)"
         trap 'rm -f "${bin}"' EXIT
-        (cd "${PACKAGE_DIR}/migrate" && GOFLAGS=-mod=mod go build -o "${bin}" ./cmd/sthmigrate)
+        (cd "${PACKAGE_DIR}/migrate" && go build -o "${bin}" ./cmd/sthmigrate)
     fi
-    STHIRA_DATABASE_DSN="${STHIRA_DATABASE_DSN}" "${bin}" "${SUBCMD}" "$@"
+    local dir_arg=()
+    if [[ ! " $* " =~ " -migrations " && ! " $* " =~ " --migrations " ]]; then
+        dir_arg=(--migrations "${REPO_ROOT}/backend/migrations")
+    fi
+    STHIRA_DATABASE_DSN="${STHIRA_DATABASE_DSN}" "${bin}" "${SUBCMD}" "${dir_arg[@]}" "$@"
 }
 
-# Prefer Docker when available and the image exists locally.
+# Prefer Docker when available and the migration image exists locally.
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    if docker image inspect "${STHIRA_DEPLOY_IMAGE}" >/dev/null 2>&1; then
+    if docker image inspect "${STHIRA_DEPLOY_MIGRATE_IMAGE}" >/dev/null 2>&1; then
         run_via_docker "$@"
         exit
     fi
-    echo "go-migrate: image ${STHIRA_DEPLOY_IMAGE} not built; please run scripts/go-build.sh" >&2
+    echo "go-migrate: image ${STHIRA_DEPLOY_MIGRATE_IMAGE} not built; please run scripts/go-build.sh" >&2
     exit 1
 fi
 

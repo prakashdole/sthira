@@ -223,6 +223,10 @@ type ProposeInput struct {
 	// It does NOT override the template; the official Sarvam
 	// template reads enable_thinking.
 	ChatTemplateKwargs map[string]any
+	// MaxOutputTokens is the per-request max tokens limit, bounded by c.limits.MaxOutputTokens.
+	MaxOutputTokens int
+	// SchemaJSON optionally narrows the pinned schema to the trusted snapshot.
+	SchemaJSON []byte
 }
 
 // ProposeOutput is what the Client returns on success.
@@ -268,13 +272,22 @@ func (c *Client) Propose(ctx context.Context, in ProposeInput) (*ProposeOutput, 
 		defer cancel()
 	}
 
+	maxTokens := c.limits.MaxOutputTokens
+	if in.MaxOutputTokens > 0 && in.MaxOutputTokens <= c.limits.MaxOutputTokens {
+		maxTokens = in.MaxOutputTokens
+	}
+
+	schema := c.schemaBytes
+	if len(in.SchemaJSON) != 0 {
+		schema = in.SchemaJSON
+	}
 	body, err := json.Marshal(chatCompletionRequest{
 		Model: in.ModelID,
 		Messages: []chatMessage{
 			{Role: "system", Content: in.SystemPrompt},
 			{Role: "user", Content: string(in.UserPayload)},
 		},
-		MaxTokens:          c.limits.MaxOutputTokens,
+		MaxTokens:          maxTokens,
 		Temperature:        0.0,
 		ChatTemplateKwargs: in.ChatTemplateKwargs,
 		ResponseFormat: &responseFormat{
@@ -282,7 +295,7 @@ func (c *Client) Propose(ctx context.Context, in ProposeInput) (*ProposeOutput, 
 			JSONSchema: &jsonSchema{
 				Name:   "model_output",
 				Strict: true,
-				Schema: c.schemaBytes,
+				Schema: schema,
 			},
 		},
 		Stream: false,
@@ -388,7 +401,7 @@ func (c *Client) Propose(ctx context.Context, in ProposeInput) (*ProposeOutput, 
 		if wire.Usage.PromptTokens > c.limits.MaxContextTokens {
 			return nil, ErrContextExceeded
 		}
-		if wire.Usage.CompletionTokens > c.limits.MaxOutputTokens {
+		if wire.Usage.CompletionTokens > maxTokens {
 			return nil, ErrOutputExceeded
 		}
 	}

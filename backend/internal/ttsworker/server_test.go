@@ -254,6 +254,7 @@ func TestServerSynthesizeOKOnCacheHit(t *testing.T) {
 		TemplateKey:       "destination_options",
 		TemplateVersion:   1,
 		SourceVersion:     clock.Current(),
+		TemplateSHA256:    mustDigest(out.Text),
 		Language:          "ml-IN",
 		ModelRevision:     "rev-1",
 		VoiceRevision:     "ml-IN-female-1",
@@ -273,6 +274,7 @@ func TestServerSynthesizeOKOnCacheHit(t *testing.T) {
 		Text:            out.Text,
 		SourceVersion:   clock.Current(),
 		TemplateVersion: 1,
+		TemplateSHA256:  id.TemplateSHA256,
 		Settings:        id.SynthesisSettings,
 		DeadlineMillis:  5000,
 	}

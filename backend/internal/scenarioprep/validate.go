@@ -2,9 +2,11 @@ package scenarioprep
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"sthira/backend/internal/catalogue"
 	"sthira/backend/internal/httpjson"
@@ -37,19 +39,30 @@ func Prepare(workspace, indexPath string) (*Report, error) {
 	catalogueAbs, err := safeResolve(mustAbs(workspace), idx.Catalogue)
 	if err != nil {
 		rep.Status = StatusInvalid
+		code := CodeUnsafeReferencePath
+		if errors.Is(err, ErrUnsafeSymlink) || strings.Contains(err.Error(), "symlink") {
+			code = CodeUnsafeSymlink
+		}
 		rep.Findings = append(rep.Findings, Finding{
-			Code: CodeUnsafeReferencePath, Severity: SeverityError, Scope: "catalogue",
+			Code: code, Severity: SeverityError, Scope: "catalogue",
 			Detail: err.Error(),
 		})
 		return rep, nil
 	}
-	catBody, err := os.ReadFile(catalogueAbs)
+	catBody, err := readBoundedFile(catalogueAbs, int64(packageLimits.MaxBytes))
 	if err != nil {
 		rep.Status = StatusInvalid
-		rep.Findings = append(rep.Findings, Finding{
-			Code: CodeMissingCatalogue, Severity: SeverityError, Scope: "catalogue",
-			Detail: "read catalogue: " + err.Error(),
-		})
+		if errors.Is(err, ErrBoundedRead) {
+			rep.Findings = append(rep.Findings, Finding{
+				Code: CodeMalformedIndex, Severity: SeverityError, Scope: "catalogue",
+				Detail: fmt.Sprintf("catalogue file exceeds limit of %d bytes", packageLimits.MaxBytes),
+			})
+		} else {
+			rep.Findings = append(rep.Findings, Finding{
+				Code: CodeMissingCatalogue, Severity: SeverityError, Scope: "catalogue",
+				Detail: "read catalogue: " + err.Error(),
+			})
+		}
 		return rep, nil
 	}
 	var manifest catalogue.Manifest
@@ -95,7 +108,7 @@ func Prepare(workspace, indexPath string) (*Report, error) {
 		if _, ok := scenarioOwners[id]; !ok {
 			rep.Findings = append(rep.Findings, Finding{
 				Code: CodeUnknownScenarioInIndex, Severity: SeverityError,
-				Scope: "scenario:" + id,
+				Scope:  "scenario:" + id,
 				Detail: fmt.Sprintf("index maps unknown scenario id %q", id),
 			})
 		}
@@ -123,7 +136,6 @@ func Prepare(workspace, indexPath string) (*Report, error) {
 		policy        bool
 		checksumOK    bool
 		jurisMatch    bool
-		hasEvent      bool
 		missingFields []string
 	}
 	perScenario := map[string]*scenStatus{}
@@ -137,7 +149,7 @@ func Prepare(workspace, indexPath string) (*Report, error) {
 		if err != nil {
 			rep.Findings = append(rep.Findings, Finding{
 				Code: CodeMissingPackageFile, Severity: SeverityError,
-				Scope: "scenario:" + ref.ScenarioID,
+				Scope:  "scenario:" + ref.ScenarioID,
 				Detail: "read package: " + err.Error(),
 			})
 			continue
@@ -146,7 +158,7 @@ func Prepare(workspace, indexPath string) (*Report, error) {
 		if err := httpjson.DecodeStrict(body, &pkg, packageLimits); err != nil {
 			rep.Findings = append(rep.Findings, Finding{
 				Code: CodeMalformedPackageFile, Severity: SeverityError,
-				Scope: "scenario:" + ref.ScenarioID,
+				Scope:  "scenario:" + ref.ScenarioID,
 				Detail: "strict decode: " + err.Error(),
 			})
 			continue
@@ -159,7 +171,7 @@ func Prepare(workspace, indexPath string) (*Report, error) {
 		if verr != nil {
 			rep.Findings = append(rep.Findings, Finding{
 				Code: CodePackageInvalid, Severity: SeverityError,
-				Scope: "scenario:" + ref.ScenarioID,
+				Scope:  "scenario:" + ref.ScenarioID,
 				Detail: "opkg.Validate: " + verr.Error(),
 			})
 			continue
@@ -176,7 +188,7 @@ func Prepare(workspace, indexPath string) (*Report, error) {
 			st.jurisMatch = false
 			rep.Findings = append(rep.Findings, Finding{
 				Code: CodeJurisdictionMismatch, Severity: SeverityError,
-				Scope: "scenario:" + ref.ScenarioID,
+				Scope:  "scenario:" + ref.ScenarioID,
 				Detail: fmt.Sprintf("package jurisdiction %q != scenario state %q", pkg.Provenance.Jurisdiction, owner),
 			})
 		} else {
@@ -254,7 +266,7 @@ func Prepare(workspace, indexPath string) (*Report, error) {
 		sort.Strings(scenarioIDs)
 		rep.States = append(rep.States, StateStatus{
 			StateCode: st.StateCode, Name: st.Name,
-			Scenarios: scenarioIDs,
+			Scenarios:        scenarioIDs,
 			LanguagesClaimed: claimed, LanguagesEvidenced: evidenced, LanguagesUnknown: unknown,
 		})
 	}

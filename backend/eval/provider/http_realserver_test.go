@@ -8,23 +8,21 @@
 // provider's imagined schema could not catch envelope drift — these
 // do, because a wrong field name in the provider is a 400/503 here,
 // not a silent pass.
-//go:build !race
-// +build !race
-
-// Real-server conformance tests are skipped under -race: the
-// production asrworker/middleworker/ttsworker Server.Start writes
-// its bound listener field without synchronization, and these
-// helpers poll Server.Addr() before returning. That's a pre-existing
-// race in the worker server constructors, not in the provider or
-// the contract. Worker 1's lane: add a mutex around the listener
-// field (or expose a bound-address channel from Start). Once that
-// lands, drop this build tag.
+//
+// These tests participate in -race: the worker server constructors
+// guard their listener field with a mutex (see
+// internal/asrworker/server.go and internal/ttsworker/server.go), so
+// Server.Addr() can safely poll Server.Start() running in another
+// goroutine. Provider conformance must run under the same race
+// detector the orchestrator uses in production.
 
 package provider
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -259,7 +257,7 @@ func TestConform_Middle_RealWorkerServer_EnvelopeAndNesting(t *testing.T) {
 			resp, err := http.Post("http://"+strings.TrimPrefix(addr, "http://"),
 				"application/json", strings.NewReader(string(body)))
 			if err != nil {
-				http.Error(w, err.Error(), 502)
+				http.Error(w, err.Error(), http.StatusBadGateway)
 				return
 			}
 			defer resp.Body.Close()
@@ -445,10 +443,12 @@ func startRealTTS(t *testing.T, primeCache bool) string {
 	clock := ttsworker.NewStandaloneSourceVersionClock(7)
 	codec := ttsworker.NewCodec(1<<20, time.Hour, clock)
 	if primeCache {
+		sum := sha256.Sum256([]byte("कृपया निकटतम सुरक्षित क्षेत्र पर जाएं"))
 		id := ttsworker.CacheIdentity{
 			Text: "कृपया निकटतम सुरक्षित क्षेत्र पर जाएं", TemplateKey: "go_to_safe_zone",
 			TemplateVersion: 3, SourceVersion: 7, Language: "hi-IN",
-			ModelRevision: "rev-conf-1", VoiceRevision: "voice-conf-1",
+			TemplateSHA256: hex.EncodeToString(sum[:]),
+			ModelRevision:  "rev-conf-1", VoiceRevision: "voice-conf-1",
 			SynthesisSettings: ttsworker.SynthesisSettings{SampleRate: 44100, BitDepth: 16, Channels: 1},
 		}
 		if err := codec.Put(id, makeWavRIFF(make([]byte, 128), 44100)); err != nil {

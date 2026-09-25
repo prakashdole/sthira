@@ -135,6 +135,15 @@ func (s *SubprocessRuntime) transcribeViaAdapter(demux *ipcDispatcher, ctx conte
 	if !hasLanguage(s, req.Language) {
 		return TranscribeResult{}, fmt.Errorf("%w: %s", ErrLanguageUnsupported, req.Language)
 	}
+	if !IsFinite(req.Samples) {
+		return TranscribeResult{}, fmt.Errorf("%w: audio contains non-finite samples", ErrRuntimeUnavailable)
+	}
+	if SilenceDetector(req.Samples) {
+		return TranscribeResult{
+			Text:       "",
+			Confidence: nil,
+		}, nil
+	}
 
 	adReq := adapterRequest{
 		Op:           "transcribe",
@@ -168,10 +177,7 @@ func (s *SubprocessRuntime) transcribeViaAdapter(demux *ipcDispatcher, ctx conte
 		Confidence: resp.Confidence,
 	}
 	for _, alt := range resp.Alternatives {
-		result.Alternatives = append(result.Alternatives, TranscriptAlternative{
-			Text:       alt.Text,
-			Confidence: alt.Confidence,
-		})
+		result.Alternatives = append(result.Alternatives, TranscriptAlternative(alt))
 	}
 	return result, nil
 }

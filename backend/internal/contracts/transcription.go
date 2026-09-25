@@ -1,5 +1,10 @@
 package contracts
 
+import (
+	"mime"
+	"strings"
+)
+
 // P6 transcription entry-point contract (ASR boundary). The HTTP handler
 // receives a bounded compressed audio upload and returns a typed transcript.
 // The handler does NOT store the transcript server-side; persistence is the
@@ -81,15 +86,34 @@ var SupportedTranscriptionContentTypes = []string{
 	"audio/wav",
 	"audio/webm",
 	"audio/ogg",
+	"audio/opus",
 }
 
 // IsSupportedTranscriptionContentType reports whether the MIME type is on
-// the allow list. Comparison is exact against the canonical form.
-func IsSupportedTranscriptionContentType(ct string) bool {
-	for _, t := range SupportedTranscriptionContentTypes {
-		if t == ct {
-			return true
-		}
+// the allow list. Uses stdlib mime.ParseMediaType to canonicalize parameters
+// (such as codecs=opus) consistently.
+func IsSupportedTranscriptionContentType(rawCT string) bool {
+	if strings.TrimSpace(rawCT) == "" {
+		return false
 	}
-	return false
+	mediaType, params, err := mime.ParseMediaType(rawCT)
+	if err != nil {
+		return false
+	}
+	switch mediaType {
+	case "audio/wav":
+		if codec, ok := params["codecs"]; ok && codec != "" && codec != "1" && codec != "pcm" {
+			return false
+		}
+		return true
+	case "audio/webm", "audio/ogg":
+		if codec, ok := params["codecs"]; ok && codec != "" && codec != "opus" {
+			return false
+		}
+		return true
+	case "audio/opus":
+		return true
+	default:
+		return false
+	}
 }

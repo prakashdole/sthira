@@ -127,6 +127,45 @@ func TestProcess_AudioPathCallsASR(t *testing.T) {
 	}
 }
 
+// TestProcess_SilenceOrEmptyTranscript_ReturnsClarifyNoActions verifies that
+// empty or silent input does not become a successful spoken command and
+// returns CLARIFY with no actions.
+func TestProcess_SilenceOrEmptyTranscript_ReturnsClarifyNoActions(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	resolver := orchestrationtest.NewResolver(orchestrationtest.BuildScopedContext("JTEST", "en-IN"))
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
+
+	// ASR returns empty transcript (silence)
+	asr.SetTranscribeHook(func(ctx context.Context, req contracts.ASRWorkerRequest) (contracts.ASRWorkerResponse, error) {
+		return contracts.ASRWorkerResponse{
+			RequestID: req.RequestID,
+			Language:  req.Language,
+			Text:      "",
+			State:     contracts.TranscriptionOK,
+		}, nil
+	})
+
+	req := audioPipelineRequest("JTEST", "en-IN", "audio/wav", "AAAAAA==")
+	out, err := o.Process(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("Process: unexpected error: %v", err)
+	}
+	if out.State != contracts.PipelineClarify {
+		t.Errorf("State = %s, want CLARIFY", out.State)
+	}
+	if out.ValidatedProposal.Status != contracts.StatusClarify {
+		t.Errorf("Proposal Status = %s, want CLARIFY", out.ValidatedProposal.Status)
+	}
+	if len(out.ValidatedProposal.Actions) != 0 {
+		t.Errorf("Actions length = %d, want 0", len(out.ValidatedProposal.Actions))
+	}
+	if mid.ProposeCalls() != 0 {
+		t.Errorf("middle called %d times for empty transcript; want 0", mid.ProposeCalls())
+	}
+}
+
 // TestProcess_RejectsStaleSnapshot runs the pipeline and verifies a
 // stale SnapshotRevalidate response fails the run with STALE_SNAPSHOT.
 func TestProcess_RejectsStaleSnapshot(t *testing.T) {
@@ -342,9 +381,11 @@ func TestProcess_CancellationAtEveryStage(t *testing.T) {
 		<-ctx.Done()
 		return contracts.TTSWorkerResponse{}, ctx.Err()
 	})
-	resolver := orchestrationtest.NewResolver(orchestrationtest.BuildScopedContext("JTEST", "en-IN"))
-	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
+	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("welcome", "en-IN")] = orchestrationtest.DigestString("hi")
+	resolver := orchestrationtest.NewResolver(sc)
+	validator := orchestrationtest.NewValidator()
 	tpls.Add(contracts.ApprovedTemplate{
 		SpeechKey: "welcome", Language: "en-IN", TemplateVersion: 1, SourceVersion: 1,
 		Text: "hi", SyntheticOnly: false,
@@ -676,8 +717,12 @@ func TestSynthesize_TwoJurisdictionsScoping(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
 	sc1 := orchestrationtest.BuildScopedContext("J1", "en-IN")
 	sc1.TemplateKeys = []string{"welcome"}
+	sc1.ApprovedSpeechKeys = map[string][]string{"welcome": {"en-IN"}}
+	sc1.ApprovedTemplateSHA = map[string]string{contracts.TemplateDigestKey("welcome", "en-IN"): orchestrationtest.DigestString("Welcome, citizen.")}
 	sc2 := orchestrationtest.BuildScopedContext("J2", "en-IN")
 	sc2.TemplateKeys = []string{"destination_options"} // "welcome" not allowed in J2
+	sc2.ApprovedSpeechKeys = map[string][]string{"destination_options": {"en-IN"}}
+	sc2.ApprovedTemplateSHA = map[string]string{contracts.TemplateDigestKey("destination_options", "en-IN"): orchestrationtest.DigestString("Destination choices are displayed on screen.")}
 
 	resolver := orchestrationtest.NewResolver(sc1)
 	resolver.AddJurisdiction(sc2)
@@ -734,6 +779,9 @@ func TestSynthesize_UnapprovedSyntheticTranslation(t *testing.T) {
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
 	sc.AllowedLanguages = append(sc.AllowedLanguages, "ml-IN")
 	sc.TemplateKeys = append(sc.TemplateKeys, "synth_key", "missing_trans")
+	sc.ApprovedSpeechKeys["synth_key"] = []string{"en-IN"}
+	sc.ApprovedSpeechKeys["missing_trans"] = []string{"ml-IN"}
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("synth_key", "en-IN")] = orchestrationtest.DigestString("Synthetic only.")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
@@ -777,6 +825,8 @@ func TestSynthesize_InjectedTemplateArg(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
 	sc.TemplateKeys = append(sc.TemplateKeys, "choice_prompt")
+	sc.ApprovedSpeechKeys["choice_prompt"] = []string{"en-IN"}
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("choice_prompt", "en-IN")] = orchestrationtest.DigestString("Select destination: {facility_id}.")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
@@ -816,6 +866,8 @@ func TestSynthesize_InventedArgIDRejected(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
 	sc.TemplateKeys = append(sc.TemplateKeys, "choice_prompt")
+	sc.ApprovedSpeechKeys["choice_prompt"] = []string{"en-IN"}
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("choice_prompt", "en-IN")] = orchestrationtest.DigestString("Select destination: {facility_id}.")
 	// sc knows FAC-KNOWN only
 	sc.KnownFacilities = map[string]contracts.FacilityRef{
 		"FAC-KNOWN": {FacilityID: "FAC-KNOWN"},
@@ -860,6 +912,7 @@ func TestSynthesize_MismatchedTemplateVersionRejected(t *testing.T) {
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
 	sc.TemplateKeys = append(sc.TemplateKeys, "welcome")
 	sc.TemplateVersion = 1
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("welcome", "en-IN")] = orchestrationtest.DigestString("Welcome to Sthira.")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
@@ -949,14 +1002,15 @@ func TestSynthesize_InvalidReturnedAudio(t *testing.T) {
 	})
 	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
 
-	// Hook TTS worker to return corrupt checksum
+	// Hook TTS worker to return corrupt checksum over valid WAV bytes
+	validWAV := makeTestWAV(t, 16000, 1)
 	tts.SetSynthesizeHook(func(ctx context.Context, req contracts.TTSWorkerRequest) (contracts.TTSWorkerResponse, error) {
 		return contracts.TTSWorkerResponse{
 			RequestID:      req.RequestID,
 			SpeechKey:      req.SpeechKey,
 			Language:       req.Language,
 			State:          contracts.TTSOK,
-			AudioB64:       base64.StdEncoding.EncodeToString([]byte("RIFFfake-audio")),
+			AudioB64:       base64.StdEncoding.EncodeToString(validWAV),
 			ContentType:    "audio/wav",
 			ChecksumSHA256: "corrupted_checksum",
 			ModelRevision:  "r0",
@@ -990,12 +1044,13 @@ func TestSynthesize_InvalidReturnedAudio(t *testing.T) {
 func TestProcess_UnavailableTTSPreservesActionsAndText(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
+	sc.ApprovedTemplateSHA[contracts.TemplateDigestKey("destination_options", "en-IN")] = orchestrationtest.DigestString("Destination choices are displayed on screen.")
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
 	tpls.Add(contracts.ApprovedTemplate{
 		SpeechKey: "destination_options", Language: "en-IN", TemplateVersion: 1, SourceVersion: 1,
-		Text: "Destination options on screen.", SyntheticOnly: false,
+		Text: "Destination choices are displayed on screen.", SyntheticOnly: false,
 	})
 	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
 
@@ -1100,5 +1155,49 @@ func TestProcess_PlayableAudioOutput(t *testing.T) {
 	checksum := hex.EncodeToString(sum[:])
 	if checksum != out.Audio.ChecksumSHA256 {
 		t.Errorf("checksum mismatch: computed %s != expected %s", checksum, out.Audio.ChecksumSHA256)
+	}
+}
+
+// TestProcess_MiddleHallucinatedSpeechKeyRejectedByValidator asserts that an unapproved
+// speech_key hallucinated by the middle model (e.g. ZOOM_IN_INSTRUCTION) is caught by
+// the independent validator and fails closed.
+func TestProcess_MiddleHallucinatedSpeechKeyRejectedByValidator(t *testing.T) {
+	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
+	resolver := orchestrationtest.NewResolver(orchestrationtest.BuildScopedContext("JTEST", "en-IN"))
+	validator := orchestrationtest.NewValidator()
+	tpls := orchestrationtest.NewTemplates()
+	o := buildOrchestrator(asr, mid, tts, resolver, validator, tpls)
+
+	mid.SetProposeHook(func(ctx context.Context, req contracts.MiddleWorkerRequest) (contracts.MiddleWorkerResponse, error) {
+		speechKey := "ZOOM_IN_INSTRUCTION"
+		intent := contracts.IntentZoom
+		return contracts.MiddleWorkerResponse{
+			RequestID:   req.RequestID,
+			DataVersion: "v1",
+			Proposal: contracts.ModelOutput{
+				SchemaVersion: "3.0",
+				RequestID:     req.RequestID,
+				DataVersion:   "v1",
+				Status:        contracts.StatusOK,
+				Intent:        &intent,
+				Language:      "en-IN",
+				Actions: []contracts.Action{
+					{Type: contracts.ActionZoom, Direction: "IN", Steps: 1},
+				},
+				SpeechKey:        &speechKey,
+				ClarificationIDs: []string{},
+				EvidenceIDs:      []string{},
+			},
+			ModelRevision: "sarvamai/sarvam-30b",
+		}, nil
+	})
+
+	req := transcriptPipelineRequest("JTEST", "en-IN", "zoom in")
+	out, err := o.Process(context.Background(), req, nil)
+	if err == nil {
+		t.Fatalf("expected validator rejection for hallucinated speech_key ZOOM_IN_INSTRUCTION, got: %+v", out)
+	}
+	if out.State != contracts.PipelineModelUnavailable {
+		t.Errorf("expected state %s, got %s", contracts.PipelineModelUnavailable, out.State)
 	}
 }

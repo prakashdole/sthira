@@ -63,7 +63,7 @@ run_pg_dump_via_docker() {
     # the env-file we just generated.
     docker run --rm --network "${PROJECT_NAME}_sthira-go-backend" -i \
         --env-file "${env_file}" \
-        "postgis/postgis:16-3.4" \
+        "${STHIRA_PG_IMAGE:-postgis/postgis:18-3.6}" \
         pg_dump --format=custom --no-owner --no-privileges --quote-all-identifiers \
         > "${out}.tmp"
     rm -f "${env_file}"
@@ -101,7 +101,7 @@ elif [[ -x "${PACKAGE_DIR}/migrate/pgdsn-env" ]]; then
     PGDSN_ENV_BIN="${PACKAGE_DIR}/migrate/pgdsn-env"
 elif command -v go >/dev/null 2>&1; then
     PGDSN_ENV_BIN="${PACKAGE_DIR}/migrate/pgdsn-env"
-    (cd "${PACKAGE_DIR}/migrate" && GOFLAGS=-mod=mod go build -o "${PGDSN_ENV_BIN}" ./cmd/pgdsn-env)
+    (cd "${PACKAGE_DIR}/migrate" && go build -o "${PGDSN_ENV_BIN}" ./cmd/pgdsn-env)
 else
     echo "go-backup: pgdsn-env missing and Go not on PATH; cannot dump without it" >&2
     exit 1

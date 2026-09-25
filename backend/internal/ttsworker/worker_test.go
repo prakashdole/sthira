@@ -2,6 +2,8 @@ package ttsworker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"sync"
@@ -97,6 +99,7 @@ func craftReq(t *testing.T, renderer *templates.Renderer, clock *StandaloneSourc
 		Text:            text,
 		SourceVersion:   clock.Current(),
 		TemplateVersion: 1,
+		TemplateSHA256:  mustDigest(text),
 		Settings:        SynthesisSettings{SampleRate: 22050, BitDepth: 16, Channels: 1, SpeakingRate: 1.0},
 		DeadlineMillis:  5000,
 	}
@@ -111,11 +114,17 @@ func identityFor(t *testing.T, renderer *templates.Renderer, clock *StandaloneSo
 		TemplateKey:       "destination_options",
 		TemplateVersion:   1,
 		SourceVersion:     clock.Current(),
+		TemplateSHA256:    mustDigest(text),
 		Language:          lang,
 		ModelRevision:     "rev-1",
 		VoiceRevision:     "ml-IN-female-1",
 		SynthesisSettings: SynthesisSettings{SampleRate: 22050, BitDepth: 16, Channels: 1, SpeakingRate: 1.0},
 	}
+}
+
+func mustDigest(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }
 
 // silenceWAVCache puts a silent WAV into the cache for an identity.
@@ -127,6 +136,30 @@ func silenceWAVCache(t *testing.T, codec *Codec, id CacheIdentity) {
 	}
 	if err := codec.Put(id, silence.Bytes); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRealAdapterCacheUsesNativeRate(t *testing.T) {
+	w, _, renderer, codec, clock := newWorker(t, 8, 2)
+	rt := &AdapterSubprocessRuntime{sampleRate: 44100, revision: "rev-1", voiceMap: map[string]string{"ml-IN": "ml-IN-female-1"}}
+	w.runtime = rt
+	id := identityFor(t, renderer, clock, "ml-IN")
+	id.SynthesisSettings.SampleRate = 44100
+	wav, err := EncodeSilenceWav(44100, 0.5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := codec.Put(id, wav.Bytes); err != nil {
+		t.Fatal(err)
+	}
+	settings := id.SynthesisSettings
+	settings.SampleRate = 16000
+	resp, err := w.Synthesize(SynthesizeRequest{RequestID: "native-rate", Text: id.Text, SpeechKey: templates.Key(id.TemplateKey), Language: id.Language, TemplateVersion: id.TemplateVersion, SourceVersion: id.SourceVersion, TemplateSHA256: id.TemplateSHA256, Settings: settings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.State != StateOK || resp.Settings.SampleRate != 44100 {
+		t.Fatalf("native cache miss or mislabeled output: %+v", resp)
 	}
 }
 
@@ -143,6 +176,7 @@ func TestWorkerHotPathServesCachedAudio(t *testing.T) {
 		Text:            id.Text,
 		SourceVersion:   id.SourceVersion,
 		TemplateVersion: id.TemplateVersion,
+		TemplateSHA256:  id.TemplateSHA256,
 		Settings:        id.SynthesisSettings,
 		DeadlineMillis:  5000,
 	}

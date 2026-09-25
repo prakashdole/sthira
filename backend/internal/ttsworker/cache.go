@@ -2,6 +2,8 @@ package ttsworker
 
 import (
 	"container/list"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,10 +45,12 @@ type KeyStr string
 // the cache refuses a partial identity. Stored as JSON-encoded key so
 // a parameter change deterministically invalidates the cache.
 type CacheIdentity struct {
-	Text              string            `json:"text"`
-	TemplateKey       string            `json:"template_key"`
-	TemplateVersion   int               `json:"template_version"`
-	SourceVersion     int               `json:"source_version"`
+	Text            string `json:"text"`
+	TemplateKey     string `json:"template_key"`
+	TemplateVersion int    `json:"template_version"`
+	SourceVersion   int    `json:"source_version"`
+	// TemplateSHA256 binds the cache entry to the approved template digest.
+	TemplateSHA256    string            `json:"template_sha256"`
 	Language          string            `json:"language"`
 	ModelRevision     string            `json:"model_revision"`
 	VoiceRevision     string            `json:"voice_revision"`
@@ -315,10 +319,12 @@ func (c *Codec) EvictExpired() int {
 // fields. The other fields are blank and the cache key includes the
 // blanks; production callers pass full identities.
 func InventoryKeyFor(text, templateKey, language string, templateVer int) CacheIdentity {
+	sum := sha256.Sum256([]byte(text))
 	return CacheIdentity{
 		Text:              text,
 		TemplateKey:       templateKey,
 		TemplateVersion:   templateVer,
+		TemplateSHA256:    hex.EncodeToString(sum[:]),
 		Language:          language,
 		SynthesisSettings: SynthesisSettings{},
 	}
@@ -371,6 +377,10 @@ func (id CacheIdentity) Validate() error {
 		return fmt.Errorf("%w: voice_revision", ErrInvalidIdentity)
 	case id.SourceVersion == 0:
 		return fmt.Errorf("%w: source_version", ErrInvalidIdentity)
+	case id.TemplateVersion == 0:
+		return fmt.Errorf("%w: template_version", ErrInvalidIdentity)
+	case id.TemplateSHA256 == "":
+		return fmt.Errorf("%w: template_sha256", ErrInvalidIdentity)
 	}
 	return nil
 }

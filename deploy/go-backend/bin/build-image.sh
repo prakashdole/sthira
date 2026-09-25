@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # bin/build-image.sh — produce an image for the Go backend without using
 # the repository root as Docker build context. Stages only what the
-# Dockerfile needs (backend/ + go.work files if any) into a temporary build
+# Dockerfile needs (backend/ + deploy/go-backend/migrate) into a temporary build
 # directory whose `.dockerignore` is owned here, then invokes docker build
 # against that staged context. The root .dockerignore is intentionally not
 # modified.
 #
-# This is the only path the lifecycle scripts use for image construction.
+# Builds both the distroless API image and the dedicated migration runner image.
 
 set -Eeuo pipefail
 
@@ -19,6 +19,7 @@ REPO_ROOT="$(cd "${PACKAGE_DIR}/../.." && pwd)"
 # comes from compose.yml; CI may export STHIRA_DEPLOY_PROJECT.
 PROJECT_NAME="${STHIRA_DEPLOY_PROJECT:-sthira-go}"
 IMAGE_TAG="${STHIRA_DEPLOY_IMAGE:-${PROJECT_NAME}-backend:local}"
+MIGRATE_IMAGE_TAG="${STHIRA_DEPLOY_MIGRATE_IMAGE:-${PROJECT_NAME}-backend:local-migrate}"
 BUILDER="${STHIRA_DEPLOY_BUILDER:-docker}"
 
 STAGE_DIR="$(mktemp -d -t sthira-go-stage.XXXXXXXX)"
@@ -62,11 +63,31 @@ testdata/
 *_test.go
 EOF
 
-echo "Building ${IMAGE_TAG} from staged context ${STAGE_DIR}"
+GO_VER="$(grep -m1 '^go ' "${REPO_ROOT}/backend/go.mod" | awk '{print $2}')"
+
+if ! command -v "${BUILDER}" >/dev/null 2>&1; then
+    echo "CONTAINER_RUNTIME=NOT_RUN: builder '${BUILDER}' not found on PATH." >&2
+    echo "Staged build context verified at: ${STAGE_DIR}"
+    echo "Backend files staged: $(find "${STAGE_DIR}/backend" -type f | wc -l | tr -d ' ')"
+    echo "Migrate files staged: $(find "${STAGE_DIR}/deploy/go-backend/migrate" -type f | wc -l | tr -d ' ')"
+    echo "Target images would be: ${IMAGE_TAG} and ${MIGRATE_IMAGE_TAG}"
+    exit 0
+fi
+
+echo "Building API image ${IMAGE_TAG} from staged context ${STAGE_DIR}"
 "${BUILDER}" build \
-  --build-arg "GO_VERSION=$(grep -m1 '^go ' "${REPO_ROOT}/backend/go.mod" | awk '{print $2}')" \
+  --build-arg "GO_VERSION=${GO_VER}" \
+  --target api \
   -f "${PACKAGE_DIR}/Dockerfile" \
   -t "${IMAGE_TAG}" \
+  "${STAGE_DIR}"
+
+echo "Building migration image ${MIGRATE_IMAGE_TAG} from staged context ${STAGE_DIR}"
+"${BUILDER}" build \
+  --build-arg "GO_VERSION=${GO_VER}" \
+  --target migrate \
+  -f "${PACKAGE_DIR}/Dockerfile" \
+  -t "${MIGRATE_IMAGE_TAG}" \
   "${STAGE_DIR}"
 
 echo "${IMAGE_TAG}" > "${STAGE_DIR}/.image-tag"

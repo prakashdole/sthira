@@ -1,0 +1,50 @@
+{
+  "schema_version": "3.0",
+  "manifest_id": "MAN-KL-2026-09-23-01",
+  "jurisdiction": "KL-WYD",
+  "revision": 1,
+  "generated_at": "2026-09-23T10:00:00Z",
+  "valid_until": "2026-09-24T10:00:00Z",
+  "source_status": "CURRENT",
+  "critical_card": {
+    "package_id": "PKG-WAYANAD-2026-V1",
+    "version": 1,
+    "uri": "/api/v3/packages/PKG-WAYANAD-2026-V1/versions/1",
+    "checksum_sha256": "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b",
+    "uncompressed_bytes": 10240,
+    "compressed_bytes": 2048,
+    "content_type": "application/json"
+  },
+  "resources": [
+    {
+      "resource_id": "res-map-wayanad-vector-v1",
+      "type": "VECTOR_TILES",
+      "uri": "/api/v3/resources/res-map-wayanad-vector-v1",
+      "checksum_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "byte_size": 25165824,
+      "content_type": "application/vnd.mapbox-vector-tile",
+      "required": false,
+      "attribution": "Synthetic vector tiles for Wayanad district"
+    }
+  ],
+  "revocations": {
+    "revoked_packages": [
+      "PKG-OLD-2025-01"
+    ],
+    "cancelled_routes": [
+      "RT-BLOCKED-01"
+    ],
+    "superseded_versions": []
+  },
+  "provenance": {
+    "authority": "kerala.sdma.gov.in",
+    "dataset_id": "DS-KL-2026-09",
+    "evidence_class": "SYNTHETIC_DEMO"
+  },
+  "checksum_sha256": "f628c6e268a7b97e930b5435a2977d4023c91a32810a9f1a0e14a2a11b6ff089",
+  "signature": {
+    "algorithm": "Ed25519",
+    "key_id": "KEY-SDMA-KL-2026",
+    "value": "MC4CAQAwBQYDK2VwBCIEIKn7X6p+55qg2hK3xY3U0L1h6uW5Q=="
+  }
+}

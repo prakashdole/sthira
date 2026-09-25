@@ -37,11 +37,9 @@ forbid_shared_target "$(hostname)" "0" "$OWNED_SYSTEM_USER" || true
 make_owned_scratch
 mkdir -p "$SCRATCH_DIR"/{bin,reports}
 start_owned_cluster > "$SCRATCH_DIR/dsn.txt"
-DSN="$(cat "$SCRATCH_DIR/dsn.txt")"
 OWNED_BIN_PORT="$(grep -oE 'port=[0-9]+' "$SCRATCH_DIR/dsn.txt" | cut -d= -f2)"
 
 DB="r7recover_outage_$(date +%s)_$$"
-CURRENT_OWNED_DBS+=("$DB")
 new_owned_db "$DB" >/dev/null
 apply_migrations "$DB"
 
@@ -57,7 +55,7 @@ STHIRA_PID=$!
 trap 'kill -TERM "$STHIRA_PID" 2>/dev/null || true; wait "$STHIRA_PID" 2>/dev/null || true' RETURN
 
 # Wait for live.
-for try in $(seq 1 50); do
+for _ in $(seq 1 50); do
   if curl -sf "http://127.0.0.1:$PORT/health/live" >/dev/null; then
     break
   fi
@@ -78,7 +76,7 @@ stop_owned_cluster fast
 # Poll readiness until it flips to a non-200. We assert the FIRST observed
 # value is NOT 200; that proves no false READY.
 FLIP_T=$(now_ms)
-for try in $(seq 1 50); do
+for _ in $(seq 1 50); do
   CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/health/ready" 2>/dev/null || true)"
   CODE="${CODE:-000}"
   if [[ "$CODE" != "200" ]]; then
@@ -108,7 +106,7 @@ trace "restarting owned cluster"
 pg_ctl -D "$OWNED_DATA_DIR" -l "$SCRATCH_DIR/pg-restarted.log" \
   -o "-p $OWNED_BIN_PORT -h 127.0.0.1 -k ${OWNED_DATA_DIR}" start \
   >"$SCRATCH_DIR/restart.log" 2>&1
-for try in $(seq 1 50); do
+for _ in $(seq 1 50); do
   if pg_isready -h 127.0.0.1 -p "$OWNED_BIN_PORT" -q; then
     break
   fi
@@ -117,7 +115,7 @@ done
 
 # Readiness must flip back to 200 within budget.
 RESTORE_T=$(now_ms)
-for try in $(seq 1 100); do
+for _ in $(seq 1 100); do
   CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/health/ready" || echo 000)"
   if [[ "$CODE" == "200" ]]; then
     break
@@ -138,7 +136,7 @@ echo "  timings = $SCRATCH_DIR/reports/outage-timings.jsonl"
 
 # Tidy up: shut down server cleanly.
 kill -TERM "$STHIRA_PID" 2>/dev/null || true
-for try in $(seq 1 50); do
+for _ in $(seq 1 50); do
   if ! kill -0 "$STHIRA_PID" 2>/dev/null; then break; fi
   sleep 0.05
 done

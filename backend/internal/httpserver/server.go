@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"sthira/backend/internal/contracts"
@@ -76,11 +77,101 @@ type Server struct {
 	// voiceProcess is the handler for P6 voice pipeline routes.
 	// When nil, routes are registered in unavailable mode (fail closed 503).
 	voiceProcess *VoiceProcessHandler
+	// metrics exposes a low-cardinality pipeline snapshot for the
+	// observability endpoint. Nil means pipeline metrics are absent.
+	metrics PipelineMetricsSnapshotter
+	// workersHealthFn returns per-stage worker health summaries when wired.
+	// Nil means workers are absent from the observability snapshot.
+	workersHealthFn func() []WorkerHealthSummary
+	// rateLimit is the per-IP token-bucket limiter. Nil means the middleware
+	// is a no-op (default: OFF; opt in via WithRateLimit).
+	rateLimit *RateLimiter
+	// rateLimitBypass lists URL paths that skip the rate-limit check.
+	rateLimitBypass []string
+	// trustForwardedFor, when true, uses X-Forwarded-For as the client IP
+	// for rate-limit decisions. Off by default.
+	trustForwardedFor bool
+	securityAuditor   *SecurityAuditor
+	allowedOrigins    []string
+	instanceID        string
+}
+
+// WithInstanceID sets the task-owned instance identifier reported by /health/live
+// and X-Sthira-Instance-Id.
+func WithInstanceID(id string) Option {
+	return func(s *Server) { s.instanceID = id }
 }
 
 // WithVoiceProcess wires the voice process handler for the /api/v3/voice/{transcriptions,process,speech} routes.
 func WithVoiceProcess(h *VoiceProcessHandler) Option {
 	return func(s *Server) { s.voiceProcess = h }
+}
+
+// WithMetricsSnapshotter wires the pipeline metrics source for the
+// /api/v3/observability/metrics endpoint. Production passes the orchestrator's
+// *orchestration.Metrics; nil means the field stays absent from the snapshot.
+func WithMetricsSnapshotter(m PipelineMetricsSnapshotter) Option {
+	return func(s *Server) { s.metrics = m }
+}
+
+// WithWorkersHealth wires the function that returns per-stage worker health
+// summaries for the /api/v3/observability/metrics endpoint. Nil means the
+// workers field stays absent from the snapshot.
+func WithWorkersHealth(fn func() []WorkerHealthSummary) Option {
+	return func(s *Server) { s.workersHealthFn = fn }
+}
+
+// WithPprof enables diagnostic pprof endpoints guarded by the provided secret token.
+func WithPprof(token string) Option {
+	return func(s *Server) {
+		s.cfg.EnablePprof = true
+		s.cfg.PprofToken = token
+	}
+}
+
+// WithAccessLog enables structured, privacy-preserving request completion logging.
+func WithAccessLog(enable bool) Option {
+	return func(s *Server) {
+		s.cfg.EnableAccessLog = enable
+	}
+}
+
+// WithRateLimit wires a per-remote-IP token-bucket limiter with the
+// given steady-state refill rate (tokens/sec) and burst capacity. Both
+// must be strictly positive. Pass nil to disable. Bypass paths are
+// supplied via WithRateLimitBypass; trust of X-Forwarded-For via
+// WithTrustForwardedFor. The limiter is fail-closed OFF when this
+// option is not applied.
+func WithRateLimit(rps, burst float64) Option {
+	return func(s *Server) {
+		if rps <= 0 || burst <= 0 {
+			return
+		}
+		s.rateLimit = NewRateLimiter(rps, burst, nil)
+		s.cfg.RateLimitRPS = rps
+		s.cfg.RateLimitBurst = burst
+		s.cfg.EnableRateLimit = true
+	}
+}
+
+// WithRateLimitBypass lists exact-match URL paths that skip the
+// rate-limit check. By default the bypass list is empty; callers
+// should add liveness, readiness, pprof, and the observability path.
+func WithRateLimitBypass(paths ...string) Option {
+	return func(s *Server) { s.rateLimitBypass = append(s.rateLimitBypass, paths...) }
+}
+
+// WithTrustForwardedFor controls whether X-Forwarded-For is treated as
+// the authoritative client IP for rate-limit decisions. Only enable
+// behind a known reverse proxy that strips the header from external
+// traffic; otherwise the limiter is trivially bypassable.
+func WithTrustForwardedFor(trust bool) Option {
+	return func(s *Server) { s.trustForwardedFor = trust }
+}
+
+// WithSecurityAuditor overrides the default in-memory security auditor.
+func WithSecurityAuditor(a *SecurityAuditor) Option {
+	return func(s *Server) { s.securityAuditor = a }
 }
 
 // persistedResolver adapts the store's persisted context resolution to the
@@ -215,27 +306,50 @@ func New(cfg Config, opts ...Option) *Server {
 		o(s)
 	}
 
+	if s.rateLimit == nil && s.cfg.EnableRateLimit && s.cfg.RateLimitRPS > 0 && s.cfg.RateLimitBurst > 0 {
+		s.rateLimit = NewRateLimiter(s.cfg.RateLimitRPS, s.cfg.RateLimitBurst, nil)
+	}
+	if len(s.rateLimitBypass) == 0 && len(s.cfg.RateLimitBypass) > 0 {
+		s.rateLimitBypass = append(s.rateLimitBypass, s.cfg.RateLimitBypass...)
+	}
+	if s.securityAuditor == nil {
+		s.securityAuditor = NewSecurityAuditor()
+	}
+	if len(s.allowedOrigins) == 0 && len(s.cfg.AllowedOrigins) > 0 {
+		for _, o := range s.cfg.AllowedOrigins {
+			trimmed := strings.TrimSpace(o)
+			if trimmed != "" && trimmed != "*" {
+				s.allowedOrigins = append(s.allowedOrigins, trimmed)
+			}
+		}
+	}
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health/live", s.withRequestID(s.handleLive))
-	mux.HandleFunc("/health/ready", s.withRequestID(s.handleReady))
-	mux.HandleFunc("/api/v3/voice/commands", s.withRequestID(s.handleVoiceCommands))
+	// rateGuard wraps every handler; when rate limiting is disabled
+	// (s.rateLimit == nil) it is a transparent pass-through that adds
+	// only the cost of a single function call.
+	rateGuard := s.withRateLimit
+	clockGuard := s.withClockDriftGuard
+	mux.HandleFunc("/health/live", s.withRequestID(rateGuard(s.handleLive)))
+	mux.HandleFunc("/health/ready", s.withRequestID(rateGuard(s.handleReady)))
+	mux.HandleFunc("/api/v3/voice/commands", s.withRequestID(rateGuard(s.handleVoiceCommands)))
 
 	// P4 citizen destination/stay routes. Public reads need no session; writes
 	// and the private read path require a live citizen session (Bearer token).
-	mux.HandleFunc("/api/v3/sessions", s.withRequestID(s.handleCreateSession))
-	mux.HandleFunc("/api/v3/places/resolve", s.withRequestID(s.handleResolvePlace))
-	mux.HandleFunc("/api/v3/guidance/query", s.withRequestID(s.handleGuidanceQuery))
-	mux.HandleFunc("/api/v3/reservations", s.withRequestID(s.withSession(s.handleCreateReservation)))
-	mux.HandleFunc("/api/v3/reservations/{id}", s.withRequestID(s.withSession(s.handleGetReservation)))
-	mux.HandleFunc("/api/v3/reservations/{id}/events", s.withRequestID(s.withSession(s.handleStayEvent)))
+	mux.HandleFunc("/api/v3/sessions", s.withRequestID(clockGuard(rateGuard(s.handleCreateSession))))
+	mux.HandleFunc("/api/v3/places/resolve", s.withRequestID(clockGuard(rateGuard(s.handleResolvePlace))))
+	mux.HandleFunc("/api/v3/guidance/query", s.withRequestID(clockGuard(rateGuard(s.handleGuidanceQuery))))
+	mux.HandleFunc("/api/v3/reservations", s.withRequestID(clockGuard(s.withSession(rateGuard(s.handleCreateReservation)))))
+	mux.HandleFunc("/api/v3/reservations/{id}", s.withRequestID(clockGuard(s.withSession(rateGuard(s.handleGetReservation)))))
+	mux.HandleFunc("/api/v3/reservations/{id}/events", s.withRequestID(clockGuard(s.withSession(rateGuard(s.handleStayEvent)))))
 
 	// P4 operator operations routes. Issuance is MFA-gated at the boundary;
 	// operational routes require a live OPERATOR session with verified MFA and
 	// are jurisdiction-scoped per handler.
-	mux.HandleFunc("/api/v3/operations/sessions", s.withRequestID(s.handleCreateOperatorSession))
-	mux.HandleFunc("/api/v3/operations/sources/{id}/transitions", s.withRequestID(s.withOperator(s.handleSourceTransition)))
-	mux.HandleFunc("/api/v3/operations/sources/{id}/quarantine", s.withRequestID(s.withOperator(s.handleSourceQuarantine)))
-	mux.HandleFunc("/api/v3/operations/stays/{id}/corrections", s.withRequestID(s.withOperator(s.handleStayCorrection)))
+	mux.HandleFunc("/api/v3/operations/sessions", s.withRequestID(clockGuard(rateGuard(s.handleCreateOperatorSession))))
+	mux.HandleFunc("/api/v3/operations/sources/{id}/transitions", s.withRequestID(clockGuard(s.withOperator(rateGuard(s.handleSourceTransition)))))
+	mux.HandleFunc("/api/v3/operations/sources/{id}/quarantine", s.withRequestID(clockGuard(s.withOperator(rateGuard(s.handleSourceQuarantine)))))
+	mux.HandleFunc("/api/v3/operations/stays/{id}/corrections", s.withRequestID(clockGuard(s.withOperator(rateGuard(s.handleStayCorrection)))))
 
 	// P5 public offline delivery routes (manifest, card, and auxiliary resources).
 	pubSrc := s.pubSource
@@ -256,19 +370,25 @@ func New(cfg Config, opts ...Option) *Server {
 	// `crashtest` tag. Never present in production builds.
 	s.registerCrashHook(mux)
 
+	// Diagnostic pprof endpoints behind authentication token (when enabled).
+	s.registerPprofRoutes(mux)
+
 	// P6 voice pipeline routes (transcriptions, full pipeline process, speech synthesis).
 	// When no voice process handler is configured, incomplete model configuration
-	// stays unavailable: the routes are registered and enforce HTTP methods (returning 405
-	// on non-POST), while returning 503 (MODEL_UNAVAILABLE) on requests.
+	// stays unavailable (fail closed 503).
 	voiceHandler := s.voiceProcess
 	if voiceHandler == nil {
 		voiceHandler = NewVoiceProcessHandler(nil, orchestration.DefaultLimits())
 	}
 	voiceHandler.RegisterVoiceRoutes(mux, s.withRequestID)
 
+	// Low-cardinality operational metrics endpoint (token-guarded via
+	// cfg.PprofToken). Without a configured token the handler fails closed.
+	mux.HandleFunc(observabilityRoute, s.withRequestID(s.handleObservability))
+
 	s.httpSrv = &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           mux,
+		Handler:           s.withSecurityHeaders(s.withCORS(mux)),
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,
@@ -293,6 +413,9 @@ func (s *Server) Serve(ctx context.Context) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
+		if s.rateLimit != nil {
+			s.rateLimit.Stop()
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.cfg.ShutdownTimeout)
 		defer cancel()
 		s.logger.Info("shutting down", "timeout", s.cfg.ShutdownTimeout)
@@ -330,6 +453,11 @@ func (s *Server) writeData(w http.ResponseWriter, r *http.Request, status int, d
 
 // writeError writes an error envelope with exactly Errors populated.
 func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, code, message, field string, retryable bool) {
+	s.writeErrorWithDetails(w, r, status, code, message, field, retryable, nil)
+}
+
+// writeErrorWithDetails writes an error envelope with Errors populated including optional details.
+func (s *Server) writeErrorWithDetails(w http.ResponseWriter, r *http.Request, status int, code, message, field string, retryable bool, details any) {
 	env := contracts.Envelope{
 		RequestID:     requestID(r),
 		SchemaVersion: contracts.SchemaVersionV3,
@@ -342,6 +470,7 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, 
 			Field:         field,
 			CorrelationID: requestID(r),
 			Retryable:     retryable,
+			Details:       details,
 		}},
 	}
 	s.writeEnvelope(w, status, env)
@@ -373,11 +502,17 @@ func requestID(r *http.Request) string {
 	return "req-unknown"
 }
 
-// withRequestID assigns a request ID for correlation.
+// withRequestID assigns a request ID for correlation and logs access metrics when enabled.
 func (s *Server) withRequestID(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := context.WithValue(r.Context(), requestIDKey, newRequestID())
-		next(w, r.WithContext(ctx))
+		reqID := newRequestID()
+		ctx := context.WithValue(r.Context(), requestIDKey, reqID)
+		start := time.Now()
+		tw := newStatusTrackingResponseWriter(w)
+		next(tw, r.WithContext(ctx))
+		if s.cfg.EnableAccessLog {
+			s.logAccess(reqID, r.Method, r.URL.Path, tw.statusCode, time.Since(start), tw.bytesWritten)
+		}
 	}
 }
 
@@ -434,4 +569,19 @@ func (s *Server) jsonDecodeError(w http.ResponseWriter, r *http.Request, err err
 		return
 	}
 	s.writeError(w, r, http.StatusBadRequest, contracts.ErrMalformedJSON, "invalid request body", "", false)
+}
+
+// RateLimiterStats returns an instantaneous snapshot of rate limiter counters,
+// or nil if rate limiting is not configured.
+func (s *Server) RateLimiterStats() *RateLimiterStats {
+	if s.rateLimit == nil {
+		return nil
+	}
+	st := s.rateLimit.Stats()
+	return &st
+}
+
+// SecurityAuditor returns the server's security event auditor.
+func (s *Server) SecurityAuditor() *SecurityAuditor {
+	return s.securityAuditor
 }

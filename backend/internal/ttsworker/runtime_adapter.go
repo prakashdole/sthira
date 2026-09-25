@@ -178,7 +178,7 @@ func (r *AdapterSubprocessRuntime) LoadModel() error {
 	r.mu.Unlock()
 
 	args := []string{"-u", "-m", r.module, "--adapter-mode"}
-	cmd := exec.Command(r.cmd, args...)
+	cmd := exec.Command(r.cmd, args...) // #nosec G204
 	if r.workdir != "" {
 		cmd.Dir = r.workdir
 	}
@@ -262,11 +262,7 @@ func (r *AdapterSubprocessRuntime) LoadModel() error {
 	voiceMap := make(map[string]string)
 	var voices []VoiceInfo
 	for _, v := range resp.Voices {
-		voices = append(voices, VoiceInfo{
-			Language: v.Language,
-			Name:     v.Name,
-			Revision: v.Revision,
-		})
+		voices = append(voices, VoiceInfo(v))
 		if _, ok := voiceMap[v.Language]; !ok {
 			voiceMap[v.Language] = v.Name
 		}
@@ -376,6 +372,13 @@ func (r *AdapterSubprocessRuntime) Close() error {
 		return disp.Close()
 	}
 	return nil
+}
+
+// Languages implements Runtime.
+func (r *AdapterSubprocessRuntime) NativeSampleRate() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.sampleRate
 }
 
 // Languages implements Runtime.

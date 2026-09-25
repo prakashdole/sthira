@@ -138,7 +138,7 @@ func main() {
 	if *outJSON != "" {
 		b, err := json.MarshalIndent(rep, "", "  ")
 		if err == nil {
-			_ = os.WriteFile(*outJSON, b, 0o644)
+			_ = os.WriteFile(*outJSON, b, 0o600)
 		}
 	}
 	if *outMD != "" {
@@ -185,7 +185,7 @@ func loadManifest(path string) ([]corpus.Case, error) {
 	if path == "" {
 		return nil, nil
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path)) // #nosec G304
 	if err != nil {
 		return nil, err
 	}

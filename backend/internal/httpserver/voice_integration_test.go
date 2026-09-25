@@ -114,12 +114,16 @@ func seedVoicePackageFixture(t *testing.T, st *store.Store, jurisdiction, pkgID,
 		// "destination_options" speech_key is only servable because a
 		// translation authority recorded a jurisdiction/source-version
 		// bound approval here. Nothing in production synthesises un-
-		// approved speech.
+		// approved speech. B01: language, source_id and template_sha256
+		// are required for an active approval row.
+		destText := "Destination choices are displayed on screen."
+		sum := sha256.Sum256([]byte(destText))
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO approved_translations
-				(translation_id, jurisdiction, speech_key, language, source_version, template_version, approved_by, evidence_ref, approved_at)
-			VALUES ($1,$2,$3,$4,1,1,$5,$6,$7)`,
+				(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, template_sha256, approved_by, evidence_ref, approved_at)
+			VALUES ($1,$2,$3,$4,1,1,$5,$6,$7,$8,$9)`,
 			"APPROVE-"+pkgID+"-destination_options", jurisdiction, "destination_options", "en-IN",
+			srcID, hex.EncodeToString(sum[:]),
 			"translator-voice", "doc-voice-translate", now); err != nil {
 			return err
 		}
@@ -244,7 +248,7 @@ func TestVoiceProcess_RealHTTP_PersistedScopedContext_Pipeline(t *testing.T) {
 	defer middleServer.Close()
 
 	// 3. Loopback TTS Server
-	ttsAudioBytes := []byte("RIFF1234WAVEfmt 16....dataREAL_TTS_AUDIO")
+	ttsAudioBytes := generateWAVBytes(500)
 	ttsAudioB64 := base64.StdEncoding.EncodeToString(ttsAudioBytes)
 	ttsHash := sha256.Sum256(ttsAudioBytes)
 	ttsChecksum := hex.EncodeToString(ttsHash[:])
@@ -610,7 +614,7 @@ func TestVoiceProcess_RealHTTP_CancellationDuringInference(t *testing.T) {
 	<-middleStarted
 	cancel() // Cancel request while middle worker is parked
 
-	_ = <-errCh
+	<-errCh
 
 	checkZeroConsequentialWrites(t, st)
 }
@@ -658,6 +662,8 @@ func TestVoiceProcess_RealHTTP_QueueSaturation(t *testing.T) {
 	primeWorkers(t, workers)
 
 	// Resolver using fake static context
+	destText := "Destination choices are displayed on screen."
+	dsum := sha256.Sum256([]byte(destText))
 	sc := contracts.ScopedContext{
 		DataVersion:      "dv-test",
 		Jurisdiction:     "KL",
@@ -666,6 +672,12 @@ func TestVoiceProcess_RealHTTP_QueueSaturation(t *testing.T) {
 			"P1": {PlaceID: "P1", PlaceKind: "VILLAGE", Jurisdiction: "KL"},
 		},
 		TemplateKeys: []string{"destination_options"},
+		ApprovedSpeechKeys: map[string][]string{
+			"destination_options": {"en-IN"},
+		},
+		ApprovedTemplateSHA: map[string]string{
+			contracts.TemplateDigestKey("destination_options", "en-IN"): hex.EncodeToString(dsum[:]),
+		},
 	}
 	resolver := &testStaticResolver{sc: sc}
 

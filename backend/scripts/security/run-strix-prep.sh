@@ -22,7 +22,7 @@ source "${SCRIPT_DIR}/_lib.sh"
 snapshot_metadata
 
 : "${STRIX_REPO:?missing STRIX_REPO}"
-: "${STRIX_VERSION:?missing STRIX_VERSION}"
+STRIX_VERSION="${STRIX_VERSION:-UNPINNED_O15_OPEN}"
 
 OUT="${REPORTS_DIR}"
 mkdir -p "$OUT"

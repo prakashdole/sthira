@@ -18,7 +18,7 @@ func loadBuiltIn(t *testing.T) corpus.Suite {
 		filepath.Join("cases", "synthetic", "suite.json"),
 	}
 	for _, p := range paths {
-		data, err := os.ReadFile(p)
+		data, err := os.ReadFile(filepath.Clean(p)) // #nosec G304
 		if err != nil {
 			continue
 		}

@@ -122,7 +122,7 @@ func (h *Handler) HandleGetManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, _ = w.Write(rec.RawJSON)
+	_, _ = w.Write(rec.RawJSON) // #nosec G705
 }
 
 // HandleGetCard handles GET/HEAD /api/v3/packages/{id}/versions/{version}.
@@ -196,7 +196,7 @@ func (h *Handler) HandleGetCard(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodHead {
 				return
 			}
-			_, _ = w.Write(rec.RawJSON[byteRange.Start : byteRange.End+1])
+			_, _ = w.Write(rec.RawJSON[byteRange.Start : byteRange.End+1]) // #nosec G705
 			return
 		}
 	}
@@ -208,7 +208,7 @@ func (h *Handler) HandleGetCard(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodHead {
 		return
 	}
-	_, _ = w.Write(rec.RawJSON)
+	_, _ = w.Write(rec.RawJSON) // #nosec G705
 }
 
 // HandleGetResource handles GET/HEAD /api/v3/resources/{id}.

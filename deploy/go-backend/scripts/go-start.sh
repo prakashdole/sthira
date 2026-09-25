@@ -16,6 +16,12 @@ PROJECT_NAME="${STHIRA_DEPLOY_PROJECT:-sthira-go}"
 export STHIRA_DEPLOY_PROJECT="${PROJECT_NAME}"
 export STHIRA_DEPLOY_IMAGE="${STHIRA_DEPLOY_IMAGE:-${PROJECT_NAME}-backend:local}"
 
+if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    echo "go-start: CONTAINER_RUNTIME=NOT_RUN: docker is unavailable; container stack cannot be started" >&2
+    echo "         For local non-container development, start local PostgreSQL and run: cd backend && go run ./cmd/sthira" >&2
+    exit 0
+fi
+
 # Compose v2 with the project's `name:` directive. --project-name is
 # still set explicitly so this script remains usable from directories
 # other than the package root (e.g. CI runners).

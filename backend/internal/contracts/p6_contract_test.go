@@ -226,3 +226,41 @@ func TestNewErrorCodesPresent(t *testing.T) {
 		}
 	}
 }
+
+// TestIsSupportedTranscriptionContentType_CanonicalizesParameters ensures that browser-sent
+// codecs (e.g. audio/webm;codecs=opus) are correctly accepted via stdlib MIME parsing,
+// while unsupported codecs and media types are rejected.
+func TestIsSupportedTranscriptionContentType_CanonicalizesParameters(t *testing.T) {
+	valid := []string{
+		"audio/wav",
+		"audio/webm",
+		"audio/webm;codecs=opus",
+		"audio/webm; codecs=opus",
+		"audio/webm; codecs=\"opus\"",
+		"audio/ogg",
+		"audio/ogg;codecs=opus",
+		"audio/ogg; codecs=opus",
+		"audio/opus",
+	}
+	for _, ct := range valid {
+		if !IsSupportedTranscriptionContentType(ct) {
+			t.Errorf("expected %q to be supported", ct)
+		}
+	}
+
+	invalid := []string{
+		"",
+		"audio/mp3",
+		"audio/aac",
+		"audio/webm;codecs=vorbis",
+		"audio/webm;codecs=vp9",
+		"audio/wav;codecs=mp3",
+		"video/mp4",
+		"application/json",
+	}
+	for _, ct := range invalid {
+		if IsSupportedTranscriptionContentType(ct) {
+			t.Errorf("expected %q to be rejected", ct)
+		}
+	}
+}

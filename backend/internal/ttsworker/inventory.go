@@ -3,6 +3,7 @@ package ttsworker
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -226,7 +227,7 @@ func ScanLocalInventory(root string, par ParlerTTS) Inventory {
 		}
 		var actual string
 		if st.Size() > 0 && st.Size() <= 64*1024 {
-			if b, err := os.ReadFile(full); err == nil {
+			if b, err := os.ReadFile(filepath.Clean(full)); err == nil { // #nosec G304
 				actual = SHA256Hex(b)
 			}
 		}

@@ -32,6 +32,7 @@ import (
 type Server struct {
 	worker       *Worker
 	listener     net.Listener
+	listenerMu   sync.Mutex // guards listener field; Addr() may be called from another goroutine
 	expectedTok  string
 	mux          *http.ServeMux
 	httpSrv      *http.Server
@@ -115,7 +116,9 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 	if err != nil {
 		return err
 	}
+	s.listenerMu.Lock()
 	s.listener = ln
+	s.listenerMu.Unlock()
 	errCh := make(chan error, 1)
 	go func() {
 		err := s.httpSrv.Serve(ln)
@@ -135,10 +138,13 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 
 // Wait blocks until the listener is closed. Pair with Cancel.
 func (s *Server) Wait() error {
-	if s.listener == nil {
+	s.listenerMu.Lock()
+	ln := s.listener
+	s.listenerMu.Unlock()
+	if ln == nil {
 		return errors.New("server not started")
 	}
-	if err := s.httpSrv.Serve(s.listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := s.httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil
@@ -154,10 +160,13 @@ func (s *Server) Cancel(ctx context.Context) error {
 
 // Addr returns the bound address (useful for tests).
 func (s *Server) Addr() string {
-	if s.listener == nil {
+	s.listenerMu.Lock()
+	ln := s.listener
+	s.listenerMu.Unlock()
+	if ln == nil {
 		return ""
 	}
-	return s.listener.Addr().String()
+	return ln.Addr().String()
 }
 
 // HandleTranscribeFor exposes the typed handler for unit tests so
@@ -307,15 +316,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	for _, m := range h.Models {
-		payload.Models = append(payload.Models, modelJSON{
-			ModelID:        m.ModelID,
-			Revision:       m.Revision,
-			ChecksumSHA256: m.ChecksumSHA256,
-			License:        m.License,
-			Runtime:        m.Runtime,
-			Hardware:       m.Hardware,
-			RemoteCode:     m.RemoteCode,
-		})
+		payload.Models = append(payload.Models, modelJSON(m))
 	}
 	for _, a := range h.Artifacts {
 		payload.Artifacts = append(payload.Artifacts, artifactJSON{
@@ -404,6 +405,11 @@ func (s *Server) handleTranscribe(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if !IsFinite(decoded.Samples) {
+		WipeBuffer(decoded.Samples)
+		writeTypedError(w, req.RequestID, req.Language, "audio contains non-finite samples")
+		return
+	}
 	// Build a request with the samples. We will wipe after the call.
 	deadline := time.Now().Add(time.Duration(req.DeadlineMillis) * time.Millisecond)
 	tr := TranscribeRequest{
@@ -447,10 +453,7 @@ func (s *Server) handleTranscribe(w http.ResponseWriter, r *http.Request) {
 		ArtifactDigest: modelRev,
 	}
 	for _, alt := range res.Alternatives {
-		out.Alternatives = append(out.Alternatives, alternativeJSON{
-			Text:       alt.Text,
-			Confidence: alt.Confidence,
-		})
+		out.Alternatives = append(out.Alternatives, alternativeJSON(alt))
 	}
 	writeTypedASRResponse(w, out)
 }
@@ -579,12 +582,3 @@ func SockAddr(host string, port int) string {
 	}
 	return fmt.Sprintf("%s:%d", host, port)
 }
-
-// bodySink is a sync.Once'd helper used by tests to capture-and-drop
-// a request body without allocating shared buffers in production.
-type bodySink struct {
-	once  sync.Once
-	bytes []byte
-}
-
-func (b *bodySink) Capture(_ []byte) { b.once.Do(func() {}) }

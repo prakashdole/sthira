@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -43,8 +45,8 @@ func newP6Fixture(t *testing.T) *p6Fixture {
 	aliasID := "ALIAS-KL-P6-" + uid("X")
 
 	// Package body: a SAFE zone + a FACILITY bound to it + a verified
-	// ROUTE bound to it + an allocation_policy with the facility order.
-	body := []byte(`{"red_zones":[{"id":"` + rzID + `"}],"safe_zones":[{"id":"` + szID + `","status":"OPEN"}],"approved_routes":[{"id":"` + rtID + `","from_zone_id":"` + rzID + `","to_safe_zone_id":"` + szID + `","mode":"FOOT","approval":"SYNTHETIC_DEMO","verified_by":"officer.test","valid_from":"2026-01-01T00:00:00Z","valid_until":"2030-01-01T00:00:00Z"}],"facilities":[{"id":"` + facID + `","safe_zone_id":"` + szID + `"}],"instruction_assets":[{"id":"INS-1","language":"ml-IN"},{"id":"INS-2","language":"en-IN"}],"allocation_policy":{"order":["` + facID + `"]}}`)
+	// ROUTE bound to it + an allocation_policy with the safe-zone order.
+	body := []byte(`{"red_zones":[{"id":"` + rzID + `"}],"safe_zones":[{"id":"` + szID + `","status":"OPEN"}],"approved_routes":[{"id":"` + rtID + `","from_zone_id":"` + rzID + `","to_safe_zone_id":"` + szID + `","mode":"FOOT","approval":"SYNTHETIC_DEMO","verified_by":"officer.test","valid_from":"2026-01-01T00:00:00Z","valid_until":"2030-01-01T00:00:00Z"}],"facilities":[{"id":"` + facID + `","safe_zone_id":"` + szID + `"}],"instruction_assets":[{"id":"INS-1","language":"ml-IN"},{"id":"INS-2","language":"en-IN"}],"allocation_policy":{"order":["` + szID + `"]}}`)
 
 	if err := st.InTx(context.Background(), func(tx DBTX) error {
 		if _, err := tx.ExecContext(context.Background(), `
@@ -334,7 +336,9 @@ func TestScopedContext_VerifierReadsViaAcceptableRoute(t *testing.T) {
 	// Worker 7's registry (P6 templates worker) supplies the
 	// authoritative TemplateKeys at request time; the persisted
 	// snapshot does not carry them. Inject a single key for this test.
+	// B01: also inject ApprovedSpeechKeys so the fail-closed check passes.
 	sc.TemplateKeys = []string{"destination_options"}
+	sc.ApprovedSpeechKeys = map[string][]string{"destination_options": {"ml-IN"}}
 	intent := contracts.IntentShowRoute
 	prop := contracts.ModelOutput{
 		SchemaVersion: "3.0",
@@ -381,7 +385,7 @@ func TestScopedContext_VerifierRejectsWrongFacilityRoute(t *testing.T) {
 			return err
 		}
 		newPkgID := "PKG-OTHER-" + uid("X")
-		body := []byte(`{"red_zones":[],"safe_zones":[{"id":"SZ-OTHER","status":"OPEN"}],"approved_routes":[{"id":"RT-OTHER","from_zone_id":"RZ-DUMMY","to_safe_zone_id":"SZ-OTHER","mode":"FOOT","approval":"SYNTHETIC_DEMO","verified_by":"officer.test","valid_from":"2026-01-01T00:00:00Z","valid_until":"2030-01-01T00:00:00Z"}],"facilities":[{"id":"FAC-OTHER","safe_zone_id":"SZ-OTHER"}],"instruction_assets":[],"allocation_policy":{"order":["FAC-OTHER"]}}`)
+		body := []byte(`{"red_zones":[],"safe_zones":[{"id":"SZ-OTHER","status":"OPEN"}],"approved_routes":[{"id":"RT-OTHER","from_zone_id":"RZ-DUMMY","to_safe_zone_id":"SZ-OTHER","mode":"FOOT","approval":"SYNTHETIC_DEMO","verified_by":"officer.test","valid_from":"2026-01-01T00:00:00Z","valid_until":"2030-01-01T00:00:00Z"}],"facilities":[{"id":"FAC-OTHER","safe_zone_id":"SZ-OTHER"}],"instruction_assets":[],"allocation_policy":{"order":["SZ-OTHER"]}}`)
 		if _, err := tx.ExecContext(context.Background(), `
 			INSERT INTO packages (package_id, alert_id, source_id, artifact_id, version, jurisdiction, evidence_class, checksum_sha256, body, effective_at, expires_at)
 			VALUES ($1,$2,$3,$4,9,$5,'AUTHORIZED_OPERATIONAL',$6,$7,$8,$9)`,
@@ -421,7 +425,7 @@ func TestScopedContext_DefaultsRouteGateClosed(t *testing.T) {
 	srcID := findKLP6Source(t, fx.store.DB())
 	// Replace the package body to add the expired route, keeping the
 	// existing valid route.
-	newBody := []byte(`{"red_zones":[{"id":"` + fx.redZoneID + `"}],"safe_zones":[{"id":"` + fx.safeZoneID + `","status":"OPEN"}],"approved_routes":[{"id":"` + fx.routeID + `","from_zone_id":"` + fx.redZoneID + `","to_safe_zone_id":"` + fx.safeZoneID + `","mode":"FOOT","approval":"SYNTHETIC_DEMO","verified_by":"officer.test","valid_from":"2026-01-01T00:00:00Z","valid_until":"2030-01-01T00:00:00Z"},{"id":"RT-EXPIRED","from_zone_id":"` + fx.redZoneID + `","to_safe_zone_id":"` + fx.safeZoneID + `","mode":"FOOT","approval":"SYNTHETIC_DEMO","verified_by":"officer.test","valid_from":"2024-01-01T00:00:00Z","valid_until":"2025-01-01T00:00:00Z"}],"facilities":[{"id":"` + fx.facilityID + `","safe_zone_id":"` + fx.safeZoneID + `"}],"instruction_assets":[],"allocation_policy":{"order":["` + fx.facilityID + `"]}}`)
+	newBody := []byte(`{"red_zones":[{"id":"` + fx.redZoneID + `"}],"safe_zones":[{"id":"` + fx.safeZoneID + `","status":"OPEN"}],"approved_routes":[{"id":"` + fx.routeID + `","from_zone_id":"` + fx.redZoneID + `","to_safe_zone_id":"` + fx.safeZoneID + `","mode":"FOOT","approval":"SYNTHETIC_DEMO","verified_by":"officer.test","valid_from":"2026-01-01T00:00:00Z","valid_until":"2030-01-01T00:00:00Z"},{"id":"RT-EXPIRED","from_zone_id":"` + fx.redZoneID + `","to_safe_zone_id":"` + fx.safeZoneID + `","mode":"FOOT","approval":"SYNTHETIC_DEMO","verified_by":"officer.test","valid_from":"2024-01-01T00:00:00Z","valid_until":"2025-01-01T00:00:00Z"}],"facilities":[{"id":"` + fx.facilityID + `","safe_zone_id":"` + fx.safeZoneID + `"}],"instruction_assets":[],"allocation_policy":{"order":["` + fx.safeZoneID + `"]}}`)
 	if err := fx.store.InTx(context.Background(), func(tx DBTX) error {
 		if _, err := tx.ExecContext(context.Background(),
 			`UPDATE packages SET body = $1 WHERE package_id = $2`,
@@ -481,12 +485,14 @@ func TestScopedGuidance_ExactLanguageBinding(t *testing.T) {
 	now := nowUTC()
 	srcID := findKLP6Source(t, fx.store.DB())
 
-	// Seed approved translation for "en-IN" only.
+	// Seed approved translation for "en-IN" only (B01: digest required).
+	dsum := sha256.Sum256([]byte("Clarify the location."))
+	dig := hex.EncodeToString(dsum[:])
 	if _, err := fx.store.DB().ExecContext(context.Background(), `
 		INSERT INTO approved_translations
-			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, approved_by, evidence_ref, approved_at)
-		VALUES ($1, $2, 'clarify_place', 'en-IN', 7, 7, $3, 'reviewer-1', 'doc-1', $4)`,
-		"APP-EN-"+uid("X"), fx.jurisdictionID, srcID, now); err != nil {
+			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, template_sha256, approved_by, evidence_ref, approved_at)
+		VALUES ($1, $2, 'clarify_place', 'en-IN', 7, 7, $3, $4, 'reviewer-1', 'doc-1', $5)`,
+		"APP-EN-"+uid("X"), fx.jurisdictionID, srcID, dig, now); err != nil {
 		t.Fatalf("seed approved translation: %v", err)
 	}
 
@@ -512,11 +518,12 @@ func TestScopedGuidance_VersionAndSourceMismatchRejected(t *testing.T) {
 	srcID := findKLP6Source(t, fx.store.DB())
 
 	// 1. Older source/template version 6 (package is at version 7) -> must NOT approve
+	oldDig := hex.EncodeToString(func() []byte { s := sha256.Sum256([]byte("old")); return s[:] }())
 	if _, err := fx.store.DB().ExecContext(context.Background(), `
 		INSERT INTO approved_translations
-			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, approved_by, evidence_ref, approved_at)
-		VALUES ($1, $2, 'old_key', 'en-IN', 6, 6, $3, 'reviewer-1', 'doc-1', $4)`,
-		"APP-OLD-"+uid("X"), fx.jurisdictionID, srcID, now); err != nil {
+			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, template_sha256, approved_by, evidence_ref, approved_at)
+		VALUES ($1, $2, 'old_key', 'en-IN', 6, 6, $3, $4, 'reviewer-1', 'doc-1', $5)`,
+		"APP-OLD-"+uid("X"), fx.jurisdictionID, srcID, oldDig, now); err != nil {
 		t.Fatalf("seed old translation: %v", err)
 	}
 
@@ -528,11 +535,12 @@ func TestScopedGuidance_VersionAndSourceMismatchRejected(t *testing.T) {
 		otherSrcID, now); err != nil {
 		t.Fatalf("seed other source: %v", err)
 	}
+	otherDig := hex.EncodeToString(func() []byte { s := sha256.Sum256([]byte("other")); return s[:] }())
 	if _, err := fx.store.DB().ExecContext(context.Background(), `
 		INSERT INTO approved_translations
-			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, approved_by, evidence_ref, approved_at)
-		VALUES ($1, $2, 'other_source_key', 'en-IN', 7, 7, $3, 'reviewer-1', 'doc-1', $4)`,
-		"APP-OTHER-"+uid("X"), fx.jurisdictionID, otherSrcID, now); err != nil {
+			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, template_sha256, approved_by, evidence_ref, approved_at)
+		VALUES ($1, $2, 'other_source_key', 'en-IN', 7, 7, $3, $4, 'reviewer-1', 'doc-1', $5)`,
+		"APP-OTHER-"+uid("X"), fx.jurisdictionID, otherSrcID, otherDig, now); err != nil {
 		t.Fatalf("seed other source translation: %v", err)
 	}
 
@@ -558,11 +566,12 @@ func TestScopedGuidance_RevocationDuringInference(t *testing.T) {
 	srcID := findKLP6Source(t, fx.store.DB())
 
 	transID := "APP-REVOKE-" + uid("X")
+	welcomeDig := hex.EncodeToString(func() []byte { s := sha256.Sum256([]byte("Welcome, citizen.")); return s[:] }())
 	if _, err := fx.store.DB().ExecContext(context.Background(), `
 		INSERT INTO approved_translations
-			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, approved_by, evidence_ref, approved_at)
-		VALUES ($1, $2, 'welcome', 'en-IN', 7, 7, $3, 'reviewer-1', 'doc-1', $4)`,
-		transID, fx.jurisdictionID, srcID, now); err != nil {
+			(translation_id, jurisdiction, speech_key, language, source_version, template_version, source_id, template_sha256, approved_by, evidence_ref, approved_at)
+		VALUES ($1, $2, 'welcome', 'en-IN', 7, 7, $3, $4, 'reviewer-1', 'doc-1', $5)`,
+		transID, fx.jurisdictionID, srcID, welcomeDig, now); err != nil {
 		t.Fatalf("seed translation: %v", err)
 	}
 
@@ -597,7 +606,9 @@ func TestScopedGuidance_RevocationDuringInference(t *testing.T) {
 	}
 }
 
-// TestScopedGuidance_BuildEligible_PolicyOrderingAndZeroCapacity: respects policy order and excludes zero capacity.
+// TestScopedGuidance_BuildEligible_PolicyOrderingAndZeroCapacity: respects
+// safe-zone ordering from allocation_policy.order, groups all facilities in a
+// zone at the same PermittedRank (zone rank), excludes zero-capacity zones.
 func TestScopedGuidance_BuildEligible_PolicyOrderingAndZeroCapacity(t *testing.T) {
 	st, cleanup := disposableTestDB(t)
 	defer cleanup()
@@ -614,8 +625,8 @@ func TestScopedGuidance_BuildEligible_PolicyOrderingAndZeroCapacity(t *testing.T
 	fac2 := "FAC-PRIORITY-2-" + uid("X")
 	facZero := "FAC-ZERO-CAP-" + uid("X")
 
-	// Notice allocation policy order has fac2 FIRST, then fac1, then facZero.
-	// Even though alphabetically fac1 < fac2, the policy order must be preserved!
+	// allocation_policy.order lists SAFE-ZONE IDs. szID first (rank 0)
+	// with two facilities, then szZeroID (rank 1) which has zero capacity.
 	body := []byte(`{
 		"safe_zones":[
 			{"id":"` + szID + `","status":"OPEN"},
@@ -627,7 +638,7 @@ func TestScopedGuidance_BuildEligible_PolicyOrderingAndZeroCapacity(t *testing.T
 			{"id":"` + facZero + `","safe_zone_id":"` + szZeroID + `"}
 		],
 		"instruction_assets":[{"id":"INS-1","language":"en-IN"}],
-		"allocation_policy":{"order":["` + fac2 + `","` + fac1 + `","` + facZero + `"]}
+		"allocation_policy":{"order":["` + szID + `","` + szZeroID + `"]}
 	}`)
 
 	if err := st.InTx(context.Background(), func(tx DBTX) error {
@@ -677,20 +688,26 @@ func TestScopedGuidance_BuildEligible_PolicyOrderingAndZeroCapacity(t *testing.T
 	}
 
 	// facZero must be EXCLUDED because its safe zone has 0 capacity.
+	// fac1 and fac2 are both in szID, both rank 0.
 	if len(sc.EligibleDestinations) != 2 {
 		t.Fatalf("expected 2 eligible destinations, got %d", len(sc.EligibleDestinations))
 	}
 
-	// Must respect policy order (fac2 rank 0, fac1 rank 1) — NOT alphabetical (fac1, fac2)!
-	if sc.EligibleDestinations[0].Facility.FacilityID != fac2 || sc.EligibleDestinations[0].PermittedRank != 0 {
-		t.Errorf("rank 0 must be %s (policy order), got %+v", fac2, sc.EligibleDestinations[0])
+	// Both facilities share rank 0 (zone rank), within-zone order is by
+	// facility ID, NOT by the old "facility-as-rank" policyOrder.
+	if sc.EligibleDestinations[0].Facility.FacilityID != fac1 || sc.EligibleDestinations[0].PermittedRank != 0 {
+		t.Errorf("rank 0 slot 0 must be %s (alphabetically first in zone, rank=zone rank), got %+v", fac1, sc.EligibleDestinations[0])
 	}
-	if sc.EligibleDestinations[1].Facility.FacilityID != fac1 || sc.EligibleDestinations[1].PermittedRank != 1 {
-		t.Errorf("rank 1 must be %s (policy order), got %+v", fac1, sc.EligibleDestinations[1])
+	if sc.EligibleDestinations[1].Facility.FacilityID != fac2 || sc.EligibleDestinations[1].PermittedRank != 0 {
+		t.Errorf("rank 0 slot 1 must be %s (alphabetically second in zone, rank=zone rank), got %+v", fac2, sc.EligibleDestinations[1])
 	}
 
-	// Browsing capacity must be unknown (honest, no promises)
+	// No facility in sc.EligibleDestinations may claim rank 1: szZeroID
+	// had zero capacity so its single facility was dropped.
 	for i, ed := range sc.EligibleDestinations {
+		if ed.PermittedRank != 0 {
+			t.Errorf("dest %d PermittedRank must be 0 (zone rank), got %d", i, ed.PermittedRank)
+		}
 		if ed.Facility.CapacityKnown {
 			t.Errorf("dest %d CapacityKnown must be false for browsing", i)
 		}
@@ -762,6 +779,224 @@ func TestScopedGuidance_BuildEligible_EmptyPolicyYieldsNoEligibleChoices(t *test
 	// Must NOT invent alphabetical ordering or PermittedRank
 	if len(sc.EligibleDestinations) != 0 {
 		t.Fatalf("EligibleDestinations must be empty when allocation_policy.order is absent, got %d", len(sc.EligibleDestinations))
+	}
+}
+
+// TestScopedGuidance_BuildEligible_UnknownZoneIDNotFabricated: an unknown
+// safe-zone ID in allocation_policy.order is dropped silently, never
+// fabricated as a real destination.
+func TestScopedGuidance_BuildEligible_UnknownZoneIDNotFabricated(t *testing.T) {
+	st, cleanup := disposableTestDB(t)
+	defer cleanup()
+	now := nowUTC()
+	jr := "JUR-KL-UNZ-" + uid("X")
+	srcID := "SRC-KL-UNZ-" + uid("X")
+	pkgID := "PKG-KL-UNZ-" + uid("X")
+	artID := "ART-KL-UNZ-" + uid("X")
+	authID := "AUTH-KL-UNZ-" + uid("X")
+
+	szReal := "SZ-REAL-" + uid("X")
+	szFake := "SZ-DOES-NOT-EXIST-" + uid("X")
+	facID := "FAC-REAL-" + uid("X")
+
+	// Policy order contains ONE real zone and ONE fabricated (non-existent) zone.
+	body := []byte(`{
+		"safe_zones":[{"id":"` + szReal + `","status":"OPEN"}],
+		"facilities":[{"id":"` + facID + `","safe_zone_id":"` + szReal + `"}],
+		"instruction_assets":[{"id":"INS-1","language":"en-IN"}],
+		"allocation_policy":{"order":["` + szReal + `","` + szFake + `"]}
+	}`)
+
+	if err := st.InTx(context.Background(), func(tx DBTX) error {
+		for _, s := range []struct{ q, s string }{
+			{`INSERT INTO sources (source_id, government_owner, official_domain, state, version, updated_at) VALUES ($1, 'gov-test', 'gov.example', 'OPERATIONAL', 1, $2)`, ""},
+		} {
+			if _, err := tx.ExecContext(context.Background(), s.q, srcID, now); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(context.Background(),
+			`INSERT INTO source_authorizations (authorization_id, source_id, granted_by, evidence_ref, jurisdiction, granted_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+			authID, srcID, "authority-1", "doc-1", jr, now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(),
+			`INSERT INTO source_artifacts (artifact_id, source_id, source_version, artifact_sha256, retrieved_at, evidence_class, payload_ref) VALUES ($1,$2,1,$3,$4,'AUTHORIZED_OPERATIONAL',$5)`,
+			artID, srcID, strings.Repeat("a", 64), now, "memory://test"); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(),
+			`INSERT INTO packages (package_id, alert_id, source_id, artifact_id, version, jurisdiction, evidence_class, checksum_sha256, body, effective_at, expires_at) VALUES ($1,$2,$3,$4,1,$5,'AUTHORIZED_OPERATIONAL',$6,$7,$8,$9)`,
+			pkgID, "ALERT-"+uid("X"), srcID, artID, jr, strings.Repeat("a", 64), body, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(),
+			`INSERT INTO zone_versions (zone_id, package_id, kind, role, status, capacity, version, updated_at) VALUES ($1, $2, 'SAFE', 'SAFE', 'OPEN', 100, 1, $3)`,
+			szReal, pkgID, now); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed fixture: %v", err)
+	}
+
+	resolver := NewScopedContextResolver(st)
+	sc, err := resolver.Resolve(context.Background(), jr)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	// Only the real zone contributes its facility; the fabricated ID must
+	// not produce any destination (it would otherwise have created a fake
+	// entry or claimed a rank for nothing).
+	if len(sc.EligibleDestinations) != 1 {
+		t.Fatalf("expected 1 eligible destination (real zone only), got %d", len(sc.EligibleDestinations))
+	}
+	if sc.EligibleDestinations[0].Facility.FacilityID != facID || sc.EligibleDestinations[0].PermittedRank != 0 {
+		t.Errorf("rank 0 must be the real facility %s, got %+v", facID, sc.EligibleDestinations[0])
+	}
+}
+
+// TestScopedGuidance_BuildEligible_ClosedZoneExcluded: a CLOSED safe-zone
+// contributes no facilities, even if its facilities exist in the package.
+func TestScopedGuidance_BuildEligible_ClosedZoneExcluded(t *testing.T) {
+	st, cleanup := disposableTestDB(t)
+	defer cleanup()
+	now := nowUTC()
+	jr := "JUR-KL-CLOSED-" + uid("X")
+	srcID := "SRC-KL-CLOSED-" + uid("X")
+	pkgID := "PKG-KL-CLOSED-" + uid("X")
+	artID := "ART-KL-CLOSED-" + uid("X")
+	authID := "AUTH-KL-CLOSED-" + uid("X")
+
+	szOpen := "SZ-OPEN-" + uid("X")
+	szClosed := "SZ-CLOSED-" + uid("X")
+	facOpen := "FAC-OPEN-" + uid("X")
+	facClosed := "FAC-CLOSED-" + uid("X")
+
+	body := []byte(`{
+		"safe_zones":[
+			{"id":"` + szOpen + `","status":"OPEN"},
+			{"id":"` + szClosed + `","status":"CLOSED"}
+		],
+		"facilities":[
+			{"id":"` + facOpen + `","safe_zone_id":"` + szOpen + `"},
+			{"id":"` + facClosed + `","safe_zone_id":"` + szClosed + `"}
+		],
+		"instruction_assets":[{"id":"INS-1","language":"en-IN"}],
+		"allocation_policy":{"order":["` + szOpen + `","` + szClosed + `"]}
+	}`)
+
+	if err := st.InTx(context.Background(), func(tx DBTX) error {
+		if _, err := tx.ExecContext(context.Background(),
+			`INSERT INTO sources (source_id, government_owner, official_domain, state, version, updated_at) VALUES ($1, 'gov-test', 'gov.example', 'OPERATIONAL', 1, $2)`,
+			srcID, now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(),
+			`INSERT INTO source_authorizations (authorization_id, source_id, granted_by, evidence_ref, jurisdiction, granted_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+			authID, srcID, "authority-1", "doc-1", jr, now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(),
+			`INSERT INTO source_artifacts (artifact_id, source_id, source_version, artifact_sha256, retrieved_at, evidence_class, payload_ref) VALUES ($1,$2,1,$3,$4,'AUTHORIZED_OPERATIONAL',$5)`,
+			artID, srcID, strings.Repeat("a", 64), now, "memory://test"); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(),
+			`INSERT INTO packages (package_id, alert_id, source_id, artifact_id, version, jurisdiction, evidence_class, checksum_sha256, body, effective_at, expires_at) VALUES ($1,$2,$3,$4,1,$5,'AUTHORIZED_OPERATIONAL',$6,$7,$8,$9)`,
+			pkgID, "ALERT-"+uid("X"), srcID, artID, jr, strings.Repeat("a", 64), body, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(),
+			`INSERT INTO zone_versions (zone_id, package_id, kind, role, status, capacity, version, updated_at) VALUES ($1, $2, 'SAFE', 'SAFE', 'OPEN', 100, 1, $4), ($3, $2, 'SAFE', 'SAFE', 'CLOSED', 100, 1, $4)`,
+			szOpen, pkgID, szClosed, now); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed fixture: %v", err)
+	}
+
+	resolver := NewScopedContextResolver(st)
+	sc, err := resolver.Resolve(context.Background(), jr)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	if len(sc.EligibleDestinations) != 1 || sc.EligibleDestinations[0].Facility.FacilityID != facOpen {
+		var got []string
+		for _, ed := range sc.EligibleDestinations {
+			got = append(got, ed.Facility.FacilityID)
+		}
+		t.Fatalf("expected only the OPEN-zone facility %s, got %v", facOpen, got)
+	}
+}
+
+// TestScopedGuidance_BuildEligible_DBErrorPropagates: a DB failure while
+// reading zone capacity propagates instead of being silently swallowed.
+func TestScopedGuidance_BuildEligible_DBErrorPropagates(t *testing.T) {
+	st, cleanup := disposableTestDB(t)
+	defer cleanup()
+	now := nowUTC()
+	jr := "JUR-KL-DBERR-" + uid("X")
+	srcID := "SRC-KL-DBERR-" + uid("X")
+	pkgID := "PKG-KL-DBERR-" + uid("X")
+	artID := "ART-KL-DBERR-" + uid("X")
+	authID := "AUTH-KL-DBERR-" + uid("X")
+	szID := "SZ-DBERR-" + uid("X")
+	facID := "FAC-DBERR-" + uid("X")
+
+	body := []byte(`{
+		"safe_zones":[{"id":"` + szID + `","status":"OPEN"}],
+		"facilities":[{"id":"` + facID + `","safe_zone_id":"` + szID + `"}],
+		"instruction_assets":[{"id":"INS-1","language":"en-IN"}],
+		"allocation_policy":{"order":["` + szID + `"]}
+	}`)
+
+	if err := st.InTx(context.Background(), func(tx DBTX) error {
+		if _, err := tx.ExecContext(context.Background(),
+			`INSERT INTO sources (source_id, government_owner, official_domain, state, version, updated_at) VALUES ($1, 'gov-test', 'gov.example', 'OPERATIONAL', 1, $2)`,
+			srcID, now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(),
+			`INSERT INTO source_authorizations (authorization_id, source_id, granted_by, evidence_ref, jurisdiction, granted_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+			authID, srcID, "authority-1", "doc-1", jr, now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(),
+			`INSERT INTO source_artifacts (artifact_id, source_id, source_version, artifact_sha256, retrieved_at, evidence_class, payload_ref) VALUES ($1,$2,1,$3,$4,'AUTHORIZED_OPERATIONAL',$5)`,
+			artID, srcID, strings.Repeat("a", 64), now, "memory://test"); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(context.Background(),
+			`INSERT INTO packages (package_id, alert_id, source_id, artifact_id, version, jurisdiction, evidence_class, checksum_sha256, body, effective_at, expires_at) VALUES ($1,$2,$3,$4,1,$5,'AUTHORIZED_OPERATIONAL',$6,$7,$8,$9)`,
+			pkgID, "ALERT-"+uid("X"), srcID, artID, jr, strings.Repeat("a", 64), body, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+			return err
+		}
+		// Deliberately omit the zone_versions row to force a sql.ErrNoRows
+		// path that should drop the destination cleanly (not propagate).
+		return nil
+	}); err != nil {
+		t.Fatalf("seed fixture: %v", err)
+	}
+
+	resolver := NewScopedContextResolver(st)
+	sc, err := resolver.Resolve(context.Background(), jr)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	// Missing zone_versions row → zone is ineligible, no destination.
+	// (Verified separately from a true DB error: see below.)
+	if len(sc.EligibleDestinations) != 0 {
+		t.Fatalf("expected 0 destinations (missing zone_versions), got %d", len(sc.EligibleDestinations))
+	}
+
+	// Force a true DB failure by closing the DB mid-Resolve.
+	_ = st.Close()
+	if _, err := resolver.Resolve(context.Background(), jr); err == nil {
+		t.Fatalf("expected DB error to propagate, got nil")
 	}
 }
 

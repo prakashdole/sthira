@@ -18,7 +18,6 @@ package provider
 import (
 	"context"
 	"errors"
-	"sync"
 	"time"
 
 	"sthira/backend/eval/corpus"
@@ -111,6 +110,7 @@ type TTSRequest struct {
 	Args            map[string]any
 	SourceVersion   int
 	TemplateVersion int
+	TemplateSHA256  string
 	Case            corpus.Case
 }
 
@@ -160,10 +160,6 @@ var ErrMalformedResponse = errors.New("provider: malformed 200 response")
 
 // NewTimings is a zero helper.
 func NewTimings() StageTimings { return StageTimings{} }
-
-// now returns time.Now; centralized for tests.
-var now = time.Now
-var nowMu sync.Mutex
 
 // Since returns monotonic-safe ms elapsed. Test code overrides now().
 func Since(start time.Time) int64 {

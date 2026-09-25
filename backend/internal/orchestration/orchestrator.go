@@ -174,6 +174,27 @@ func (o *Orchestrator) Process(ctx context.Context, req contracts.PipelineReques
 		return o.fail(id, scoped.DataVersion, err)
 	}
 
+	if strings.TrimSpace(asrResp.Text) == "" {
+		// Empty/all-zero input must not become a successful spoken command.
+		// Return CLARIFY with no actions.
+		proposal := contracts.ModelOutput{
+			SchemaVersion:    contracts.ModelSchemaVersion,
+			RequestID:        string(id),
+			DataVersion:      scoped.DataVersion,
+			Status:           contracts.StatusClarify,
+			Language:         req.Language,
+			Actions:          []contracts.Action{},
+			ClarificationIDs: []string{},
+			EvidenceIDs:      []string{},
+		}
+		return PipelineOutput{
+			RequestID:         id,
+			DataVersion:       scoped.DataVersion,
+			State:             contracts.PipelineClarify,
+			ValidatedProposal: proposal,
+		}, nil
+	}
+
 	// 4. STAGE: MIDDLE (typed proposal).
 	middleResp, err := o.stageMiddle(runCtx, id, scoped, asrResp, req)
 	if err != nil {
@@ -298,6 +319,7 @@ func (o *Orchestrator) Process(ctx context.Context, req contracts.PipelineReques
 		ValidatedProposal: middleResp.Proposal,
 		Template: contracts.PipelineTemplate{
 			SpeechKey:       tplOut.SpeechKey,
+			Text:            tplOut.Text,
 			TemplateVersion: tplOut.TemplateVersion,
 			Args:            tplOut.Args,
 		},
@@ -542,7 +564,7 @@ func (o *Orchestrator) stageMiddle(ctx context.Context, id CorrelationID, sc con
 		RequestID:       string(id),
 		ScopedContext:   sc,
 		Transcript:      asrResp,
-		MaxOutputTokens: 256,
+		MaxOutputTokens: 512,
 		DeadlineMillis:  o.cfg.Limits.MiddleDeadline.Milliseconds(),
 	})
 	if err != nil {
@@ -593,19 +615,32 @@ func (o *Orchestrator) stageTemplate(ctx context.Context, sc contracts.ScopedCon
 			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template not registered for language", Retryable: false,
 		})
 	}
-	if tpl.SyntheticOnly {
+	if tpl.SyntheticOnly && !o.cfg.AllowSyntheticTemplates {
 		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
 			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template is synthetic-only", Retryable: false,
 		})
 	}
-	if tpl.TemplateVersion != 0 && tpl.TemplateVersion != sc.TemplateVersion {
+	if tpl.TemplateVersion == 0 || tpl.TemplateVersion != sc.TemplateVersion {
 		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
 			Stage: StageTemplate, Code: contracts.ErrStaleVersion, Reason: fmt.Sprintf("template version %d does not match active context %d", tpl.TemplateVersion, sc.TemplateVersion), Retryable: false,
 		})
 	}
-	if tpl.SourceVersion != 0 && tpl.SourceVersion != sc.SourceVersion {
+	if tpl.SourceVersion == 0 || tpl.SourceVersion != sc.SourceVersion {
 		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 409, StageFailure{
 			Stage: StageTemplate, Code: contracts.ErrStaleVersion, Reason: fmt.Sprintf("template source version %d does not match active context %d", tpl.SourceVersion, sc.SourceVersion), Retryable: false,
+		})
+	}
+	// B01: approved template identity is the SHA-256 of the canonical
+	// template bytes (tpl.Text), not the rendered substitution output.
+	wantSHA, ok := sc.TemplateDigest(speechKey, proposal.Language)
+	if !ok || wantSHA == "" {
+		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
+			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template digest not approved for language", Retryable: false,
+		})
+	}
+	if got := sha256HexOfString(tpl.Text); got != wantSHA {
+		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
+			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template digest mismatch", Retryable: false,
 		})
 	}
 	// Validate args against the template's ArgSchema; the orchestrator
@@ -666,6 +701,10 @@ func (o *Orchestrator) stageTTS(ctx context.Context, id CorrelationID, sc contra
 	ttsCtx, cancel := StageDeadline(ctx, o.cfg.Limits.TTSDeadline)
 	defer cancel()
 	settings := contracts.TTSSynthesisSettings{SampleRate: 16000, BitDepth: 16, Channels: 1}
+	templateSHA, ok := sc.TemplateDigest(tpl.SpeechKey, language)
+	if !ok {
+		return nil, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{Stage: StageTemplate, Code: contracts.ErrValidation, Reason: "missing language-bound template digest"})
+	}
 	resp, err := o.cfg.Workers.TTS.Synthesize(ttsCtx, contracts.TTSWorkerRequest{
 		RequestID:       string(id),
 		SpeechKey:       tpl.SpeechKey,
@@ -674,6 +713,7 @@ func (o *Orchestrator) stageTTS(ctx context.Context, id CorrelationID, sc contra
 		SourceVersion:   tpl.SourceVersion,
 		TemplateVersion: tpl.TemplateVersion,
 		Settings:        settings,
+		TemplateSHA256:  templateSHA,
 		DeadlineMillis:  o.cfg.Limits.TTSDeadline.Milliseconds(),
 	})
 	if err != nil {
@@ -710,6 +750,39 @@ func (o *Orchestrator) stageTTS(ctx context.Context, id CorrelationID, sc contra
 			Stage: StageTTS, Code: contracts.ErrInternal, Reason: "tts checksum mismatch", Retryable: false,
 		})
 	}
+	// Audio metadata truthfulness: never declare 16 kHz (or any
+	// request-side rate) when the actual WAV bytes are at a
+	// different rate. The worker's SynthesizeResponse.Settings is
+	// the source of truth for what rate / depth / channels produced
+	// these bytes; the orchestrator inspects the RIFF header to
+	// confirm the worker did not mislabel bytes.
+	actual, err := readWAVHeader(bytes)
+	if err != nil {
+		return nil, pipelineError(contracts.PipelineModelUnavailable, 500, StageFailure{
+			Stage: StageTTS, Code: contracts.ErrInternal, Reason: "tts audio: " + err.Error(), Retryable: false,
+		})
+	}
+	if actual.SampleRate <= 0 || actual.Channels <= 0 || actual.BitDepth <= 0 {
+		return nil, pipelineError(contracts.PipelineModelUnavailable, 500, StageFailure{
+			Stage: StageTTS, Code: contracts.ErrInternal, Reason: "tts audio: missing RIFF header fields", Retryable: false,
+		})
+	}
+	effectiveSettings := settings
+	if (resp.Settings != contracts.TTSSynthesisSettings{}) {
+		effectiveSettings = contracts.TTSSynthesisSettings{
+			SampleRate:   resp.Settings.SampleRate,
+			BitDepth:     resp.Settings.BitDepth,
+			Channels:     resp.Settings.Channels,
+			SpeakingRate: resp.Settings.SpeakingRate,
+		}
+	}
+	if effectiveSettings.SampleRate != actual.SampleRate ||
+		effectiveSettings.BitDepth != actual.BitDepth ||
+		effectiveSettings.Channels != actual.Channels {
+		return nil, pipelineError(contracts.PipelineModelUnavailable, 500, StageFailure{
+			Stage: StageTTS, Code: contracts.ErrInternal, Reason: "tts audio declared settings do not match RIFF header", Retryable: false,
+		})
+	}
 	return &contracts.PipelineAudio{
 		AudioID:         checksum,
 		ContentType:     resp.ContentType,
@@ -721,8 +794,11 @@ func (o *Orchestrator) stageTTS(ctx context.Context, id CorrelationID, sc contra
 		VoiceRevision:   resp.VoiceRevision,
 		TemplateVersion: tpl.TemplateVersion,
 		SourceVersion:   tpl.SourceVersion,
-		Settings:        settings,
-		AudioB64:        resp.AudioB64,
+		// Propagate the WORKER's truth, not the orchestrator's
+		// request-side settings, so the client never sees a
+		// declared 16 kHz label on native-rate audio.
+		Settings: effectiveSettings,
+		AudioB64: resp.AudioB64,
 	}, nil
 }
 
@@ -1083,4 +1159,55 @@ func (o *Orchestrator) validateProposal(out contracts.ModelOutput, sc contracts.
 // Sanity: this file is big; a guard compile-time check that we use
 // the helpers we imported.
 var _ = json.Valid
+
+// PipelineMetricsSnapshot exposes the orchestrator's low-cardinality pipeline
+// metrics snapshot for the /api/v3/observability/metrics endpoint. Returns
+// false when the recorder is the default NopMetrics (no snapshot available)
+// or the orchestrator is nil. The returned snapshot MUST NOT contain citizen
+// identifiers, transcripts, audio bytes, bearer tokens or session IDs.
+func (o *Orchestrator) PipelineMetricsSnapshot() (MetricsSnapshot, bool) {
+	if o == nil {
+		return MetricsSnapshot{}, false
+	}
+	if o.cfg.Metrics == nil {
+		return MetricsSnapshot{}, false
+	}
+	if s, ok := o.cfg.Metrics.(interface{ Snapshot() MetricsSnapshot }); ok {
+		return s.Snapshot(), true
+	}
+	return MetricsSnapshot{}, false
+}
+
+// WorkerHealthStages returns the per-stage worker health snapshot. Returns
+// nil when no orchestrator/workers are wired. Each row pairs the canonical
+// stage identifier with the last-known WorkerHealth (ready/warm flags,
+// supported languages). The values carry no request IDs, transcripts or
+// audio.
+type StageHealth struct {
+	Stage  Stage
+	Health contracts.WorkerHealth
+}
+
+// WorkerHealthStages returns the per-stage worker health snapshot. Returns
+// nil when no orchestrator/workers are wired. The returned slice contains one
+// row per pipeline stage (asr, middle, tts) when available; stages without a
+// recorded health are omitted.
+func (o *Orchestrator) WorkerHealthStages() []StageHealth {
+	if o == nil || o.cfg.Workers == nil {
+		return nil
+	}
+	out := make([]StageHealth, 0, 3)
+	for _, stage := range []Stage{StageASR, StageMiddle, StageTTS} {
+		h, ok := o.cfg.Workers.HealthSnapshot(stage)
+		if !ok {
+			continue
+		}
+		out = append(out, StageHealth{Stage: stage, Health: h})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 var _ = fmt.Sprintf

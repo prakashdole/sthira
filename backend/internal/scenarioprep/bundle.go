@@ -27,17 +27,17 @@ const (
 // compatibility, never publishes to citizens, and never includes a
 // signature placeholder. Worker 1 owns the offline-client protocol.
 type BundleManifest struct {
-	ManifestVersion   int                       `json:"manifest_version"`
-	BundleStatus      BundleStatus              `json:"bundle_status"`
-	ExerciseClock     string                    `json:"exercise_clock,omitempty"`
-	CatalogueSHA256   string                    `json:"catalogue_sha256"`
-	CataloguePath     string                    `json:"catalogue_path"`
-	ScenarioCount     int                       `json:"scenario_count"`
-	StateCount        int                       `json:"state_count"`
-	Files             []BundleFile              `json:"files"`
-	Packages          []BundlePackage           `json:"packages"`
-	Report            *Report                   `json:"report"`
-	ToolVersion       string                    `json:"tool_version"`
+	ManifestVersion int             `json:"manifest_version"`
+	BundleStatus    BundleStatus    `json:"bundle_status"`
+	ExerciseClock   string          `json:"exercise_clock,omitempty"`
+	CatalogueSHA256 string          `json:"catalogue_sha256"`
+	CataloguePath   string          `json:"catalogue_path"`
+	ScenarioCount   int             `json:"scenario_count"`
+	StateCount      int             `json:"state_count"`
+	Files           []BundleFile    `json:"files"`
+	Packages        []BundlePackage `json:"packages"`
+	Report          *Report         `json:"report"`
+	ToolVersion     string          `json:"tool_version"`
 }
 
 // BundleFile is one entry in the deterministic file index. RawSHA256 is the
@@ -45,22 +45,22 @@ type BundleManifest struct {
 // files only. Provenance is the package's evidence_class when applicable,
 // empty otherwise.
 type BundleFile struct {
-	Path            string `json:"path"`
-	RawSHA256       string `json:"raw_sha256"`
-	Bytes           int64  `json:"bytes"`
+	Path             string `json:"path"`
+	RawSHA256        string `json:"raw_sha256"`
+	Bytes            int64  `json:"bytes"`
 	SourceProvenance string `json:"source_provenance,omitempty"`
 }
 
 // BundlePackage is the per-scenario summary reusing opkg metadata.
 type BundlePackage struct {
-	ScenarioID     string `json:"scenario_id"`
-	StateCode      string `json:"state_code"`
-	EvidenceClass  string `json:"evidence_class"`
-	Authority      string `json:"authority,omitempty"`
-	Version        int    `json:"version"`
-	Jurisdiction   string `json:"jurisdiction"`
-	Checksum       string `json:"opkg_checksum_sha256"`
-	PackagePath    string `json:"package_path"`
+	ScenarioID    string `json:"scenario_id"`
+	StateCode     string `json:"state_code"`
+	EvidenceClass string `json:"evidence_class"`
+	Authority     string `json:"authority,omitempty"`
+	Version       int    `json:"version"`
+	Jurisdiction  string `json:"jurisdiction"`
+	Checksum      string `json:"opkg_checksum_sha256"`
+	PackagePath   string `json:"package_path"`
 }
 
 // Bundle writes a deterministic handoff directory. It copies the catalogue
@@ -75,7 +75,7 @@ func Bundle(workspace, indexPath, output string, allowDraft bool, rep *Report, t
 	if outputInsideInput(output, workspace) {
 		return wrap("bundle", fmt.Errorf("%w: output directory %q is inside the input workspace %q", ErrUnsafeLayout, output, workspace))
 	}
-	if fileExists(output) {
+	if destinationExists(output) {
 		return wrap("bundle", fmt.Errorf("%w: destination %q already exists; refusing to overwrite", ErrIO, output))
 	}
 
@@ -103,7 +103,7 @@ func Bundle(workspace, indexPath, output string, allowDraft bool, rep *Report, t
 	if err != nil {
 		return wrap("bundle", err)
 	}
-	catBody, err := os.ReadFile(catalogueAbs)
+	catBody, err := readBoundedFile(catalogueAbs, int64(packageLimits.MaxBytes))
 	if err != nil {
 		return wrap("bundle", fmt.Errorf("%w: catalogue: %v", ErrIO, err))
 	}
@@ -127,7 +127,7 @@ func Bundle(workspace, indexPath, output string, allowDraft bool, rep *Report, t
 	manifestEntries := []BundleFile{}
 	pkgEntries := []BundlePackage{}
 	for _, ref := range refs {
-		body, err := os.ReadFile(ref.PackagePath)
+		body, err := readBoundedFile(ref.PackagePath, int64(packageLimits.MaxBytes))
 		if err != nil {
 			return wrap("bundle", fmt.Errorf("%w: read %s: %v", ErrIO, ref.ScenarioID, err))
 		}
@@ -156,15 +156,15 @@ func Bundle(workspace, indexPath, output string, allowDraft bool, rep *Report, t
 
 	// File index for the catalogue.
 	manifestEntries = append(manifestEntries, BundleFile{
-		Path:      filepath.ToSlash(idx.Catalogue),
-		RawSHA256: catSum,
-		Bytes:     int64(len(catBody)),
+		Path:             filepath.ToSlash(idx.Catalogue),
+		RawSHA256:        catSum,
+		Bytes:            int64(len(catBody)),
 		SourceProvenance: "catalogue",
 	})
 
 	// Add per-package file entries with raw hashes and opkg provenance.
 	for _, ref := range refs {
-		body, err := os.ReadFile(ref.PackagePath)
+		body, err := readBoundedFile(ref.PackagePath, int64(packageLimits.MaxBytes))
 		if err != nil {
 			continue
 		}
@@ -236,7 +236,7 @@ func Bundle(workspace, indexPath, output string, allowDraft bool, rep *Report, t
 	}
 	// Copy each referenced package.
 	for _, ref := range refs {
-		body, err := os.ReadFile(ref.PackagePath)
+		body, err := readBoundedFile(ref.PackagePath, int64(packageLimits.MaxBytes))
 		if err != nil {
 			cleanup()
 			return wrap("bundle", fmt.Errorf("%w: read %s: %v", ErrIO, ref.ScenarioID, err))
@@ -273,6 +273,14 @@ func relInsideWorkspace(workspace, path string) string {
 	if workspace == "" {
 		return filepath.ToSlash(path)
 	}
+	realWS, err := filepath.EvalSymlinks(workspace)
+	if err == nil {
+		workspace = realWS
+	}
+	realPath, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		path = realPath
+	}
 	rel, err := filepath.Rel(workspace, path)
 	if err != nil {
 		return filepath.ToSlash(path)
@@ -284,7 +292,7 @@ func relInsideWorkspace(workspace, path string) string {
 // directory and renaming. Ensures the destination directory exists.
 func copyFileAtomic(path string, body []byte) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("%w: mkdir %s: %v", ErrIO, path, err)
 	}
 	tmp, err := os.CreateTemp(dir, ".scenario-prep-")
@@ -302,7 +310,7 @@ func copyFileAtomic(path string, body []byte) error {
 		cleanup()
 		return fmt.Errorf("%w: close %s: %v", ErrIO, path, err)
 	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
+	if err := os.Chmod(tmpName, 0o600); err != nil {
 		cleanup()
 		return fmt.Errorf("%w: chmod %s: %v", ErrIO, path, err)
 	}
@@ -336,6 +344,9 @@ func (r *sliceReader) Read(p []byte) (int, error) {
 // bundle was produced. It does not copy any input files: nothing is
 // published under a rejected status.
 func writeRejection(output string, manifest *BundleManifest) error {
+	if destinationExists(output) {
+		return wrap("bundle", fmt.Errorf("%w: destination %q already exists; refusing to overwrite", ErrIO, output))
+	}
 	parent := filepath.Dir(output)
 	if parent == "" {
 		parent = "."

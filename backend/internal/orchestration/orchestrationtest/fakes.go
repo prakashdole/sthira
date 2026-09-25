@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"sync"
@@ -24,8 +25,6 @@ import (
 // orchestration.WorkerClient by composing three per-method hooks
 // and the Health signature.
 type Worker struct {
-	mu sync.Mutex
-
 	ready atomic.Bool
 
 	transcribeCalls atomic.Int64
@@ -36,16 +35,51 @@ type Worker struct {
 	proposeHook    func(ctx context.Context, req contracts.MiddleWorkerRequest) (contracts.MiddleWorkerResponse, error)
 	synthesizeHook func(ctx context.Context, req contracts.TTSWorkerRequest) (contracts.TTSWorkerResponse, error)
 
-	audioBytes []byte
-	languages  []string
+	audioBytes    []byte
+	languages     []string
+	audioSettings contracts.TTSSynthesisSettings
 }
 
-// NewWorker returns a fake worker with sensible defaults.
+// NewWorker returns a fake worker with sensible defaults. The audio
+// default is a canonical 1-second silence WAV at the request's
+// declared rate (16000 Hz mono PCM16), so the orchestrator's
+// declared-settings vs RIFF-header check passes for the default
+// happy path. Tests that need a mismatch install a custom
+// synthesizeHook or override the audio bytes.
 func NewWorker() *Worker {
 	return &Worker{
 		languages:  []string{"en-IN", "hi-IN"},
-		audioBytes: []byte("RIFFfake-audio"),
+		audioBytes: silenceWAV(16000, 1),
+		audioSettings: contracts.TTSSynthesisSettings{
+			SampleRate: 16000, BitDepth: 16, Channels: 1,
+		},
 	}
+}
+
+// silenceWAV produces a canonical PCM 16-bit LE mono WAV holding
+// `seconds` of zeros at `rate`. The orchestrator's RIFF-header
+// validator requires PCM format=1, 16-bit, mono; this helper emits
+// #nosec G115 -- test helper generating bounded synthetic WAV audio
+func silenceWAV(rate int, seconds float64) []byte {
+	samples := int(float64(rate) * seconds)
+	dataLen := samples * 2
+	total := 36 + dataLen
+	b := make([]byte, 44+dataLen)
+	copy(b[0:4], "RIFF")
+	binary.LittleEndian.PutUint32(b[4:8], uint32(total))
+	copy(b[8:12], "WAVE")
+	copy(b[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(b[16:20], 16)
+	binary.LittleEndian.PutUint16(b[20:22], 1) // PCM
+	binary.LittleEndian.PutUint16(b[22:24], 1) // mono
+	binary.LittleEndian.PutUint32(b[24:28], uint32(rate))
+	binary.LittleEndian.PutUint32(b[28:32], uint32(rate*2))
+	binary.LittleEndian.PutUint16(b[32:34], 2)
+	binary.LittleEndian.PutUint16(b[34:36], 16)
+	copy(b[36:40], "data")
+	binary.LittleEndian.PutUint32(b[40:44], uint32(dataLen))
+	// Samples default to zero.
+	return b
 }
 
 // MarkReady sets the worker's reported /health state to ready+warm.
@@ -135,6 +169,7 @@ func (w *Worker) Synthesize(ctx context.Context, req contracts.TTSWorkerRequest)
 		ChecksumSHA256: hex.EncodeToString(sum[:]),
 		ModelRevision:  "r0",
 		VoiceRevision:  "v0",
+		Settings:       w.audioSettings,
 	}, nil
 }
 
@@ -238,7 +273,6 @@ func (r *Resolver) SetRevalidateError(err error) {
 
 // Validator is the orchestrationtest fake VoiceValidator.
 type Validator struct {
-	mu         sync.Mutex
 	enforced   atomic.Int64
 	enforceErr error
 	shapeErr   error
@@ -304,18 +338,37 @@ func (r *Templates) Keys() []string {
 
 // Build constructs a typed ScopedContext for tests.
 func BuildScopedContext(jurisdiction, language string) contracts.ScopedContext {
+	// Digests for the two default keys' canonical test texts. Tests that
+	// register a different Text must update ApprovedTemplateSHA accordingly.
+	welcomeSHA := DigestString("Welcome, citizen.")
+	destSHA := DigestString("Destination choices are displayed on screen.")
 	return contracts.ScopedContext{
 		RequestID:        "sc-" + jurisdiction,
 		DataVersion:      "PKG-1:1",
 		Jurisdiction:     jurisdiction,
 		SchemaVersion:    contracts.SchemaVersionV3,
+		SourceID:         "SRC-1",
 		SourceStatus:     contracts.FreshnessCurrent,
 		SourceVersion:    1,
 		TemplateVersion:  1,
 		AllowedLanguages: []string{language},
 		TemplateKeys:     []string{"welcome", "destination_options"},
-		IssuedAt:         "2026-09-21T00:00:00Z",
+		ApprovedSpeechKeys: map[string][]string{
+			"welcome":             {language},
+			"destination_options": {language},
+		},
+		ApprovedTemplateSHA: map[string]string{
+			contracts.TemplateDigestKey("welcome", language):             welcomeSHA,
+			contracts.TemplateDigestKey("destination_options", language): destSHA,
+		},
+		IssuedAt: "2026-09-21T00:00:00Z",
 	}
+}
+
+// DigestString is the SHA-256 hex of a canonical template string.
+func DigestString(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }
 
 // NewOrchestrator wires a fresh orchestrator with the supplied
@@ -327,9 +380,9 @@ func NewOrchestrator(asr, mid, tts *Worker, resolver *Resolver, validator *Valid
 	workers := orchestration.NewWorkers(asr, mid, tts)
 	// SnapshotHealth transitions the workers' internal ready state
 	// so the orchestrator's IsReady short-circuit returns true.
-	workers.SnapshotHealth(context.Background(), orchestration.StageASR)
-	workers.SnapshotHealth(context.Background(), orchestration.StageMiddle)
-	workers.SnapshotHealth(context.Background(), orchestration.StageTTS)
+	_, _ = workers.SnapshotHealth(context.Background(), orchestration.StageASR)    // #nosec G104
+	_, _ = workers.SnapshotHealth(context.Background(), orchestration.StageMiddle) // #nosec G104
+	_, _ = workers.SnapshotHealth(context.Background(), orchestration.StageTTS)    // #nosec G104
 	cfg := orchestration.PipelineConfig{
 		Limits:      orchestration.DefaultLimits(),
 		Workers:     workers,

@@ -75,10 +75,10 @@ type PipelineTemplateArg struct {
 	Value string `json:"value"`
 }
 
-// PipelineTemplate carries the rendered template reference (NOT the rendered
-// text — TTS only sees what it needs).
+// PipelineTemplate carries the rendered template reference and approved text.
 type PipelineTemplate struct {
 	SpeechKey       string                `json:"speech_key"`
+	Text            string                `json:"text,omitempty"`
 	TemplateVersion int                   `json:"template_version"`
 	Args            []PipelineTemplateArg `json:"args,omitempty"`
 }

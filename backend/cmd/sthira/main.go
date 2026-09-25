@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"sthira/backend/internal/httpserver"
-	"sthira/backend/internal/orchestration"
 	"sthira/backend/internal/store"
 )
 
@@ -80,89 +79,29 @@ func main() {
 	// When private worker URLs are configured (STHIRA_ASR_URL, STHIRA_MIDDLE_URL, STHIRA_TTS_URL)
 	// and durable store is available, wire the full voice orchestrator.
 	// Otherwise, incomplete model configuration stays unavailable (fail closed 503).
-	asrURL := os.Getenv("STHIRA_ASR_URL")
-	asrTok := os.Getenv("STHIRA_ASR_TOKEN")
-	midURL := os.Getenv("STHIRA_MIDDLE_URL")
-	midTok := os.Getenv("STHIRA_MIDDLE_TOKEN")
-	ttsURL := os.Getenv("STHIRA_TTS_URL")
-	ttsTok := os.Getenv("STHIRA_TTS_TOKEN")
-
-	if asrURL != "" && midURL != "" && ttsURL != "" && st != nil {
-		asrClient := orchestration.NewHTTPWorkerClient(asrURL, asrTok, nil)
-		midClient := orchestration.NewHTTPWorkerClient(midURL, midTok, nil)
-		ttsClient := orchestration.NewHTTPWorkerClient(ttsURL, ttsTok, nil)
-		workers := orchestration.NewWorkers(asrClient, midClient, ttsClient)
-
-		// Warm and check worker health on startup via SnapshotHealth.
-		healthCtx, cancelHealth := context.WithTimeout(ctx, 5*time.Second)
-		for _, stage := range []orchestration.Stage{orchestration.StageASR, orchestration.StageMiddle, orchestration.StageTTS} {
-			h, err := workers.SnapshotHealth(healthCtx, stage)
-			if err != nil {
-				logger.Warn("initial worker health check failed", "stage", stage, "error", err)
-			} else if !h.Ready || !h.Warm {
-				logger.Warn("worker not ready or not warm", "stage", stage, "ready", h.Ready, "warm", h.Warm)
-			} else {
-				logger.Info("worker healthy and warm", "stage", stage, "languages", h.SupportedLanguages)
-			}
+	refreshInterval := 10 * time.Second
+	if d := os.Getenv("STHIRA_WORKER_HEALTH_REFRESH"); d != "" {
+		if v, err := time.ParseDuration(d); err == nil && v > 0 {
+			refreshInterval = v
 		}
-		cancelHealth()
-
-		// Bounded refresh loop: re-probe each worker on a steady
-		// interval until shutdown, so a worker that recovers
-		// later can serve the next pipeline call. Each iteration
-		// shares the same SnapshotHealth bookkeeping (no parallel
-		// monitor or independent read of the worker URL).
-		refreshInterval := 10 * time.Second
-		if d := os.Getenv("STHIRA_WORKER_HEALTH_REFRESH"); d != "" {
-			if v, err := time.ParseDuration(d); err == nil && v > 0 {
-				refreshInterval = v
-			}
-		}
-		go func() {
-			ticker := time.NewTicker(refreshInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					rctx, rcancel := context.WithTimeout(ctx, 3*time.Second)
-					for _, stage := range []orchestration.Stage{orchestration.StageASR, orchestration.StageMiddle, orchestration.StageTTS} {
-						h, err := workers.SnapshotHealth(rctx, stage)
-						if err != nil {
-							logger.Debug("worker health refresh failed", "stage", stage, "error", err)
-							continue
-						}
-						if !h.Ready || !h.Warm {
-							logger.Warn("worker not ready during refresh", "stage", stage, "ready", h.Ready, "warm", h.Warm)
-						}
-					}
-					rcancel()
-				}
-			}
-		}()
-
-		resolver := store.NewScopedContextResolver(st)
-		validator := orchestration.NewProductionValidator()
-		templates := orchestration.DefaultTemplateRegistry()
-
-		orch, err := orchestration.NewOrchestrator(orchestration.PipelineConfig{
-			Limits:    orchestration.DefaultLimits(),
-			Workers:   workers,
-			Resolver:  resolver,
-			Validator: validator,
-			Templates: templates,
-		})
-		if err != nil {
-			logger.Error("failed to construct voice orchestrator", "error", err)
-			os.Exit(1)
-		}
-		voiceHandler := httpserver.NewVoiceProcessHandler(orch, orchestration.DefaultLimits())
-		opts = append(opts, httpserver.WithVoiceProcess(voiceHandler))
-		logger.Info("P6 voice orchestrator wired with private workers")
-	} else {
-		logger.Info("P6 voice workers not fully configured; voice pipeline stays unavailable (503)")
 	}
+	voiceOpts, _, err := httpserver.WireVoicePipeline(ctx, httpserver.VoiceWiringConfig{
+		Store:                   st,
+		Logger:                  logger,
+		ASRURL:                  os.Getenv("STHIRA_ASR_URL"),
+		ASRToken:                os.Getenv("STHIRA_ASR_TOKEN"),
+		MiddleURL:               os.Getenv("STHIRA_MIDDLE_URL"),
+		MiddleToken:             os.Getenv("STHIRA_MIDDLE_TOKEN"),
+		TTSURL:                  os.Getenv("STHIRA_TTS_URL"),
+		TTSToken:                os.Getenv("STHIRA_TTS_TOKEN"),
+		HealthRefreshInterval:   refreshInterval,
+		AllowSyntheticTemplates: false, // Production: synthetic templates prohibited (B01 fail-closed)
+	})
+	if err != nil {
+		logger.Error("failed to wire voice pipeline", "error", err)
+		os.Exit(1)
+	}
+	opts = append(opts, voiceOpts...)
 
 	// Optional demo context for manual smoke testing only. It wires a static
 	// server-side snapshot resolver with the golden fixture IDs so a valid
@@ -180,6 +119,22 @@ func main() {
 			EnabledLanguages: map[string]bool{"en-IN": true, "hi-IN": true, "ml-IN": true},
 		})))
 		logger.Warn("demo context enabled: static server-side snapshot resolver (non-operational)")
+	}
+
+	// Observability + diagnostics (opt-in, fail-closed default OFF):
+	//   STHIRA_ENABLE_ACCESS_LOG=1   enable structured request completion logging
+	//   STHIRA_PPROF_TOKEN=<secret> enable /debug/pprof/* and /api/v3/observability/metrics
+	//                                  (both endpoints require the same token)
+	// Both surfaces are designed for low-cardinality operational telemetry; the
+	// observability endpoint never includes citizen identifiers, bearer tokens,
+	// GPS coordinates, audio bytes, transcripts, or session IDs.
+	if os.Getenv("STHIRA_ENABLE_ACCESS_LOG") == "1" {
+		opts = append(opts, httpserver.WithAccessLog(true))
+		logger.Info("access log enabled (privacy-preserving structured logging)")
+	}
+	if pprofTok := os.Getenv("STHIRA_PPROF_TOKEN"); pprofTok != "" {
+		opts = append(opts, httpserver.WithPprof(pprofTok))
+		logger.Info("pprof + observability metrics endpoint enabled (token-guarded)")
 	}
 
 	srv := httpserver.New(cfg, opts...)

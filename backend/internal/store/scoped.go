@@ -203,20 +203,21 @@ func BuildScopedContext(ctx context.Context, db DBTX, jurisdiction, packageID st
 	// (external gate O11); seeding it from a test is an isolated
 	// fixture, not an invented approved translation.
 	//
-	// A row with a NULL language approves the speech_key for every
-	// language the jurisdiction serves; a concrete language restricts
-	// it to that reviewer's sign-off and is only surfaced when that
-	// language is in the context's allowed set.
+	// A row with a NULL language, source_id or template_sha256 cannot
+	// authorize speech: migration 0010 quarantines such active rows and
+	// readApprovedSpeechKeys fails closed (no wildcard, no empty-source
+	// match). An empty result is an honest fail-closed signal.
 	allowedLangs := make(map[string]struct{}, len(sc.AllowedLanguages))
 	for _, l := range sc.AllowedLanguages {
 		allowedLangs[l] = struct{}{}
 	}
-	approved, approvedLangs, err := readApprovedSpeechKeys(ctx, db, jurisdiction, sourceVersion, sc.TemplateVersion, sourceID, now, allowedLangs)
+	approved, approvedLangs, digests, err := readApprovedSpeechKeys(ctx, db, jurisdiction, sourceVersion, sc.TemplateVersion, sourceID, now, allowedLangs)
 	if err != nil {
 		return contracts.ScopedContext{}, fmt.Errorf("store: read approved translations: %w", err)
 	}
 	sc.TemplateKeys = approved
 	sc.ApprovedSpeechKeys = approvedLangs
+	sc.ApprovedTemplateSHA = digests
 
 	// Place aliases: each alias maps a normalized lookup key to a place
 	// ID; we expose them as KnownPlaces with kind guessed from where
@@ -324,58 +325,72 @@ func readAliases(ctx context.Context, db DBTX, jurisdiction string) ([]PlaceCand
 }
 
 // readApprovedSpeechKeys returns the distinct, ascending set of
-// speech_keys currently approved for the jurisdiction matching
-// sourceVersion, templateVersion and sourceID, active at now,
-// backed by the persisted approved_translations authority table.
-// A row with a NULL language is approved for every allowed language ("*");
-// a concrete language is surfaced only when that language is in allowed.
-// Returns both the unique keys and a map of key -> approved languages.
-func readApprovedSpeechKeys(ctx context.Context, db DBTX, jurisdiction string, sourceVersion, templateVersion int, sourceID string, now time.Time, allowed map[string]struct{}) ([]string, map[string][]string, error) {
+// speech_keys currently approved for the jurisdiction matching the exact
+// sourceVersion, templateVersion and sourceID, active at now, backed by
+// the persisted approved_translations authority table.
+//
+// B01 fail-closed rules:
+//   - empty sourceID returns no approvals (cannot authorize every source);
+//   - source_id must be non-NULL and exactly equal to sourceID;
+//   - language must be non-NULL (no wildcard) and in the allowed set;
+//   - template_sha256 must be non-NULL (64-hex digest) and is returned
+//     bound to the speech_key/language tuple for the orchestrator's template check;
+//   - conflicting active approvals for the same tuple fail closed deterministically.
+func readApprovedSpeechKeys(ctx context.Context, db DBTX, jurisdiction string, sourceVersion, templateVersion int, sourceID string, now time.Time, allowed map[string]struct{}) ([]string, map[string][]string, map[string]string, error) {
+	if sourceID == "" {
+		return nil, nil, map[string]string{}, nil
+	}
 	rows, err := db.QueryContext(ctx, `
-		SELECT speech_key, language
+		SELECT speech_key, language, template_sha256
 		FROM approved_translations
 		WHERE jurisdiction = $1
 		  AND source_version = $2
 		  AND template_version = $3
-		  AND (source_id IS NULL OR $4 = '' OR source_id = $4)
+		  AND source_id IS NOT NULL
+		  AND source_id = $4
+		  AND language IS NOT NULL
+		  AND template_sha256 IS NOT NULL
 		  AND revoked_at IS NULL
 		  AND approved_at <= $5
 		ORDER BY speech_key, language`,
 		jurisdiction, sourceVersion, templateVersion, sourceID, now)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer rows.Close()
 	seen := map[string]struct{}{}
 	approvedLangs := map[string][]string{}
+	digests := map[string]string{}
 	var out []string
 	for rows.Next() {
-		var key string
-		var lang sql.NullString
-		if err := rows.Scan(&key, &lang); err != nil {
-			return nil, nil, err
+		var key, digest string
+		var lang string
+		if err := rows.Scan(&key, &lang, &digest); err != nil {
+			return nil, nil, nil, err
 		}
-		if lang.Valid {
-			if _, ok := allowed[lang.String]; !ok {
-				continue
+		if _, ok := allowed[lang]; !ok {
+			continue
+		}
+		tupleKey := contracts.TemplateDigestKey(key, lang)
+		if existing, ok := digests[tupleKey]; ok {
+			if existing != digest {
+				return nil, nil, nil, fmt.Errorf("store: conflicting active approvals for speech key %q language %q (%s vs %s)", key, lang, existing, digest)
 			}
-			approvedLangs[key] = append(approvedLangs[key], lang.String)
-		} else {
-			approvedLangs[key] = append(approvedLangs[key], "*")
+			continue
 		}
+		digests[tupleKey] = digest
+		approvedLangs[key] = append(approvedLangs[key], lang)
 		if _, dup := seen[key]; !dup {
 			seen[key] = struct{}{}
 			out = append(out, key)
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	sort.Strings(out)
-	return out, approvedLangs, nil
+	return out, approvedLangs, digests, nil
 }
-
-func isInMap(id string, m map[string]contracts.ZoneRef) bool { _, ok := m[id]; return ok }
 
 func isZoneID(id string, m map[string]contracts.ZoneRef) bool {
 	_, ok := m[id]
@@ -388,12 +403,24 @@ func isFacilityID(id string, m map[string]contracts.FacilityRef) bool {
 }
 
 // buildEligible populates sc.EligibleDestinations using the package's
-// authoritative allocation_policy.order. General destination browsing does
-// not assume party size or duration (PartySize and dates are unknown), so
-// it does not make synthetic capacity promises (CapacityKnown=false, Free=0).
-// Facilities must be in OPEN or PUBLISHED safe zones and non-zero total capacity.
-// If allocation policy order is empty, no arbitrary alphabetical order or
-// PermittedRank is fabricated.
+// authoritative allocation_policy.order, which lists SAFE-ZONE IDs (per
+// opkg.AllocationPolicy and the opkg validator). General destination
+// browsing does not assume party size or duration (PartySize and dates
+// are unknown), so it does not make synthetic capacity promises
+// (CapacityKnown=false, Free=0). Each safe-zone ID maps to ALL of its
+// member facilities; all facilities in a zone share the same
+// PermittedRank (= the zone's rank in policyOrder). Within a zone,
+// facilities are deterministically ordered by ID; that ordering is
+// display-only and is NOT a claimed authority safety ranking.
+//
+// Filtering:
+//   - Zone must be present in the package body and be OPEN or PUBLISHED.
+//   - Zone must have positive capacity in zone_versions for this package.
+//   - Unknown / missing zone IDs are dropped (never fabricated).
+//   - DB errors propagate; they are never silently swallowed.
+//
+// If allocation policy order is empty, no arbitrary alphabetical order
+// or PermittedRank is fabricated.
 func buildEligible(ctx context.Context, db DBTX, packageID, jurisdiction string, policyOrder []string, now time.Time, sc *contracts.ScopedContext) error {
 	if len(policyOrder) == 0 {
 		// No server-permitted order: leave sc.EligibleDestinations empty.
@@ -401,46 +428,59 @@ func buildEligible(ctx context.Context, db DBTX, packageID, jurisdiction string,
 		return nil
 	}
 
-	for _, facID := range policyOrder {
-		fac, ok := sc.KnownFacilities[facID]
-		if !ok {
+	for rank, szID := range policyOrder {
+		if szID == "" {
 			continue
 		}
-		// Facility must be in an OPEN or PUBLISHED safe zone.
-		sz, ok := sc.KnownSafeZones[fac.SafeZoneID]
-		if !ok || (sz.Status != contracts.ZoneStatusOpen && sz.Status != contracts.ZoneStatusPublished) {
+		// Zone must be present in the typed map built from the package.
+		sz, ok := sc.KnownSafeZones[szID]
+		if !ok {
+			// Unknown / missing zone ID: drop, never fabricate facilities.
+			continue
+		}
+		if sz.Status != contracts.ZoneStatusOpen && sz.Status != contracts.ZoneStatusPublished {
 			continue
 		}
 
-		// Check that the facility does not have zero total capacity in zone_versions.
+		// Zone capacity in this package. sql.ErrNoRows means the zone
+		// was named in policyOrder without a zone_versions row for this
+		// package — treat as zero / ineligible.
 		var zoneCap *int
 		err := db.QueryRowContext(ctx, `
 			SELECT zv.capacity FROM zone_versions zv
-			WHERE zv.zone_id = $1 AND zv.package_id = $2`, fac.SafeZoneID, packageID).Scan(&zoneCap)
-		if err == nil && zoneCap != nil && *zoneCap <= 0 {
-			// Zero zone capacity: ineligible
+			WHERE zv.zone_id = $1 AND zv.package_id = $2`, szID, packageID).Scan(&zoneCap)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return fmt.Errorf("store: read zone capacity for %s: %w", szID, err)
+		}
+		if zoneCap == nil || *zoneCap <= 0 {
 			continue
 		}
 
-		// Check facility inventory if any row exists; if inventory exists and all rows have capacity <= 0, ineligible.
-		var maxInvCap *int
-		err = db.QueryRowContext(ctx, `
-			SELECT MAX(capacity) FROM facility_inventory
-			WHERE facility_id = $1`, facID).Scan(&maxInvCap)
-		if err == nil && maxInvCap != nil && *maxInvCap <= 0 {
-			// Zero inventory capacity: ineligible
-			continue
+		// Find all facilities in this zone that belong to this package
+		// (KnownFacilities was built from the same package body).
+		var facs []string
+		for facID, fac := range sc.KnownFacilities {
+			if fac.SafeZoneID == szID {
+				facs = append(facs, facID)
+			}
 		}
+		sort.Strings(facs)
 
-		// Capacity is unknown for general browsing (no party size or dates assumed).
-		fac.CapacityKnown = false
-		fac.Free = 0
-		sc.KnownFacilities[facID] = fac
-
-		sc.EligibleDestinations = append(sc.EligibleDestinations, contracts.EligibleChoice{
-			Facility:      fac,
-			PermittedRank: len(sc.EligibleDestinations),
-		})
+		for _, facID := range facs {
+			fac := sc.KnownFacilities[facID]
+			// Capacity is unknown for general browsing (no party size or
+			// dates). The commit-time query enriches CapacityKnown + Free.
+			fac.CapacityKnown = false
+			fac.Free = 0
+			sc.KnownFacilities[facID] = fac
+			sc.EligibleDestinations = append(sc.EligibleDestinations, contracts.EligibleChoice{
+				Facility:      fac,
+				PermittedRank: rank,
+			})
+		}
 	}
 	return nil
 }
@@ -539,7 +579,8 @@ func (r *ScopedContextResolver) SnapshotRevalidate(ctx context.Context, sc contr
 				  AND source_version = $2
 				  AND template_version = $3
 				  AND speech_key = $4
-				  AND (source_id IS NULL OR $5 = '' OR source_id = $5)
+				  AND source_id IS NOT NULL
+				  AND source_id = $5
 				  AND revoked_at IS NOT NULL
 				  AND revoked_at <= $6
 			)`, sc.Jurisdiction, sc.SourceVersion, sc.TemplateVersion, key, sc.SourceID, r.now()).Scan(&isRevoked)
@@ -548,12 +589,12 @@ func (r *ScopedContextResolver) SnapshotRevalidate(ctx context.Context, sc contr
 		}
 	}
 
-	// 2. Active approved speech keys and languages must match the snapshot.
+	// 2. Active approved speech keys, languages and digests must match the snapshot.
 	allowedLangs := make(map[string]struct{}, len(sc.AllowedLanguages))
 	for _, l := range sc.AllowedLanguages {
 		allowedLangs[l] = struct{}{}
 	}
-	currentKeys, currentApprovedLangs, err := readApprovedSpeechKeys(ctx, r.store.DB(), sc.Jurisdiction, sc.SourceVersion, sc.TemplateVersion, sc.SourceID, r.now(), allowedLangs)
+	currentKeys, currentApprovedLangs, currentDigests, err := readApprovedSpeechKeys(ctx, r.store.DB(), sc.Jurisdiction, sc.SourceVersion, sc.TemplateVersion, sc.SourceID, r.now(), allowedLangs)
 	if err != nil {
 		return err
 	}
@@ -575,6 +616,14 @@ func (r *ScopedContextResolver) SnapshotRevalidate(ctx context.Context, sc contr
 				return errors.New(contracts.ErrStaleSnapshot)
 			}
 		}
+	}
+	for k, want := range sc.ApprovedTemplateSHA {
+		if currentDigests[k] != want {
+			return errors.New(contracts.ErrStaleSnapshot)
+		}
+	}
+	if len(currentDigests) != len(sc.ApprovedTemplateSHA) {
+		return errors.New(contracts.ErrStaleSnapshot)
 	}
 
 	return nil

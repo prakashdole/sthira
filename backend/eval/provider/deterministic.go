@@ -457,21 +457,6 @@ func firstID(xs []string) string {
 	return ""
 }
 
-// routesForFacility reads the VerifiedRoutes field via the opaque map
-// (the case only carries IDs, not bundles). We just return the route
-// list verbatim; the runner does the resolution against the harness
-// baseline context.
-func routesForFacility(c corpus.Case, _ string) []string {
-	out := make([]string, 0, len(c.Context.Routes))
-	for _, r := range c.Context.Routes {
-		if r == "" {
-			continue
-		}
-		out = append(out, r)
-	}
-	return out
-}
-
 func firstChoiceWithFacility(c corpus.Case) string {
 	for _, f := range c.Context.Facilities {
 		if f == "" {

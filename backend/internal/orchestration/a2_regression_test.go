@@ -60,6 +60,7 @@ func TestA2_EmptyScopedTemplateKeysFailClosed(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
 	sc.TemplateKeys = nil // empty -> must fail closed
+	sc.ApprovedSpeechKeys = nil
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()
@@ -122,6 +123,8 @@ func TestA2_ArgsForTemplateNoFacilityCollision(t *testing.T) {
 	asr, mid, tts := orchestrationtest.NewWorker(), orchestrationtest.NewWorker(), orchestrationtest.NewWorker()
 	sc := orchestrationtest.BuildScopedContext("JTEST", "en-IN")
 	sc.TemplateKeys = []string{"route_prompt"}
+	sc.ApprovedSpeechKeys = map[string][]string{"route_prompt": {"en-IN"}}
+	sc.ApprovedTemplateSHA = map[string]string{contracts.TemplateDigestKey("route_prompt", "en-IN"): orchestrationtest.DigestString("Route: {route_id}, Facility: {facility_id}.")}
 	resolver := orchestrationtest.NewResolver(sc)
 	validator := orchestrationtest.NewValidator()
 	tpls := orchestrationtest.NewTemplates()

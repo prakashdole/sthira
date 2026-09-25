@@ -85,14 +85,17 @@ type TTSResponse struct {
 //
 // The cache key is sha256 hex of the JSON encoding of this struct.
 type TTSCacheKey struct {
-	SpeechKey       string               `json:"speech_key"`
-	Language        string               `json:"language"`
-	Args            SpeechArgs           `json:"args"`
-	SourceVersion   int                  `json:"source_version"`
-	TemplateVersion int                  `json:"template_version"`
-	ModelRevision   string               `json:"model_revision"`
-	VoiceRevision   string               `json:"voice_revision"`
-	Settings        TTSSynthesisSettings `json:"settings"`
+	SpeechKey       string     `json:"speech_key"`
+	Language        string     `json:"language"`
+	Args            SpeechArgs `json:"args"`
+	SourceVersion   int        `json:"source_version"`
+	TemplateVersion int        `json:"template_version"`
+	// TemplateSHA256 binds the cache entry to the approved template
+	// digest so a text change invalidates prior audio.
+	TemplateSHA256 string               `json:"template_sha256"`
+	ModelRevision  string               `json:"model_revision"`
+	VoiceRevision  string               `json:"voice_revision"`
+	Settings       TTSSynthesisSettings `json:"settings"`
 }
 
 // ApprovedTemplate is the typed description of an approved speech template.
@@ -116,6 +119,9 @@ type ApprovedTemplate struct {
 	// SyntheticOnly is true when the template is a TEST/DEMO template and
 	// must be rejected outside isolated test configuration.
 	SyntheticOnly bool `json:"synthetic_only,omitempty"`
+	// TemplateSHA256 is the SHA-256 hex of Text (canonical template bytes).
+	// Computed on registry Add when empty; compared to the DB-approved digest.
+	TemplateSHA256 string `json:"template_sha256,omitempty"`
 }
 
 // TemplateRegistry is the read-only seam Worker 7 reads from and Worker 4

@@ -149,6 +149,65 @@ func TestSubprocessRuntime_TranscribeViaAdapter_HappyPath(t *testing.T) {
 	}
 }
 
+// TestSubprocessRuntime_TranscribeViaAdapter_SilenceProducesEmptyText verifies that
+// all-zero audio produces an empty transcript rather than invoking the model.
+func TestSubprocessRuntime_TranscribeViaAdapter_SilenceProducesEmptyText(t *testing.T) {
+	bin := writeAdapterMockScript(t)
+	r := NewSubprocessRuntime(SubprocessRuntimeConfig{
+		Cmd:    bin,
+		Module: "ignored",
+	})
+	if err := r.LoadModel(); err != nil {
+		t.Fatalf("LoadModel: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Close() })
+
+	res, err := r.Transcribe(context.Background(), TranscribeRequest{
+		RequestID:    "R-silence-1",
+		Language:     "hi-IN",
+		Samples:      make([]float32, 16000), // 1 second of exact silence
+		SampleRate:   16000,
+		DurationSecs: 1.0,
+	})
+	if err != nil {
+		t.Fatalf("Transcribe: %v", err)
+	}
+	if res.Text != "" {
+		t.Errorf("silence must produce empty text, got %q", res.Text)
+	}
+	if res.Confidence != nil {
+		t.Errorf("silence must produce nil confidence, got %v", res.Confidence)
+	}
+}
+
+// TestSubprocessRuntime_TranscribeViaAdapter_NonFiniteFailsSafely verifies that
+// NaN or Inf samples fail safely rather than reaching the model.
+func TestSubprocessRuntime_TranscribeViaAdapter_NonFiniteFailsSafely(t *testing.T) {
+	bin := writeAdapterMockScript(t)
+	r := NewSubprocessRuntime(SubprocessRuntimeConfig{
+		Cmd:    bin,
+		Module: "ignored",
+	})
+	if err := r.LoadModel(); err != nil {
+		t.Fatalf("LoadModel: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Close() })
+
+	_, err := r.Transcribe(context.Background(), TranscribeRequest{
+		RequestID:    "R-nan-1",
+		Language:     "hi-IN",
+		Samples:      []float32{float32(math.NaN()), 0.5},
+		SampleRate:   16000,
+		DurationSecs: 2.0 / 16000.0,
+	})
+	if err == nil {
+		t.Fatal("expected error for non-finite samples")
+	}
+	if !errors.Is(err, ErrRuntimeUnavailable) {
+		t.Errorf("expected ErrRuntimeUnavailable, got %v", err)
+	}
+}
+
 // TestSubprocessRuntime_TranscribeViaAdapter_RejectsUnsupportedLanguage
 // checks that the language allow-list is honored before the request
 // is sent to the subprocess.

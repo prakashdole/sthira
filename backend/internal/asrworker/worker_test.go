@@ -340,7 +340,6 @@ func TestDispatch_ConcurrencyCappedAtMaxInflight(t *testing.T) {
 // overlapping Transcribe calls observed by an inner Runtime.
 type concurrencyTrackingRuntime struct {
 	base    *StubRuntime
-	stub    *StubRuntime // alias of base, retained for explicit method delegation
 	current atomic.Int64
 	max     atomic.Int64
 }

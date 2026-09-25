@@ -88,6 +88,8 @@ func TestServer_ProposeRequiresAuth(t *testing.T) {
 		RequestID: "REQ-1",
 		ScopedContext: ScopedContext{
 			SchemaVersion: "3.0", DataVersion: "v1",
+			SourceID: "SRC-1", ApprovedSpeechKeys: map[string][]string{"welcome": {"en-IN"}},
+			ApprovedTemplateSHA: map[string]string{"welcome/en-IN": strings.Repeat("a", 64)},
 		},
 		Transcript: TranscriptInput{
 			RequestID: "REQ-1", Language: "en-IN", Text: "show shelter", State: "OK",
@@ -228,6 +230,16 @@ func TestServer_NewServerRejectsNilWorker(t *testing.T) {
 	_, err := NewServer(ServerConfig{Address: "127.0.0.1:0"}, nil)
 	if err == nil {
 		t.Fatalf("expected error on nil worker")
+	}
+}
+
+func TestMapWorkerErrorToState_OutputExceeded(t *testing.T) {
+	state, status := mapWorkerErrorToState(ErrOutputExceeded)
+	if state != MiddleStateOutputExceeded {
+		t.Errorf("state: got %q, want %q", state, MiddleStateOutputExceeded)
+	}
+	if status != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", status, http.StatusBadRequest)
 	}
 }
 

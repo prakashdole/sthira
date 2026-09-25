@@ -9,8 +9,6 @@ import (
 // fixedNow is the deterministic injected clock for parser tests.
 var fixedNow = time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 
-func allowAll() map[string]bool { return nil }
-
 func allowList(senders ...string) map[string]bool {
 	m := make(map[string]bool, len(senders))
 	for _, s := range senders {

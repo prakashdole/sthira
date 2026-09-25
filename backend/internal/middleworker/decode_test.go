@@ -147,6 +147,27 @@ func TestDecodeStrictProposal_StringWithEscapedQuotesHandled(t *testing.T) {
 	}
 }
 
+func TestDecodeStrictProposal_StringWithUnmatchedBraces(t *testing.T) {
+	// A string with an unmatched opening or closing brace must not alter object depth.
+	body := `{"schema_version":"3.0","request_id":"r1","data_version":"v1","status":"OK","intent":"FOCUS_PLACE","language":"en-IN","actions":[{"type":"FOCUS_FEATURE","target_id":"P1"}],"speech_key":"only { an open brace","clarification_ids":[],"evidence_ids":[]}`
+	p, err := decodeStrictProposal([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error with unmatched open brace: %v", err)
+	}
+	if p.SpeechKey == nil || *p.SpeechKey != "only { an open brace" {
+		t.Errorf("speech_key=%v", p.SpeechKey)
+	}
+
+	body2 := `{"schema_version":"3.0","request_id":"r1","data_version":"v1","status":"OK","intent":"FOCUS_PLACE","language":"en-IN","actions":[{"type":"FOCUS_FEATURE","target_id":"P1"}],"speech_key":"only } a close brace","clarification_ids":[],"evidence_ids":[]}`
+	p2, err := decodeStrictProposal([]byte(body2))
+	if err != nil {
+		t.Fatalf("unexpected error with unmatched close brace: %v", err)
+	}
+	if p2.SpeechKey == nil || *p2.SpeechKey != "only } a close brace" {
+		t.Errorf("speech_key=%v", p2.SpeechKey)
+	}
+}
+
 func TestDecodeStrictProposal_EmptyActionArray(t *testing.T) {
 	body := `{"schema_version":"3.0","request_id":"r1","data_version":"v1","status":"OK","intent":"FOCUS_PLACE","language":"en-IN","actions":[],"speech_key":null,"clarification_ids":[],"evidence_ids":[]}`
 	_, err := decodeStrictProposal([]byte(body))

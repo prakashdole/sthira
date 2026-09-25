@@ -48,9 +48,8 @@ check_target_is_local() {
 }
 check_target_is_local "$ZAP_TARGET_URL"
 
-echo "==> ZAP spider + active scan against $ZAP_TARGET_URL"
-if ! command -v docker >/dev/null 2>&1; then
-    echo "skip ZAP: docker not installed (pin ${ZAP_IMAGE})"
+if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    echo "skip ZAP: docker not available (pin ${ZAP_IMAGE})"
     exit 77
 fi
 

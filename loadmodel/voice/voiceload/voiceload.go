@@ -130,7 +130,7 @@ func Run(ctx context.Context, cfg Config) Result {
 			go func(idx uint64) {
 				defer wg.Done()
 				t := time.Now().UTC()
-				includeTTS := float64(idx%uint64(cfg.ArrivalRate+1))/float64(cfg.ArrivalRate) < cfg.RenderTTSFraction
+				includeTTS := float64(idx%uint64(cfg.ArrivalRate+1))/float64(cfg.ArrivalRate) < cfg.RenderTTSFraction // #nosec G115
 				code, _ := driveVoiceProcess(ctx, cfg, includeTTS)
 				d := time.Since(t)
 				switch code {
@@ -201,7 +201,7 @@ func driveVoiceProcess(ctx context.Context, cfg Config, includeTTS bool) (int, e
 		return 599, err
 	}
 	_, _ = io.Copy(io.Discard, asrResp.Body)
-	asrResp.Body.Close()
+	_ = asrResp.Body.Close() // #nosec G104
 	if asrResp.StatusCode != 200 {
 		return asrResp.StatusCode, fmt.Errorf("asr status %d", asrResp.StatusCode)
 	}
@@ -225,7 +225,7 @@ func driveVoiceProcess(ctx context.Context, cfg Config, includeTTS bool) (int, e
 		return 599, err
 	}
 	_, _ = io.Copy(io.Discard, midResp.Body)
-	midResp.Body.Close()
+	_ = midResp.Body.Close() // #nosec G104
 	if midResp.StatusCode != 200 {
 		return midResp.StatusCode, fmt.Errorf("middle status %d", midResp.StatusCode)
 	}
@@ -249,7 +249,7 @@ func driveVoiceProcess(ctx context.Context, cfg Config, includeTTS bool) (int, e
 			return 599, err
 		}
 		_, _ = io.Copy(io.Discard, ttsResp.Body)
-		ttsResp.Body.Close()
+		_ = ttsResp.Body.Close() // #nosec G104
 		if ttsResp.StatusCode != 200 {
 			return ttsResp.StatusCode, fmt.Errorf("tts status %d", ttsResp.StatusCode)
 		}

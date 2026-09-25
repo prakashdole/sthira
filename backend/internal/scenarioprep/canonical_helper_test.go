@@ -62,7 +62,7 @@ func minimalPackageValue(jurisdiction string) any {
 			{ID: "FAC-1", SafeZone: "SZ-1"},
 		},
 		Policy: opkg.AllocationPolicy{
-			Order:                   []string{"SZ-1"},
+			Order:                    []string{"SZ-1"},
 			ReservationExpirySeconds: &expiry,
 			AllowWalkIns:             &walkIns,
 		},

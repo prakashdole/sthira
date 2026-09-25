@@ -56,16 +56,18 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Body is optional; decode if present.
-	if r.ContentLength > 0 {
+	if r.ContentLength > 0 || r.Header.Get("Transfer-Encoding") == "chunked" {
 		body, err := s.readBoundedBody(w, r)
 		if err != nil {
 			s.jsonDecodeError(w, r, err)
 			return
 		}
-		var req createSessionRequest
-		if err := httpjson.DecodeStrict(body, &req, httpjson.Limits{MaxBytes: s.cfg.MaxBodyBytes, MaxDepth: s.cfg.MaxJSONDepth}); err != nil {
-			s.jsonDecodeError(w, r, err)
-			return
+		if len(body) > 0 {
+			var req createSessionRequest
+			if err := httpjson.DecodeStrict(body, &req, httpjson.Limits{MaxBytes: s.cfg.MaxBodyBytes, MaxDepth: s.cfg.MaxJSONDepth}); err != nil {
+				s.jsonDecodeError(w, r, err)
+				return
+			}
 		}
 	}
 	sessionID := newID("SES")
@@ -95,10 +97,6 @@ func (s *Server) handleResolvePlace(w http.ResponseWriter, r *http.Request) {
 	if !s.requireJSONContentType(w, r) {
 		return
 	}
-	if s.store == nil {
-		s.writeError(w, r, http.StatusServiceUnavailable, contracts.ErrDataUnavailable, "store unavailable", "", true)
-		return
-	}
 	body, err := s.readBoundedBody(w, r)
 	if err != nil {
 		s.jsonDecodeError(w, r, err)
@@ -109,11 +107,17 @@ func (s *Server) handleResolvePlace(w http.ResponseWriter, r *http.Request) {
 		s.jsonDecodeError(w, r, err)
 		return
 	}
+	if s.store == nil {
+		s.writeError(w, r, http.StatusServiceUnavailable, contracts.ErrDataUnavailable, "store unavailable", "", true)
+		return
+	}
 	cand, err := store.ResolvePlace(r.Context(), s.store.DB(), req.Jurisdiction, req.Query)
 	if err != nil {
 		var amb *store.AmbiguousPlaceError
 		if errors.As(err, &amb) {
-			s.writeError(w, r, http.StatusConflict, contracts.ErrAmbiguousPlace, "multiple places match; choose a candidate", "query", true)
+			s.writeErrorWithDetails(w, r, http.StatusConflict, contracts.ErrAmbiguousPlace, "multiple places match; choose a candidate", "query", true, map[string]any{
+				"candidates": amb.Candidates,
+			})
 			return
 		}
 		if errors.Is(err, store.ErrPlaceNotFound) {
@@ -146,10 +150,6 @@ func (s *Server) handleGuidanceQuery(w http.ResponseWriter, r *http.Request) {
 	if !s.requireJSONContentType(w, r) {
 		return
 	}
-	if s.store == nil {
-		s.writeError(w, r, http.StatusServiceUnavailable, contracts.ErrDataUnavailable, "store unavailable", "", true)
-		return
-	}
 	body, err := s.readBoundedBody(w, r)
 	if err != nil {
 		s.jsonDecodeError(w, r, err)
@@ -160,10 +160,18 @@ func (s *Server) handleGuidanceQuery(w http.ResponseWriter, r *http.Request) {
 		s.jsonDecodeError(w, r, err)
 		return
 	}
+	if s.store == nil {
+		s.writeError(w, r, http.StatusServiceUnavailable, contracts.ErrDataUnavailable, "store unavailable", "", true)
+		return
+	}
 	start, err1 := time.Parse("2006-01-02", req.StartDate)
 	end, err2 := time.Parse("2006-01-02", req.EndDate)
 	if err1 != nil || err2 != nil || !end.After(start) || req.PartySize < 1 {
 		s.writeError(w, r, http.StatusBadRequest, contracts.ErrInvalidValue, "invalid party size or date range", "start_date", false)
+		return
+	}
+	if end.After(start.AddDate(0, 0, store.MaxChoiceDays)) {
+		s.writeError(w, r, http.StatusBadRequest, contracts.ErrInvalidValue, "requested date range exceeds maximum policy duration of 30 days", "end_date", false)
 		return
 	}
 	// Route authority (O05) is open: the operational route gate is CLOSED in production.
@@ -177,8 +185,16 @@ func (s *Server) handleGuidanceQuery(w http.ResponseWriter, r *http.Request) {
 		EndDate:       end,
 		RouteGateOpen: s.allowSynthetic(),
 	}
-	dests, err := store.ChoiceQuerier{}.Eligible(r.Context(), s.store.DB(), q, time.Now().UTC())
+	dests, freshness, err := store.ChoiceQuerier{}.EligibleWithStatus(r.Context(), s.store.DB(), q, time.Now().UTC())
 	if err != nil {
+		if errors.Is(err, store.ErrDateRangeExceeded) {
+			s.writeError(w, r, http.StatusBadRequest, contracts.ErrInvalidValue, err.Error(), "end_date", false)
+			return
+		}
+		if errors.Is(err, store.ErrNoScopedContext) || errors.Is(err, store.ErrNotFound) {
+			s.writeError(w, r, http.StatusNotFound, contracts.ErrNotFound, "package not found", "package_id", false)
+			return
+		}
 		s.writeError(w, r, http.StatusInternalServerError, contracts.ErrInternal, "eligibility query failed", "", true)
 		return
 	}
@@ -200,7 +216,7 @@ func (s *Server) handleGuidanceQuery(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, item)
 	}
-	s.writeData(w, r, http.StatusOK, req.PackageID, contracts.FreshnessUnknown, map[string]any{
+	s.writeData(w, r, http.StatusOK, req.PackageID, freshness, map[string]any{
 		"destinations": items,
 		"route_gate":   s.allowSynthetic(),
 	})
@@ -256,6 +272,11 @@ func reservationPayloadHash(sessID string, req createReservationRequest) string 
 	return hex.EncodeToString(h[:])
 }
 
+func legacyReservationPayloadHash(sessID string, req createReservationRequest) string {
+	h := sha256.Sum256([]byte(sessID + "|" + req.FacilityID + "|" + req.PackageID + "|" + req.RouteID + "|" + req.StartDate + "|" + req.EndDate + "|" + req.IdemKey))
+	return hex.EncodeToString(h[:])
+}
+
 func (s *Server) handleCreateReservation(w http.ResponseWriter, r *http.Request) {
 	if !s.requireMethod(w, r, http.MethodPost) {
 		return
@@ -289,6 +310,40 @@ func (s *Server) handleCreateReservation(w http.ResponseWriter, r *http.Request)
 	is := store.IdempotencyStore{}
 	stays := store.NewStayStore(store.ChainAuditor{})
 	payloadHash := reservationPayloadHash(sess.SessionID, req)
+	legacyHash := legacyReservationPayloadHash(sess.SessionID, req)
+	legacyCheck := func(c context.Context, tx store.DBTX, existingHash string, storedResult []byte) (bool, error) {
+		if existingHash != legacyHash {
+			return false, nil
+		}
+		if len(storedResult) == 0 {
+			return false, store.ErrPayloadConflict
+		}
+		var out map[string]string
+		if err := json.Unmarshal(storedResult, &out); err != nil {
+			return false, store.ErrPayloadConflict
+		}
+		resID := out["reservation_id"]
+		if resID == "" {
+			return false, store.ErrPayloadConflict
+		}
+		// B02 bounded compatibility: an old request can replay only for the
+		// original authenticated actor/resource and equivalent validated original semantics.
+		// Discriminating fields (e.g. party_size, facility_id) cannot alias it.
+		var dbSessID, dbFacID string
+		var dbPartySize int
+		err := tx.QueryRowContext(c, `
+			SELECT session_id, facility_id, party_size
+			FROM reservations
+			WHERE reservation_id = $1`, resID).Scan(&dbSessID, &dbFacID, &dbPartySize)
+		if err != nil {
+			return false, store.ErrPayloadConflict
+		}
+		if dbSessID != sess.SessionID || dbFacID != req.FacilityID || dbPartySize != req.PartySize {
+			return false, store.ErrPayloadConflict
+		}
+		return true, nil
+	}
+
 	now := time.Now().UTC()
 	stayID := newID("STAY")
 	resID := newID("RES")
@@ -296,8 +351,8 @@ func (s *Server) handleCreateReservation(w http.ResponseWriter, r *http.Request)
 	var result []byte
 	var replay bool
 	err = s.store.InTx(ctx, func(tx store.DBTX) error {
-		// Idempotency: replay a completed key, conflict on a changed payload.
-		res, rep, err := is.Begin(ctx, tx, sess.SessionID, "reservation.create", req.IdemKey, payloadHash, now.Add(time.Hour))
+		// Idempotency: replay a completed key (canonical or legacy compatible), conflict on a changed payload.
+		res, rep, err := is.BeginWithCompat(ctx, tx, sess.SessionID, "reservation.create", req.IdemKey, payloadHash, legacyCheck, now.Add(time.Hour))
 		if err != nil {
 			return err
 		}

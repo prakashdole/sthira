@@ -189,6 +189,8 @@ class _TTSEngine:
             import torch
             desc_inputs = self.description_tokenizer(description, return_tensors="pt")
             prompt_inputs = self.prompt_tokenizer(text, return_tensors="pt")
+            desc_inputs = desc_inputs.to(self.model.device)
+            prompt_inputs = prompt_inputs.to(self.model.device)
             max_new = int(os.environ.get("STHIRA_TTS_MAX_NEW_TOKENS", DEFAULT_MAX_NEW_TOKENS))
             with torch.no_grad():
                 generation = self.model.generate(
@@ -297,6 +299,7 @@ def _try_load() -> tuple[_TTSEngine | None, str]:
     try:
         model = ParlerTTSForConditionalGeneration.from_pretrained(
             art, local_files_only=True, trust_remote_code=False)
+        model.to(os.environ.get("STHIRA_TTS_DEVICE", "cpu"))
         model.eval()
         sr = int(getattr(model.config, "sampling_rate", 0) or 0)
         if sr <= 0:

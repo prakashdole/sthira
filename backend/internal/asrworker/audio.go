@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"mime"
 )
 
 // Wire formats this worker actually decodes. The private protocol
@@ -111,7 +112,12 @@ func (e *DecodeError) Unwrap() error { return e.Cause }
 //   - errors.Is(err, ErrUnsupportedCodec) when content_type is not in
 //     WorkerSupportedContentTypes.
 func DecodeWAV(audioBytes []byte, contentType string, limits AudioDecodeLimits) (*AudioDecodeResult, error) {
-	if contentType != "audio/wav" {
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil || mediaType != "audio/wav" {
+		if contentType != "audio/wav" {
+			return nil, fmt.Errorf("%w: %s", ErrUnsupportedCodec, contentType)
+		}
+	} else if codec, ok := params["codecs"]; ok && codec != "" && codec != "1" && codec != "pcm" {
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedCodec, contentType)
 	}
 	if int64(len(audioBytes)) > limits.CompressedBytes {
@@ -162,13 +168,27 @@ func DecodeWAV(audioBytes []byte, contentType string, limits AudioDecodeLimits) 
 // maps this to TranscriptionAudioUnavailable.
 var ErrUnsupportedCodec = errors.New("unsupported audio codec")
 
-func isWorkerSupportedCodec(ct string) bool {
-	for _, t := range WorkerSupportedContentTypes {
-		if t == ct {
-			return true
-		}
+func isWorkerSupportedCodec(rawCT string) bool {
+	mediaType, params, err := mime.ParseMediaType(rawCT)
+	if err != nil {
+		return false
 	}
-	return false
+	switch mediaType {
+	case "audio/wav":
+		if codec, ok := params["codecs"]; ok && codec != "" && codec != "1" && codec != "pcm" {
+			return false
+		}
+		return true
+	case "audio/webm", "audio/ogg":
+		if codec, ok := params["codecs"]; ok && codec != "" && codec != "opus" {
+			return false
+		}
+		return true
+	case "audio/opus":
+		return true
+	default:
+		return false
+	}
 }
 
 // wavUnknownChunkSize is the sentinel value used by WAV producers
@@ -220,7 +240,7 @@ func decodeRIFFWAV(b []byte, limits AudioDecodeLimits) (samples []float32, sampl
 		id := string(b[pos : pos+4])
 		size := binary.LittleEndian.Uint32(b[pos+4 : pos+8])
 		knownSize := size != wavUnknownChunkSize
-		avail := uint64(len(b) - pos - 8)
+		avail := uint64(len(b) - pos - 8) // #nosec G115
 		if knownSize && uint64(size) > avail && id != "data" {
 			// Malformed: chunk declares more bytes than the file.
 			return nil, 0, 0, &DecodeError{Reason: "wav chunk overruns file",
@@ -276,7 +296,7 @@ func decodeRIFFWAV(b []byte, limits AudioDecodeLimits) (samples []float32, sampl
 				// reject it via the declared-length comparison.
 				break
 			}
-			pos = int(end)
+			pos = int(end) // #nosec G115
 			if size%2 == 1 && pos < len(b) {
 				pos++ // pad byte
 			}
@@ -330,7 +350,7 @@ func decodeRIFFWAV(b []byte, limits AudioDecodeLimits) (samples []float32, sampl
 	if channels == 1 {
 		out := make([]float32, frameCount)
 		for i := 0; i < frameCount; i++ {
-			s := int16(binary.LittleEndian.Uint16(pcm[i*2 : i*2+2]))
+			s := int16(binary.LittleEndian.Uint16(pcm[i*2 : i*2+2])) // #nosec G115
 			out[i] = float32(s) / 32768.0
 		}
 		return out, sampleRate, channels, nil
@@ -342,7 +362,7 @@ func decodeRIFFWAV(b []byte, limits AudioDecodeLimits) (samples []float32, sampl
 	// channels > 1 with MonoOnly=false: collapse to channel 0 only.
 	out := make([]float32, frameCount)
 	for i := 0; i < frameCount; i++ {
-		s := int16(binary.LittleEndian.Uint16(pcm[i*frameSize : i*frameSize+2]))
+		s := int16(binary.LittleEndian.Uint16(pcm[i*frameSize : i*frameSize+2])) // #nosec G115
 		out[i] = float32(s) / 32768.0
 	}
 	return out, sampleRate, 1, nil
@@ -394,13 +414,32 @@ func resampleLinear(samples []float32, srcRate, dstRate int) []float32 {
 	return out
 }
 
-// SilenceDetector reports whether the buffer is all-zero or
-// numerically negligible. Used by the stub runtime only to produce
-// a "no speech detected" response when silence is the entire input.
-// This is a band-aid for the stub path; a real runtime performs its
-// own silence / VAD detection and would never go through this.
-func SilenceDetector(samples []float32) bool {
+// IsFinite reports whether all samples in the buffer are finite numbers
+// (neither NaN nor +/-Inf).
+func IsFinite(samples []float32) bool {
 	for _, s := range samples {
+		if math.IsNaN(float64(s)) || math.IsInf(float64(s), 0) {
+			return false
+		}
+	}
+	return true
+}
+
+// SilenceDetector reports whether the buffer is all-zero or
+// numerically negligible (abs(s) <= 1e-6). Non-finite samples return false
+// so they are caught by validity checks.
+//
+// This suppresses exact and near-zero digital silence without an aggressive
+// energy threshold, preserving quiet legitimate speech. Noisy or non-speech
+// acoustic detection remains explicitly unverified without a verified VAD model.
+func SilenceDetector(samples []float32) bool {
+	if len(samples) == 0 {
+		return true
+	}
+	for _, s := range samples {
+		if math.IsNaN(float64(s)) || math.IsInf(float64(s), 0) {
+			return false
+		}
 		if math.Abs(float64(s)) > 1e-6 {
 			return false
 		}

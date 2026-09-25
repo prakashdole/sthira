@@ -47,11 +47,13 @@ func newStayServer(t *testing.T) (*Server, *store.Store) {
 // snapshotVersion). Reservation commit revalidation (Item B/C) requires the
 // source to be OPERATIONAL with a live authorization and the package body to
 // carry an authoritative allocation_policy; a bare DISCOVERED seed no longer
-// passes the commit gate.
+// passes the commit gate. The body also lists the single safe zone in
+// allocation_policy.order so the ChoiceQuerier (which reads order from the
+// body) can surface the seeded facility.
 func seedHTTPPackageFacility(t *testing.T, st *store.Store, capacity int, start, end time.Time) (string, string, int) {
 	t.Helper()
 	return seedHTTPPackageFacilityPolicy(t, st, capacity, start, end,
-		`{"allocation_policy":{"reservation_expiry_seconds":3600,"temporary_stay_min_days":1,"temporary_stay_max_days":14,"allow_transfers":true,"route_required":false}}`)
+		`{"safe_zones":[{"id":"SZ","status":"OPEN"}],"facilities":[{"id":"FAC-SEED","safe_zone_id":"SZ"}],"allocation_policy":{"order":["SZ"],"reservation_expiry_seconds":3600,"temporary_stay_min_days":1,"temporary_stay_max_days":14,"allow_transfers":true,"route_required":false}}`)
 }
 
 // seedHTTPPackageFacilityPolicy is seedHTTPPackageFacility with a caller-supplied
@@ -152,6 +154,10 @@ func doAuthed(t *testing.T, srv *httptest.Server, method, path, token, body stri
 	defer resp.Body.Close()
 	b := readAll(t, resp)
 	return response{code: resp.StatusCode, header: resp.Header, body: b}
+}
+
+func doUnauthed(t *testing.T, srv *httptest.Server, method, path, body string) response {
+	return doAuthed(t, srv, method, path, "", body)
 }
 
 func readAll(t *testing.T, resp *http.Response) string {
@@ -1078,5 +1084,224 @@ func TestHTTPReservationPayloadBinding_ChangedPayloadConflicts(t *testing.T) {
 	resNew := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", token, bodyNew)
 	if resNew.code == http.StatusCreated {
 		t.Fatalf("new reservation after quarantine should fail, got 201")
+	}
+}
+
+// TestHTTPGuidanceQuery_AuthorityAndScopeEnforcement verifies that /api/v3/guidance/query
+// enforces jurisdiction scoping, source lifecycle (OPERATIONAL), active authorization,
+// package currency/supersession, date bounding, and distinguishes empty vs not-found vs error.
+func TestHTTPGuidanceQuery_AuthorityAndScopeEnforcement(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	pkgID, facID, _ := seedHTTPPackageFacility(t, st, 10, httpDayT(1), httpDayT(5))
+
+	type destItem struct {
+		FacilityID string `json:"facility_id"`
+		SafeZoneID string `json:"safe_zone_id"`
+	}
+	type guidanceData struct {
+		Destinations []destItem `json:"destinations"`
+		RouteGate    bool       `json:"route_gate"`
+	}
+
+	queryPayload := func(jur, pkg, start, end string, party int) string {
+		return fmt.Sprintf(`{"jurisdiction":%q,"package_id":%q,"party_size":%d,"start_date":%q,"end_date":%q}`,
+			jur, pkg, party, start, end)
+	}
+
+	// 1. Positive control: valid jurisdiction returns the facility.
+	resp := doUnauthed(t, srv, http.MethodPost, "/api/v3/guidance/query", queryPayload("JTEST", pkgID, httpDay(1), httpDay(2), 2))
+	if resp.code != http.StatusOK {
+		t.Fatalf("positive control: expected 200, got %d body=%s", resp.code, resp.body)
+	}
+	env := decodeEnvelope(t, resp)
+	if env.SourceStatus != contracts.FreshnessCurrent {
+		t.Fatalf("expected CURRENT status, got %s", env.SourceStatus)
+	}
+	var data guidanceData
+	b, _ := json.Marshal(env.Data)
+	_ = json.Unmarshal(b, &data)
+	if len(data.Destinations) != 1 || data.Destinations[0].FacilityID != "FAC-SEED" {
+		t.Fatalf("expected 1 destination FAC-SEED, got %+v", data.Destinations)
+	}
+
+	// 2. Wrong jurisdiction with known package ID: returns 200 with empty destinations.
+	resp = doUnauthed(t, srv, http.MethodPost, "/api/v3/guidance/query", queryPayload("WRONG-JURISDICTION", pkgID, httpDay(1), httpDay(2), 2))
+	if resp.code != http.StatusOK {
+		t.Fatalf("wrong jurisdiction: expected 200, got %d body=%s", resp.code, resp.body)
+	}
+	env = decodeEnvelope(t, resp)
+	data = guidanceData{}
+	b, _ = json.Marshal(env.Data)
+	_ = json.Unmarshal(b, &data)
+	if len(data.Destinations) != 0 {
+		t.Fatalf("wrong jurisdiction should return 0 destinations, got %d", len(data.Destinations))
+	}
+
+	// 3. Quarantined source: returns 200 with empty destinations.
+	if _, err := st.DB().ExecContext(t.Context(),
+		`UPDATE sources SET state = 'QUARANTINED' WHERE source_id IN (SELECT source_id FROM packages WHERE package_id = $1)`, pkgID); err != nil {
+		t.Fatalf("quarantine source: %v", err)
+	}
+	resp = doUnauthed(t, srv, http.MethodPost, "/api/v3/guidance/query", queryPayload("JTEST", pkgID, httpDay(1), httpDay(2), 2))
+	if resp.code != http.StatusOK {
+		t.Fatalf("quarantined source: expected 200, got %d body=%s", resp.code, resp.body)
+	}
+	env = decodeEnvelope(t, resp)
+	data = guidanceData{}
+	b, _ = json.Marshal(env.Data)
+	_ = json.Unmarshal(b, &data)
+	if len(data.Destinations) != 0 {
+		t.Fatalf("quarantined source should return 0 destinations, got %d", len(data.Destinations))
+	}
+	// Restore source to OPERATIONAL
+	if _, err := st.DB().ExecContext(t.Context(),
+		`UPDATE sources SET state = 'OPERATIONAL' WHERE source_id IN (SELECT source_id FROM packages WHERE package_id = $1)`, pkgID); err != nil {
+		t.Fatalf("restore source: %v", err)
+	}
+
+	// 4. Suspended source: returns 200 with empty destinations.
+	if _, err := st.DB().ExecContext(t.Context(),
+		`UPDATE sources SET state = 'SUSPENDED' WHERE source_id IN (SELECT source_id FROM packages WHERE package_id = $1)`, pkgID); err != nil {
+		t.Fatalf("suspend source: %v", err)
+	}
+	resp = doUnauthed(t, srv, http.MethodPost, "/api/v3/guidance/query", queryPayload("JTEST", pkgID, httpDay(1), httpDay(2), 2))
+	if resp.code != http.StatusOK {
+		t.Fatalf("suspended source: expected 200, got %d body=%s", resp.code, resp.body)
+	}
+	env = decodeEnvelope(t, resp)
+	data = guidanceData{}
+	b, _ = json.Marshal(env.Data)
+	_ = json.Unmarshal(b, &data)
+	if len(data.Destinations) != 0 {
+		t.Fatalf("suspended source should return 0 destinations, got %d", len(data.Destinations))
+	}
+	// Restore source to OPERATIONAL
+	if _, err := st.DB().ExecContext(t.Context(),
+		`UPDATE sources SET state = 'OPERATIONAL' WHERE source_id IN (SELECT source_id FROM packages WHERE package_id = $1)`, pkgID); err != nil {
+		t.Fatalf("restore source: %v", err)
+	}
+
+	// 5. Expired package: returns 200 with empty destinations.
+	if _, err := st.DB().ExecContext(t.Context(),
+		`UPDATE packages SET effective_at = now() - interval '2 hours', expires_at = now() - interval '1 hour' WHERE package_id = $1`, pkgID); err != nil {
+		t.Fatalf("expire package: %v", err)
+	}
+	resp = doUnauthed(t, srv, http.MethodPost, "/api/v3/guidance/query", queryPayload("JTEST", pkgID, httpDay(1), httpDay(2), 2))
+	if resp.code != http.StatusOK {
+		t.Fatalf("expired package: expected 200, got %d body=%s", resp.code, resp.body)
+	}
+	env = decodeEnvelope(t, resp)
+	if env.SourceStatus != contracts.FreshnessExpired {
+		t.Fatalf("expected EXPIRED status, got %s", env.SourceStatus)
+	}
+	data = guidanceData{}
+	b, _ = json.Marshal(env.Data)
+	_ = json.Unmarshal(b, &data)
+	if len(data.Destinations) != 0 {
+		t.Fatalf("expired package should return 0 destinations, got %d", len(data.Destinations))
+	}
+	// Restore expires_at
+	if _, err := st.DB().ExecContext(t.Context(),
+		`UPDATE packages SET effective_at = now() - interval '1 hour', expires_at = now() + interval '24 hours' WHERE package_id = $1`, pkgID); err != nil {
+		t.Fatalf("restore expires_at: %v", err)
+	}
+
+	// 6. Unknown package ID: returns 404 NOT_FOUND.
+	resp = doUnauthed(t, srv, http.MethodPost, "/api/v3/guidance/query", queryPayload("JTEST", "PKG-DOES-NOT-EXIST", httpDay(1), httpDay(2), 2))
+	if resp.code != http.StatusNotFound {
+		t.Fatalf("unknown package ID: expected 404, got %d body=%s", resp.code, resp.body)
+	}
+
+	// 7. Bounded date input: date range > 30 days returns 400 INVALID_VALUE.
+	resp = doUnauthed(t, srv, http.MethodPost, "/api/v3/guidance/query", queryPayload("JTEST", pkgID, "2026-01-01", "2026-02-15", 2))
+	if resp.code != http.StatusBadRequest {
+		t.Fatalf("excessive date range: expected 400, got %d body=%s", resp.code, resp.body)
+	}
+
+	// 8. Read-only query: verify that inventory was not mutated.
+	if got := heldCount(t, st, facID, httpDayT(1)); got != 0 {
+		t.Fatalf("read-only query mutated held count: %d, want 0", got)
+	}
+}
+
+// TestHTTPResolvePlace_AmbiguousPlaceCandidates verifies that /api/v3/places/resolve
+// returns HTTP 409 AMBIGUOUS_PLACE with candidates in errors[0].details.candidates,
+// and that selecting an explicit candidate ID resolves unambiguously with HTTP 200.
+func TestHTTPResolvePlace_AmbiguousPlaceCandidates(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	jr := "IN-KL"
+	lookup := "meppadi"
+	sz1 := "SZ-MEPPADI-NORTH"
+	sz2 := "SZ-MEPPADI-SOUTH"
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	if err := store.InsertPlaceAlias(t.Context(), st.DB(), "AL-1-"+suffix, jr, lookup, sz1, "ZONE"); err != nil {
+		t.Fatalf("InsertPlaceAlias 1: %v", err)
+	}
+	if err := store.InsertPlaceAlias(t.Context(), st.DB(), "AL-2-"+suffix, jr, lookup, sz2, "ZONE"); err != nil {
+		t.Fatalf("InsertPlaceAlias 2: %v", err)
+	}
+
+	// 1. Ambiguous lookup returns HTTP 409 with candidates
+	resolvePayload := func(query string) string {
+		return fmt.Sprintf(`{"jurisdiction":%q,"query":%q}`, jr, query)
+	}
+	resp := doUnauthed(t, srv, http.MethodPost, "/api/v3/places/resolve", resolvePayload(lookup))
+	if resp.code != http.StatusConflict {
+		t.Fatalf("expected 409 for ambiguous place, got %d body=%s", resp.code, resp.body)
+	}
+	var errResp struct {
+		Errors []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Details struct {
+				Candidates []struct {
+					PlaceID      string `json:"place_id"`
+					PlaceKind    string `json:"place_kind"`
+					Jurisdiction string `json:"jurisdiction"`
+				} `json:"candidates"`
+			} `json:"details"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal([]byte(resp.body), &errResp); err != nil {
+		t.Fatalf("decode 409 response: %v", err)
+	}
+	if len(errResp.Errors) != 1 || errResp.Errors[0].Code != contracts.ErrAmbiguousPlace {
+		t.Fatalf("expected AMBIGUOUS_PLACE error, got %+v", errResp.Errors)
+	}
+	cands := errResp.Errors[0].Details.Candidates
+	if len(cands) != 2 {
+		t.Fatalf("expected 2 candidates in details, got %d: %+v", len(cands), cands)
+	}
+	if cands[0].PlaceID != sz1 || cands[1].PlaceID != sz2 {
+		t.Fatalf("unexpected candidate IDs: %+v", cands)
+	}
+
+	// 2. Explicit candidate selection resolves with HTTP 200
+	resp = doUnauthed(t, srv, http.MethodPost, "/api/v3/places/resolve", resolvePayload(sz1))
+	if resp.code != http.StatusOK {
+		t.Fatalf("expected 200 for explicit candidate selection, got %d body=%s", resp.code, resp.body)
+	}
+	var okResp struct {
+		Data struct {
+			PlaceID   string `json:"place_id"`
+			PlaceKind string `json:"place_kind"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(resp.body), &okResp); err != nil {
+		t.Fatalf("decode 200 response: %v", err)
+	}
+	if okResp.Data.PlaceID != sz1 || okResp.Data.PlaceKind != "ZONE" {
+		t.Fatalf("unexpected resolved place: %+v", okResp.Data)
+	}
+
+	// 3. Unknown place returns HTTP 404 NOT_FOUND
+	resp = doUnauthed(t, srv, http.MethodPost, "/api/v3/places/resolve", resolvePayload("non-existent-place"))
+	if resp.code != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown place, got %d body=%s", resp.code, resp.body)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"mime"
 	"os/exec"
 	"strings"
 	"time"
@@ -42,15 +43,23 @@ func init() {
 }
 
 // isCompressedCodec reports whether the content-type requires
-// subprocess transcode.
-func isCompressedCodec(ct string) bool {
-	ct = strings.TrimSpace(strings.ToLower(ct))
-	for _, t := range CompressedContentTypes {
-		if ct == t {
-			return true
-		}
+// subprocess transcode. Canonicalizes parameters with mime.ParseMediaType.
+func isCompressedCodec(rawCT string) bool {
+	mediaType, params, err := mime.ParseMediaType(rawCT)
+	if err != nil {
+		return false
 	}
-	return false
+	switch mediaType {
+	case "audio/webm", "audio/ogg":
+		if codec, ok := params["codecs"]; ok && codec != "" && codec != "opus" {
+			return false
+		}
+		return true
+	case "audio/opus":
+		return true
+	default:
+		return false
+	}
 }
 
 // TranscoderBinary is the external transcoder. Tests can override.
@@ -120,7 +129,7 @@ func DecodeCompressed(audioBytes []byte, contentType string, limits AudioDecodeL
 		"pipe:1",
 	}
 
-	cmd := exec.Command(TranscoderBinary, args...)
+	cmd := exec.Command(TranscoderBinary, args...) // #nosec G204
 	cmd.Stdin = bytes.NewReader(audioBytes)
 
 	// Bounded stdout capture.

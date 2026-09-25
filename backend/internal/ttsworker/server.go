@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -20,6 +21,7 @@ type Server struct {
 	worker       *Worker
 	bearerToken  string
 	listener     net.Listener
+	listenerMu   sync.Mutex // guards listener field; Addr() may be called from another goroutine
 	mux          *http.ServeMux
 	httpSrv      *http.Server
 	shuttingDown atomic.Bool
@@ -71,7 +73,9 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		if err != nil {
 			return nil, err
 		}
+		s.listenerMu.Lock()
 		s.listener = ln
+		s.listenerMu.Unlock()
 		s.httpSrv.Addr = ln.Addr().String()
 	}
 	return s, nil
@@ -79,17 +83,27 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 
 // Start binds addr (if not already bound) and serves until Cancel.
 func (s *Server) Start(ctx context.Context, addr string) error {
-	if addr != "" && s.listener == nil {
-		ln, err := net.Listen("tcp", addr)
-		if err != nil {
-			return err
+	if addr != "" {
+		s.listenerMu.Lock()
+		alreadyBound := s.listener != nil
+		s.listenerMu.Unlock()
+		if !alreadyBound {
+			ln, err := net.Listen("tcp", addr)
+			if err != nil {
+				return err
+			}
+			s.listenerMu.Lock()
+			s.listener = ln
+			s.listenerMu.Unlock()
 		}
-		s.listener = ln
 	}
-	if s.listener == nil {
+	s.listenerMu.Lock()
+	ln := s.listener
+	s.listenerMu.Unlock()
+	if ln == nil {
 		return errors.New("no listener; bind address is required")
 	}
-	err := s.httpSrv.Serve(s.listener)
+	err := s.httpSrv.Serve(ln)
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -113,10 +127,13 @@ func (s *Server) Cancel(ctx context.Context) error {
 
 // Addr returns the bound address (useful for tests).
 func (s *Server) Addr() string {
-	if s.listener == nil {
+	s.listenerMu.Lock()
+	ln := s.listener
+	s.listenerMu.Unlock()
+	if ln == nil {
 		return ""
 	}
-	return s.listener.Addr().String()
+	return ln.Addr().String()
 }
 
 // handleHealth returns the typed WorkerHealth snapshot.

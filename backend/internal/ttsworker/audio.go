@@ -129,7 +129,7 @@ func Float32ToWav(samples []float32, sampleRate int) (*WavOutput, error) {
 	buf := append([]byte(nil), buildWavHeader(sampleRate, 1, 16, len(samples)*2)...)
 	for _, s := range samples {
 		v := int16(math.Round(float64(s) * 32767))
-		buf = binary.LittleEndian.AppendUint16(buf, uint16(v))
+		buf = binary.LittleEndian.AppendUint16(buf, uint16(v)) // #nosec G115
 	}
 	if len(buf) > MaxOutputBytes {
 		return nil, fmt.Errorf("encoded size %d > %d", len(buf), MaxOutputBytes)
@@ -144,6 +144,7 @@ func Float32ToWav(samples []float32, sampleRate int) (*WavOutput, error) {
 	}, nil
 }
 
+// #nosec G115 -- parameters are bounded audio constants (channels=1, bitDepth=16, sampleRate<=48000)
 func buildWavHeader(sampleRate, channels, bitDepth int, dataBytes int) []byte {
 	h := make([]byte, 0, 44)
 	h = append(h, 'R', 'I', 'F', 'F')
