@@ -28,7 +28,13 @@ import { renderOperatorView } from './operator';
 import { triggerEmergencyDial, recordEmergencyAudit } from './emergency';
 
 type RuntimeState = 'checking' | 'demo' | 'blocked' | 'offline';
-type ChatMessage = { role: 'USER' | 'ASSISTANT'; text: string; audioB64?: string };
+type AudioMetadata = {
+  audio_b64: string;
+  content_type?: string;
+  byte_size?: number;
+  checksum_sha256?: string;
+};
+type ChatMessage = { role: 'USER' | 'ASSISTANT'; text: string; audio?: AudioMetadata };
 type AmbiguousCandidate = { place_id: string; place_kind: string };
 type DestinationChoice = {
   facility_id: string;
@@ -264,9 +270,9 @@ async function reconcileStayState(): Promise<void> {
           journeyState = 'ARRIVAL_REPORTED';
           arrivalSuccess = true;
           routeStarted = true;
-        } else if (body.data.state === 'CONFIRMED') {
+        } else if (body.data.state === 'RESERVED') {
           routeStarted = true;
-        } else if (body.data.state === 'CANCELLED' || body.data.state === 'REVOKED') {
+        } else if (body.data.state === 'CANCELLED' || body.data.state === 'REVOKED' || body.data.state === 'EXPIRED') {
           journeyState = 'ROUTE_REVOKED';
         }
         render();
@@ -707,7 +713,7 @@ function render() {
             `<article class="chat-message chat-message--${message.role.toLowerCase()}">
               <span>${message.role === 'USER' ? t.you : 'Sthira'}</span>
               <p>${escapeHtml(message.text)}</p>
-              ${message.role === 'ASSISTANT' && message.audioB64 ? `<button type="button" data-speak-message="${index}" aria-label="${t.readAloud}">${icons.volume}<span>${t.listen}</span></button>` : ''}
+              ${message.role === 'ASSISTANT' && message.audio?.audio_b64 ? `<button type="button" data-speak-message="${index}" aria-label="${t.readAloud}">${icons.volume}<span>${t.listen}</span></button>` : ''}
             </article>`
           ).join('')}
           ${autoplayBlockedAudio ? `
@@ -1000,37 +1006,37 @@ function speakText(text: string) {
 function formatSpeechKeyText(key: string, lang: Language): string {
   const templates: Record<string, Record<Language, string>> = {
     clarify_place: {
-      EN: 'Multiple locations match your request. Please select a location from the options.',
-      ML: 'ഒന്നിലധികം സ്ഥലങ്ങൾ പൊരുത്തപ്പെടുന്നു. ഓപ്ഷനുകളിൽ നിന്ന് സ്ഥലം തിരഞ്ഞെടുക്കുക.',
-      HI: 'एकाधिक स्थान मेल खाते हैं। कृपया विकल्पों में से एक स्थान चुनें।',
+      EN: 'Please clarify the location.',
+      ML: 'ദയവായി സ്ഥലം വ്യക്തമാക്കുക.',
+      HI: 'कृपया स्थान स्पष्ट करें।',
     },
     destination_options: {
-      EN: 'Authorized destination options are displayed on screen.',
-      ML: 'അംഗീകൃത ലക്ഷ്യസ്ഥാന ഓപ്ഷനുകൾ സ്ക്രീനിൽ കാണിച്ചിരിക്കുന്നു.',
-      HI: 'अधिकृत गंतव्य विकल्प स्क्रीन पर प्रदर्शित हैं।',
+      EN: 'Destination choices are displayed on screen.',
+      ML: 'ലക്ഷ്യസ്ഥാന ഓപ്ഷനുകൾ സ്ക്രീനിൽ കാണിച്ചിരിക്കുന്നു.',
+      HI: 'गंतव्य विकल्प स्क्रीन पर प्रदर्शित हैं।',
     },
     verified_route_unavailable: {
-      EN: 'Verified route unavailable for this location. Follow emergency guidance.',
-      ML: 'ഈ സ്ഥലത്തേക്ക് പരിശോധിച്ച വഴി ലഭ്യമല്ല. അടിയന്തര നിർദ്ദേശങ്ങൾ പാലിക്കുക.',
-      HI: 'इस स्थान के लिए सत्यापित मार्ग उपलब्ध नहीं है। आपातकालीन मार्गदर्शन का पालन करें।',
+      EN: 'Verified route is currently unavailable.',
+      ML: 'സ്ഥിരീകരിച്ച റൂട്ട് നിലവിൽ ലഭ്യമല്ല.',
+      HI: 'सत्यापित मार्ग वर्तमान में अनुपलब्ध है।',
     },
-    repeat_template: {
-      EN: 'Repeating evacuation guidance instructions.',
-      ML: 'ഒഴിപ്പിക്കൽ മാർഗ്ഗനിർദ്ദേശങ്ങൾ ആവർത്തിക്കുന്നു.',
-      HI: 'निकासी मार्गदर्शन दोहराया जा रहा है।',
+    welcome: {
+      EN: 'Welcome to Sthira emergency guidance.',
+      ML: 'സ്ഥിര അടിയന്തര മാർഗ്ഗനിർദ്ദേശത്തിലേക്ക് സ്വാഗതം.',
+      HI: 'स्थिरा आपातकालीन मार्गदर्शन में आपका स्वागत है।',
     },
-    clarify_audio_unclear: {
-      EN: 'Audio unclear. Please repeat or use touch controls.',
-      ML: 'ശബ്ദം വ്യക്തമല്ല. വീണ്ടും പറയുകയോ ബട്ടണുകൾ ഉപയോഗിക്കുകയോ ചെയ്യുക.',
-      HI: 'ऑडियो स्पष्ट नहीं है। कृपया दोहराएं या ऑन-स्क्रीन नियंत्रणों का उपयोग करें।',
+    stay_put_notice: {
+      EN: 'Remain at your current location and await official emergency instructions.',
+      ML: 'നിങ്ങളുടെ നിലവിലെ സ്ഥലത്ത് തുടരുക, ഔദ്യോഗിക അടിയന്തര നിർദ്ദേശങ്ങൾക്കായി കാത്തിരിക്കുക.',
+      HI: 'अपने वर्तमान स्थान पर रहें और आधिकारिक आपातकालीन निर्देशों की प्रतीक्षा करें।',
     },
-    go_to_safe_zone: {
-      EN: 'Move to the designated safe zone along the approved route.',
-      ML: 'അംഗീകൃത വഴിയിലൂടെ നിശ്ചയിച്ച സുരക്ഷിത മേഖലയിലേക്ക് മാറുക.',
-      HI: 'स्वीकृत मार्ग से निर्दिष्ट सुरक्षित क्षेत्र की ओर बढ़ें।',
+    location_not_found: {
+      EN: 'Requested location was not found in the verified disaster database.',
+      ML: 'സ്ഥിരീകരിച്ച ദുരന്ത ഡാറ്റാബേസിൽ അഭ്യർത്ഥിച്ച സ്ഥലം കണ്ടെത്തിയില്ല.',
+      HI: 'सत्यापित आपदा डेटाबेस में अनुरोधित स्थान नहीं मिला।',
     },
   };
-  return templates[key]?.[lang] || `Official guidance: [${key}]`;
+  return templates[key]?.[lang] || words[lang].assistantUnavailable;
 }
 
 let autoplayBlockedAudio: { audio: HTMLAudioElement; b64: string } | null = null;
@@ -1054,7 +1060,7 @@ async function verifyAndPlayAudio(audioInfo: {
     return { success: false, autoplayBlocked: false, error: 'Corrupted audio base64' };
   }
   const byteLen = binaryStr.length;
-  if (audioInfo.byte_size && Math.abs(byteLen - audioInfo.byte_size) > 4) {
+  if (audioInfo.byte_size && byteLen !== audioInfo.byte_size) {
     return { success: false, autoplayBlocked: false, error: `Audio byte size mismatch: expected ${audioInfo.byte_size}, got ${byteLen}` };
   }
   if (byteLen > 768 * 1024) {
@@ -1152,22 +1158,42 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
       ? formatSpeechKeyText(out.template.speech_key, language)
       : words[language].responseReady;
 
-    chatMessages.push({ role: 'ASSISTANT', text: replyText, audioB64: out?.audio?.audio_b64 });
+    const audioMeta = out?.audio?.audio_b64
+      ? {
+          audio_b64: out.audio.audio_b64,
+          content_type: out.audio.content_type,
+          byte_size: out.audio.byte_size,
+          checksum_sha256: out.audio.checksum_sha256,
+        }
+      : undefined;
+
+    chatMessages.push({ role: 'ASSISTANT', text: replyText, audio: audioMeta });
     voiceFeedbackKey = 'responseReady';
 
     // Execute validated map action if proposal is present
     if (out?.validated_proposal && map) {
-      executeMapActions(map, out.validated_proposal, motionDuration() === 0, (panel) => {
-        if (panel === 'ROUTE_GUIDANCE') directionsOpen = true;
-        if (panel === 'ALERT_DETAILS') detailsOpen = true;
-        if (panel === 'EMERGENCY_CALL_CONFIRMATION') assistanceOpen = true;
-        render();
-      }, (newLang) => {
-        if (newLang === 'ml-IN') language = 'ML';
-        if (newLang === 'hi-IN') language = 'HI';
-        if (newLang === 'en-IN') language = 'EN';
-        render();
-      });
+      executeMapActions(
+        map,
+        out.validated_proposal,
+        motionDuration() === 0,
+        (panel) => {
+          if (panel === 'ROUTE_GUIDANCE' || panel === 'ROUTE_STEPS') directionsOpen = true;
+          if (panel === 'ALERT_DETAILS') detailsOpen = true;
+          if (panel === 'EMERGENCY_CALL_CONFIRMATION') assistanceOpen = true;
+          if (panel === 'ARRIVAL_CONFIRMATION') arrivalOpen = true;
+          render();
+        },
+        (newLang) => {
+          if (newLang === 'ml-IN') language = 'ML';
+          if (newLang === 'hi-IN') language = 'HI';
+          if (newLang === 'en-IN') language = 'EN';
+          render();
+        },
+        (candidates) => {
+          ambiguousPlaces = candidates.map((id) => ({ place_id: id, place_kind: 'candidate' }));
+          render();
+        }
+      );
     }
 
     // Play verified synthesized audio if returned
@@ -1455,20 +1481,9 @@ async function confirmArrival() {
       render();
     }
   } else {
-    // Fail-closed if backend session active but no stay_id; if illustrative preview, allow local state change
-    if (isIllustrativePreview) {
-      journeyState = 'ARRIVAL_REPORTED';
-      arrivalSuccess = true;
-      arrivalRecordedAt = new Date().toLocaleTimeString();
-      arrivalPending = false;
-      arrivalError = '';
-      stopTracking();
-      render();
-    } else {
-      arrivalError = 'No verified stay reservation found. Please select an authorized route first.';
-      arrivalPending = false;
-      render();
-    }
+    arrivalError = 'No verified stay reservation found. Please select an authorized route first.';
+    arrivalPending = false;
+    render();
   }
 }
 
@@ -1517,12 +1532,8 @@ function bindInteractions() {
   document.querySelectorAll<HTMLButtonElement>('[data-speak-message]').forEach((b) =>
     b.addEventListener('click', () => {
       const message = chatMessages[Number(b.dataset.speakMessage)];
-      if (message) {
-        if (message.audioB64) {
-          void verifyAndPlayAudio({ audio_b64: message.audioB64 });
-        } else {
-          speakText(message.text);
-        }
+      if (message?.audio) {
+        void verifyAndPlayAudio(message.audio);
       }
     })
   );
@@ -1600,7 +1611,10 @@ function bindInteractions() {
   });
 
   document.querySelector<HTMLButtonElement>('[data-action="listen"]')?.addEventListener('click', () => {
-    speakText(words[language].summary);
+    const lastWithAudio = [...chatMessages].reverse().find((m) => m.audio?.audio_b64);
+    if (lastWithAudio?.audio) {
+      void verifyAndPlayAudio(lastWithAudio.audio);
+    }
   });
 
   document.querySelector<HTMLButtonElement>('[data-action="details"]')?.addEventListener('click', () => {
@@ -1715,6 +1729,17 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     tabInBackground = true;
     lastBackgroundTime = Date.now();
+    stopTracking();
+    if (voiceListening && mediaRecorder) {
+      try {
+        mediaRecorder.stop();
+      } catch {}
+      voiceListening = false;
+      if (mediaStream) {
+        mediaStream.getTracks().forEach((track) => track.stop());
+        mediaStream = null;
+      }
+    }
   } else {
     tabInBackground = false;
   }
