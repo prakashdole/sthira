@@ -1668,13 +1668,21 @@ function render() {
 }
 
 function mapColor(token: string) { return getComputedStyle(document.documentElement).getPropertyValue(token).trim(); }
+// Layer and source writes are dropped wholesale while the style is mid-load, which happens
+// transiently well after 'load'. Flag the drop so 'idle' can re-apply once the style settles.
+let mapPropsPending = false;
 function updateMapDynamicProperties() {
   if (!map) return;
   try {
-    if (!map.isStyleLoaded()) return;
+    if (!map.isStyleLoaded()) {
+      mapPropsPending = true;
+      return;
+    }
   } catch {
+    mapPropsPending = true;
     return;
   }
+  mapPropsPending = false;
   const rVis = redZonesVisible ? 'visible' : 'none';
   ['hazard-band', 'hazard-fill', 'hazard-edge'].forEach((id) => {
     if (map?.getLayer(id)) map.setLayoutProperty(id, 'visibility', rVis);
@@ -1799,8 +1807,30 @@ async function initMap(renderVersion: number) {
   map.on('pitchend', recordCameraState);
   map.on('rotateend', recordCameraState);
 
+  // isStyleLoaded() dips false transiently long after load, so the voice dispatch guard
+  // can park a proposal after the one-shot 'load' flush has already run. idle re-fires
+  // whenever the map settles, which is the earliest moment a parked action is safe to run.
+  const flushQueuedVoiceProposal = () => {
+    if (!map || !queuedVoiceProposal) return;
+    const p = queuedVoiceProposal;
+    queuedVoiceProposal = null;
+    executeMapActions(
+      map,
+      p,
+      motionDuration() === 0,
+      () => {},
+      () => {},
+      (candidates) => {
+        ambiguousPlaces = candidates.map((id) => ({ place_id: id, place_kind: 'candidate' }));
+      }
+    );
+    recordCameraState();
+  };
   map.on('idle', () => {
-    if (renderVersion === mapRenderVersion) document.querySelector<HTMLElement>('.map-loading')?.setAttribute('hidden', '');
+    if (renderVersion !== mapRenderVersion) return;
+    document.querySelector<HTMLElement>('.map-loading')?.setAttribute('hidden', '');
+    flushQueuedVoiceProposal();
+    if (mapPropsPending) updateMapDynamicProperties();
   });
   map.once('load', () => {
     if (renderVersion !== mapRenderVersion) return;
@@ -1809,21 +1839,7 @@ async function initMap(renderVersion: number) {
     recordCameraState();
     if (routeStarted) focusRoute();
     revealMapLayers();
-    if (queuedVoiceProposal) {
-      const p = queuedVoiceProposal;
-      queuedVoiceProposal = null;
-      executeMapActions(
-        map!,
-        p,
-        motionDuration() === 0,
-        () => {},
-        () => {},
-        (candidates) => {
-          ambiguousPlaces = candidates.map((id) => ({ place_id: id, place_kind: 'candidate' }));
-        }
-      );
-      recordCameraState();
-    }
+    flushQueuedVoiceProposal();
     startMapAnimation();
     map?.on('mouseenter', 'place-points', () => { if (map) map.getCanvas().style.cursor = 'pointer'; });
     map?.on('mouseleave', 'place-points', () => { if (map) map.getCanvas().style.cursor = ''; });
