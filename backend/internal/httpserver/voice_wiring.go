@@ -46,22 +46,26 @@ func (s OrchestratorSnapshotter) Snapshot() orchestration.MetricsSnapshot {
 
 // WorkerHealthSummaries returns a function suitable for WithWorkersHealth
 // that produces public low-cardinality summaries of each pipeline stage.
-func WorkerHealthSummaries(orch *orchestration.Orchestrator) func() []WorkerHealthSummary {
+// Ready comes from the live per-stage ready flag the orchestrator gates
+// dispatch on, NOT from the last health snapshot: a worker that dies keeps
+// its last successful snapshot forever, so a snapshot-derived Ready would
+// report a dead model as ready. Every configured stage is always listed so a
+// dead stage cannot be silently dropped from the count. Warm and Languages
+// are informational and still come from the last snapshot.
+func WorkerHealthSummaries(workers *orchestration.Workers) func() []WorkerHealthSummary {
 	return func() []WorkerHealthSummary {
-		if orch == nil {
+		if workers == nil {
 			return nil
 		}
-		stages := orch.WorkerHealthStages()
-		if len(stages) == 0 {
-			return nil
-		}
+		stages := []orchestration.Stage{orchestration.StageASR, orchestration.StageMiddle, orchestration.StageTTS}
 		out := make([]WorkerHealthSummary, 0, len(stages))
-		for _, s := range stages {
+		for _, stage := range stages {
+			h, _ := workers.HealthSnapshot(stage)
 			out = append(out, WorkerHealthSummary{
-				Stage:     string(s.Stage),
-				Ready:     s.Health.Ready,
-				Warm:      s.Health.Warm,
-				Languages: append([]string(nil), s.Health.SupportedLanguages...),
+				Stage:     string(stage),
+				Ready:     workers.IsReady(stage),
+				Warm:      h.Warm,
+				Languages: append([]string(nil), h.SupportedLanguages...),
 			})
 		}
 		return out
@@ -163,7 +167,7 @@ func WireVoicePipeline(ctx context.Context, cfg VoiceWiringConfig) ([]Option, *o
 	opts := []Option{
 		WithVoiceProcess(voiceHandler),
 		WithMetricsSnapshotter(OrchestratorSnapshotter{Orch: orch}),
-		WithWorkersHealth(WorkerHealthSummaries(orch)),
+		WithWorkersHealth(WorkerHealthSummaries(workers)),
 	}
 
 	logger.Info("P6 voice orchestrator wired with private workers",

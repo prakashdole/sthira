@@ -210,11 +210,13 @@ func (s *Server) CheckReadiness(ctx context.Context) ReadinessReport {
 				Status: StatusNotReady,
 				Detail: "no workers reporting",
 			}
+			allReady = false
 		} else {
 			subsystems["models"] = SubsystemHealth{
 				Status: StatusNotReady,
 				Detail: fmt.Sprintf("unready worker stages: %s", strings.Join(issues, ", ")),
 			}
+			allReady = false
 		}
 	} else if s.voiceProcess != nil {
 		subsystems["models"] = SubsystemHealth{
