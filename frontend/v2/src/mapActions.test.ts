@@ -389,4 +389,187 @@ test('validateVoiceResponse & executeMapActions: accepts backend fixture IDs (RZ
   assert.deepEqual(panels, ['ROUTE_GUIDANCE']);
 });
 
+test('executeMapActions: dispatches actions exactly once per call and steps zoom/pan by 1 without duplicate execution', () => {
+  let currentZoom = 13.4;
+  const zoomCalls: number[] = [];
+  let center = [76.112, 11.562];
+  const easeCalls: any[] = [];
+  const layerCalls: string[] = [];
+
+  const mockMap: any = {
+    getZoom() {
+      return currentZoom;
+    },
+    zoomTo(z: number) {
+      zoomCalls.push(z);
+      currentZoom = z;
+    },
+    getCenter() {
+      return {
+        toArray(): [number, number] {
+          return center as [number, number];
+        },
+      };
+    },
+    easeTo(opts: any) {
+      easeCalls.push(opts);
+      if (opts.center) center = opts.center;
+    },
+    setLayoutProperty(id: string, prop: string, val: string) {
+      layerCalls.push(`${id}:${prop}:${val}`);
+    },
+  };
+
+  const zoomProposal: VoiceProposal = {
+    schema_version: '3.0',
+    status: 'OK',
+    actions: [{ type: 'ZOOM', direction: 'IN', steps: 1 }],
+  };
+
+  // Command 1: single zoom in step
+  const r1 = executeMapActions(mockMap, zoomProposal, false, () => {});
+  assert.equal(r1, true);
+  assert.equal(zoomCalls.length, 1);
+  assert.equal(zoomCalls[0], 14.4);
+
+  // Command 2: consecutive zoom in step -> exactly 2 total steps (not zero or four)
+  const r2 = executeMapActions(mockMap, zoomProposal, false, () => {});
+  assert.equal(r2, true);
+  assert.equal(zoomCalls.length, 2);
+  assert.equal(zoomCalls[1], 15.4);
+
+  // PAN command: steps by 0.01
+  const panProposal: VoiceProposal = {
+    schema_version: '3.0',
+    status: 'OK',
+    actions: [{ type: 'PAN', direction: 'NORTH', steps: 1 }],
+  };
+  const r3 = executeMapActions(mockMap, panProposal, false, () => {});
+  assert.equal(r3, true);
+  assert.equal(easeCalls.length, 1);
+  assert.deepEqual(easeCalls[0].center, [76.112, 11.572]); // 11.562 + 0.01
+
+  // Layer toggle: exactly one callback per action
+  const layerVisCalls: Array<{ layer: string; visible: boolean }> = [];
+  const layerProposal: VoiceProposal = {
+    schema_version: '3.0',
+    status: 'OK',
+    actions: [{ type: 'SET_LAYER_VISIBILITY', layer: 'RED_ZONES', visible: true }],
+  };
+  const r4 = executeMapActions(
+    mockMap,
+    layerProposal,
+    false,
+    () => {},
+    () => {},
+    () => {},
+    (layer, visible) => layerVisCalls.push({ layer, visible })
+  );
+  assert.equal(r4, true);
+  assert.equal(layerVisCalls.length, 1);
+  assert.deepEqual(layerVisCalls[0], { layer: 'RED_ZONES', visible: true });
+});
+
+test('executeMapActions: dispatches SHOW_CHOICES and calls onChoices callback once with target IDs', () => {
+  const choicesReceived: string[][] = [];
+  const mockMap: any = {
+    fitBounds() {},
+  };
+
+  const choiceProposal: VoiceProposal = {
+    schema_version: '3.0',
+    status: 'OK',
+    actions: [{ type: 'SHOW_CHOICES', target_ids: ['FACDEMO-1', 'FACDEMO-2'] }],
+  };
+
+  const executed = executeMapActions(
+    mockMap,
+    choiceProposal,
+    false,
+    () => {},
+    () => {},
+    () => {},
+    () => {},
+    (choices) => choicesReceived.push(choices)
+  );
+
+  assert.equal(executed, true);
+  assert.equal(choicesReceived.length, 1);
+  assert.deepEqual(choicesReceived[0], ['FACDEMO-1', 'FACDEMO-2']);
+});
+
+test('validateVoiceResponse & executeMapActions: accepts FACDEMO-2, SZDEMO-2, and backend IDs', () => {
+  const proposal: VoiceProposal = {
+    schema_version: '3.0',
+    status: 'OK',
+    actions: [
+      { type: 'FOCUS_FEATURE', target_id: 'SZDEMO-2' },
+      { type: 'FOCUS_FEATURE', target_id: 'FACDEMO-2' },
+      { type: 'SHOW_CHOICES', target_ids: ['FACDEMO-1'] },
+    ],
+  };
+
+  const validated = validateVoiceResponse(proposal);
+  assert.ok(validated !== null);
+  assert.equal(validated.actions.length, 3);
+
+  const mockMap: any = {
+    fitBounds() {},
+  };
+  const executed = executeMapActions(mockMap, validated, false, () => {});
+  assert.equal(executed, true);
+});
+
+test('executeMapActions: SET_LAYER_VISIBILITY for ROUTES toggles route layers and does not mutate journey state', () => {
+  const layerPropsSet: Array<{ id: string; prop: string; val: string }> = [];
+  const visibilityEvents: Array<{ layer: string; visible: boolean }> = [];
+
+  const mockMap: any = {
+    setLayoutProperty(id: string, prop: string, val: string) {
+      layerPropsSet.push({ id, prop, val });
+    },
+  };
+
+  const routeHideProposal: VoiceProposal = {
+    schema_version: '3.0',
+    status: 'OK',
+    actions: [{ type: 'SET_LAYER_VISIBILITY', layer: 'ROUTES', visible: false }],
+  };
+
+  const executed = executeMapActions(
+    mockMap,
+    routeHideProposal,
+    false,
+    () => {},
+    () => {},
+    () => {},
+    (layer, visible) => visibilityEvents.push({ layer, visible })
+  );
+
+  assert.equal(executed, true);
+  assert.equal(visibilityEvents.length, 1);
+  assert.deepEqual(visibilityEvents[0], { layer: 'ROUTES', visible: false });
+
+  // Assert all four route layer IDs are set to 'none'
+  const idsSet = layerPropsSet.map((p) => p.id);
+  assert.ok(idsSet.includes('route-casing'));
+  assert.ok(idsSet.includes('approved-route'));
+  assert.ok(idsSet.includes('route-motion'));
+  assert.ok(idsSet.includes('routes'));
+  for (const item of layerPropsSet) {
+    assert.equal(item.prop, 'visibility');
+    assert.equal(item.val, 'none');
+  }
+});
+
+test('validateVoiceResponse: rejects obsolete mock alias FAC-PKG-DEST-1', () => {
+  const proposal: VoiceProposal = {
+    schema_version: '3.0',
+    status: 'OK',
+    actions: [{ type: 'FOCUS_FEATURE', target_id: 'FAC-PKG-DEST-1' }],
+  };
+  const validated = validateVoiceResponse(proposal);
+  assert.equal(validated, null, 'Obsolete mock alias FAC-PKG-DEST-1 must be rejected');
+});
+
 

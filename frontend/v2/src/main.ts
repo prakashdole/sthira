@@ -7,6 +7,7 @@ import {
   validateVoiceResponse,
   executeMapActions,
   type MapAction as VoiceMapAction,
+  type VoiceProposal,
   type Panel,
 } from './mapActions';
 import '@fontsource/noto-sans/400.css';
@@ -27,6 +28,13 @@ import {
   transitionOnPosition,
   transitionOnArrival,
   transitionOnRevocation,
+  shouldDropResponse,
+  validateGuidanceSnapshot,
+  mapGuidanceDestinations,
+  resolveChoiceAgainstGuidance,
+  buildReservationPayload,
+  type RawGuidanceDestination,
+  type ResolvedDestinationChoice,
   DEFAULT_JOURNEY_OPTIONS,
 } from './journey';
 import { triggerEmergencyDial } from './emergency';
@@ -46,18 +54,7 @@ type RuntimeState = 'checking' | 'demo' | 'blocked' | 'offline';
 type OnboardingStep = 'starting' | 'language' | 'location' | null;
 type LocationStatus = 'idle' | 'checking' | 'ready' | 'unavailable';
 
-type DestinationChoice = {
-  facility_id: string;
-  safe_zone_id: string;
-  facility_name: string;
-  capacity_known: boolean;
-  free: number | null;
-  route_id?: string;
-  route_verified: boolean;
-  distance_km?: number;
-  duration_minutes?: number;
-  is_illustrative?: boolean;
-};
+type DestinationChoice = ResolvedDestinationChoice;
 
 type AmbiguousCandidate = { place_id: string; place_kind: string };
 
@@ -127,8 +124,27 @@ let redZonesVisible = false;
 let relocationZonesVisible = false;
 let layersOpen = false;
 let mapTilted = false;
+let savedCamera = {
+  center: [76.112, 11.562] as [number, number],
+  zoom: 13.4,
+  pitch: 0,
+  bearing: 0,
+};
 let perspectiveCamera: { center: [number, number]; zoom: number } | null = null;
 let pendingZoneFocus: 'RED' | 'RELOCATION' | null = null;
+
+function recordCameraState() {
+  if (!map) return;
+  try {
+    const center = map.getCenter();
+    if (center && typeof center.toArray === 'function') {
+      savedCamera.center = center.toArray() as [number, number];
+    }
+    savedCamera.zoom = map.getZoom();
+    savedCamera.pitch = map.getPitch();
+    savedCamera.bearing = map.getBearing();
+  } catch {}
+}
 
 let voiceOpen = false;
 let voiceListening = false;
@@ -151,6 +167,7 @@ let activeReservationId: string | null = sessionStorage.getItem('sthira_reservat
 let activeStayId: string | null = sessionStorage.getItem('sthira_stay_id');
 
 let routeStarted = false;
+let routesVisible = true;
 let directionsOpen = false;
 let detailsOpen = false;
 let assistanceOpen = false;
@@ -170,7 +187,8 @@ let isIllustrativePreview = true;
 let guidanceStatus: 'PENDING' | 'LOADED' | 'EMPTY' | 'ERROR' = 'PENDING';
 let guidanceFreshness = 'UNKNOWN';
 let guidanceErrorMessage = '';
-let currentDataVersion = 'v1';
+let currentDataVersion = 'UNAVAILABLE';
+let currentSnapshotVersion: number | null = null;
 
 let ambiguousPlaces: AmbiguousCandidate[] = [];
 let availableDestinations: DestinationChoice[] = [
@@ -180,8 +198,22 @@ let availableDestinations: DestinationChoice[] = [
     facility_name: 'Demo Safe Facility (SZDEMO-1)',
     capacity_known: false,
     free: null,
-    route_id: EXERCISE_CONFIG.route_id,
+    route_id: undefined,
     route_verified: false,
+    coordinates: mapData.shelter as [number, number],
+    distance_km: undefined,
+    duration_minutes: undefined,
+    is_illustrative: true,
+  },
+  {
+    facility_id: 'FACDEMO-2',
+    safe_zone_id: 'SZDEMO-2',
+    facility_name: 'Alternate Facility (Ward 10) [Illustrative]',
+    capacity_known: false,
+    free: null,
+    route_id: undefined,
+    route_verified: false,
+    coordinates: undefined,
     distance_km: undefined,
     duration_minutes: undefined,
     is_illustrative: true,
@@ -199,7 +231,7 @@ let activeRequestId = 0;
 const audioGuard = new AudioPlaybackGuard();
 let lastApprovedAudio: AudioMetadata | undefined = undefined;
 
-let queuedVoiceActions: VoiceMapAction[] = [];
+let queuedVoiceProposal: VoiceProposal | null = null;
 
 function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
@@ -253,11 +285,12 @@ function requestLocation() {
 }
 
 function getDestinationTarget(): DestinationTarget {
+  const coords = (selectedDestination && selectedDestination.coordinates) ? selectedDestination.coordinates : mapData.shelter;
   return {
     id: selectedDestination ? selectedDestination.facility_id : EXERCISE_CONFIG.facility_id,
     name: selectedDestination ? selectedDestination.facility_name : 'Safe Shelter',
-    longitude: mapData.shelter[0],
-    latitude: mapData.shelter[1],
+    longitude: coords[0],
+    latitude: coords[1],
   };
 }
 
@@ -265,13 +298,16 @@ function destinationDistanceText(d: DestinationChoice | null): { kmText: string;
   const t = words[language];
   if (!d) return { kmText: '—', durationText: '—' };
   if (d.is_illustrative) return { kmText: t.distance || '2.8 km', durationText: t.duration || '35 min' };
-  if (currentPosition) {
-    const distM = computeDistanceMeters(currentPosition.longitude, currentPosition.latitude, mapData.shelter[0], mapData.shelter[1]);
+  if (d.coordinates && currentPosition) {
+    const distM = computeDistanceMeters(currentPosition.longitude, currentPosition.latitude, d.coordinates[0], d.coordinates[1]);
     const km = (distM / 1000).toFixed(1);
     const mins = Math.max(1, Math.round(distM / 80));
     return { kmText: `${km} km`, durationText: `${mins} min` };
   }
-  return { kmText: t.distance || '2.8 km', durationText: t.duration || '35 min' };
+  if (typeof d.distance_km === 'number') {
+    return { kmText: `${d.distance_km} km`, durationText: typeof d.duration_minutes === 'number' ? `${d.duration_minutes} min` : '—' };
+  }
+  return { kmText: '—', durationText: '—' };
 }
 
 function destinationCapacityText(): string {
@@ -455,23 +491,25 @@ async function queryGuidanceDestinations(): Promise<void> {
         data_version?: string;
         source_status?: string;
         data?: {
-          destinations?: Array<{
-            facility_id: string;
-            safe_zone_id: string;
-            capacity_known: boolean;
-            free: number | null;
-            route_id?: string;
-            route_verified: boolean;
-          }>;
+          snapshot_version?: number;
+          destinations?: RawGuidanceDestination[];
           package_id?: string;
           jurisdiction?: string;
         };
       };
-      if (!envelope.source_status || envelope.source_status !== 'CURRENT') {
+
+      const snapshotVal = validateGuidanceSnapshot(
+        envelope.source_status,
+        envelope.data_version,
+        envelope.data?.snapshot_version
+      );
+
+      if (!snapshotVal.isValid) {
         guidanceFreshness = envelope.source_status || 'UNAVAILABLE';
         guidanceStatus = 'ERROR';
-        guidanceErrorMessage = `Source status is ${guidanceFreshness}. Guidance unavailable.`;
+        guidanceErrorMessage = snapshotVal.errorMessage || 'Guidance snapshot is invalid or unverified.';
         currentDataVersion = 'UNAVAILABLE';
+        currentSnapshotVersion = null;
         audioGuard.invalidate();
         lastApprovedAudio = undefined;
         availableDestinations = [];
@@ -480,28 +518,34 @@ async function queryGuidanceDestinations(): Promise<void> {
         render();
         return;
       }
+
       guidanceFreshness = 'CURRENT';
-      const nextDataVersion = envelope.data_version || 'v1';
-      if (nextDataVersion !== currentDataVersion) {
+      const nextDataVersion = snapshotVal.dataVersion!;
+      const nextSnapshotVersion = snapshotVal.snapshotVersion!;
+
+      if (nextDataVersion !== currentDataVersion || nextSnapshotVersion !== currentSnapshotVersion) {
         audioGuard.invalidate();
         lastApprovedAudio = undefined;
       }
       currentDataVersion = nextDataVersion;
-      const dests = envelope.data?.destinations;
-      if (dests && dests.length > 0) {
-        availableDestinations = dests.map((d) => ({
-          facility_id: d.facility_id,
-          safe_zone_id: d.safe_zone_id,
-          facility_name: d.facility_id === EXERCISE_CONFIG.facility_id ? 'Demo Safe Facility (SZDEMO-1)' : `Shelter ${d.facility_id}`,
-          capacity_known: d.capacity_known,
-          free: d.free,
-          route_id: d.route_id || EXERCISE_CONFIG.route_id,
-          route_verified: d.route_verified,
-          distance_km: currentPosition ? Math.round(computeDistanceMeters(currentPosition.longitude, currentPosition.latitude, mapData.shelter[0], mapData.shelter[1]) / 100) / 10 : undefined,
-          duration_minutes: undefined,
-          is_illustrative: false,
-        }));
-        selectedDestination = availableDestinations[0]!;
+      currentSnapshotVersion = nextSnapshotVersion;
+
+      const rawDests = envelope.data?.destinations;
+      if (rawDests && rawDests.length > 0) {
+        availableDestinations = mapGuidanceDestinations(
+          rawDests,
+          EXERCISE_CONFIG.facility_id,
+          mapData.shelter as [number, number],
+          currentPosition
+        );
+
+        // Clear/invalidate selection if guidance changes version or no longer supports selected destination
+        const prevSelectedId = selectedDestination?.facility_id;
+        const stillSupported = prevSelectedId
+          ? availableDestinations.find((d) => d.facility_id === prevSelectedId)
+          : null;
+        selectedDestination = stillSupported || availableDestinations[0]!;
+
         isIllustrativePreview = false;
         guidanceStatus = 'LOADED';
       } else {
@@ -515,6 +559,7 @@ async function queryGuidanceDestinations(): Promise<void> {
       guidanceStatus = 'ERROR';
       guidanceFreshness = 'UNAVAILABLE';
       currentDataVersion = 'UNAVAILABLE';
+      currentSnapshotVersion = null;
       audioGuard.invalidate();
       lastApprovedAudio = undefined;
       availableDestinations = [];
@@ -526,6 +571,7 @@ async function queryGuidanceDestinations(): Promise<void> {
     guidanceStatus = 'ERROR';
     guidanceFreshness = 'UNAVAILABLE';
     currentDataVersion = 'UNAVAILABLE';
+    currentSnapshotVersion = null;
     audioGuard.invalidate();
     lastApprovedAudio = undefined;
     availableDestinations = [];
@@ -673,37 +719,47 @@ async function verifyAndPlayAudio(audioInfo: AudioMetadata): Promise<{ success: 
 }
 
 async function startRouteReservation() {
-  if (!selectedDestination || isIllustrativePreview) {
+  if (reservationPending) return;
+
+  if (!selectedDestination || isIllustrativePreview || selectedDestination.is_illustrative) {
     reservationError = 'Cannot reserve route for illustrative preview. Waiting for authorized operational guidance.';
     render();
     return;
   }
 
-  routeStarted = true;
-  directionsOpen = true;
+  const pendingKey = sessionStorage.getItem('pending_reservation_idem') || ('idem-' + Math.random().toString(36).slice(2, 10));
+
+  const buildResult = buildReservationPayload({
+    facilityId: selectedDestination.facility_id,
+    packageId: PACKAGE_ID,
+    routeId: selectedDestination.route_id,
+    partySize,
+    startDate: getTodayYMD(),
+    endDate: getTomorrowYMD(),
+    idempotencyKey: pendingKey,
+    snapshotVersion: currentSnapshotVersion,
+    isIllustrative: isIllustrativePreview || selectedDestination.is_illustrative,
+  });
+
+  if (!buildResult.canAllocate || !buildResult.payload) {
+    reservationPending = false;
+    reservationError = buildResult.errorMessage || 'Cannot allocate reservation: snapshot is missing or invalid.';
+    render();
+    return;
+  }
+
   reservationPending = true;
   reservationError = '';
   render();
-  focusRoute();
 
   try {
     await initSession();
-    const pendingKey = sessionStorage.getItem('pending_reservation_idem') || ('idem-' + Math.random().toString(36).slice(2, 10));
     sessionStorage.setItem('pending_reservation_idem', pendingKey);
 
     const res = await fetch('/api/v3/reservations', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({
-        facility_id: selectedDestination.facility_id,
-        package_id: PACKAGE_ID,
-        route_id: selectedDestination.route_id || EXERCISE_CONFIG.route_id,
-        party_size: partySize,
-        start_date: getTodayYMD(),
-        end_date: getTomorrowYMD(),
-        idempotency_key: pendingKey,
-        snapshot_version: EXERCISE_CONFIG.snapshot_version,
-      }),
+      body: JSON.stringify(buildResult.payload),
     });
     if (res.ok) {
       sessionStorage.removeItem('pending_reservation_idem');
@@ -716,16 +772,22 @@ async function startRouteReservation() {
         activeStayId = data.data.stay_id;
         sessionStorage.setItem('sthira_stay_id', activeStayId);
       }
+      routeStarted = true;
+      directionsOpen = true;
+      journeyState = 'TRACKING';
       reservationPending = false;
       reservationError = '';
+      focusRoute();
       render();
     } else {
+      routeStarted = false;
       const errJson = await res.json().catch(() => null);
       reservationError = errJson?.error?.message || errJson?.message || `Reservation failed (${res.status})`;
       reservationPending = false;
       render();
     }
   } catch {
+    routeStarted = false;
     reservationError = 'Network error while requesting reservation.';
     reservationPending = false;
     render();
@@ -744,43 +806,47 @@ async function confirmArrival() {
   arrivalError = '';
   render();
 
-  if (activeStayId) {
-    const idemKey = sessionStorage.getItem('pending_arrival_idem') || ('arrive-' + Math.random().toString(36).slice(2, 10));
-    sessionStorage.setItem('pending_arrival_idem', idemKey);
+  if (!activeStayId) {
+    arrivalError = 'No verified stay reservation found. Please select an authorized route and reserve a stay before confirming arrival.';
+    arrivalPending = false;
+    arrivalSuccess = false;
+    render();
+    return;
+  }
 
-    try {
-      const res = await fetch(`/api/v3/reservations/${encodeURIComponent(activeStayId)}/events`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({
-          type: 'ARRIVE',
-          idempotency_key: idemKey,
-        }),
-      });
+  const idemKey = sessionStorage.getItem('pending_arrival_idem') || ('arrive-' + Math.random().toString(36).slice(2, 10));
+  sessionStorage.setItem('pending_arrival_idem', idemKey);
 
-      if (res.ok) {
-        sessionStorage.removeItem('pending_arrival_idem');
-        journeyState = 'ARRIVAL_REPORTED';
-        arrivalSuccess = true;
-        arrivalRecordedAt = new Date().toLocaleTimeString();
-        arrivalPending = false;
-        arrivalError = '';
-        stopTracking();
-        render();
-      } else {
-        const errJson = await res.json().catch(() => null);
-        arrivalError = errJson?.error?.message || errJson?.message || `Server rejected arrival (${res.status})`;
-        arrivalPending = false;
-        render();
-      }
-    } catch {
-      arrivalError = 'Network error while reporting arrival. Please try again.';
+  try {
+    const res = await fetch(`/api/v3/reservations/${encodeURIComponent(activeStayId)}/events`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        type: 'ARRIVE',
+        idempotency_key: idemKey,
+      }),
+    });
+
+    if (res.ok) {
+      sessionStorage.removeItem('pending_arrival_idem');
+      journeyState = 'ARRIVAL_REPORTED';
+      arrivalSuccess = true;
+      arrivalRecordedAt = new Date().toLocaleTimeString();
       arrivalPending = false;
+      arrivalError = '';
+      stopTracking();
+      render();
+    } else {
+      const errJson = await res.json().catch(() => null);
+      arrivalError = errJson?.error?.message || errJson?.message || `Server rejected arrival (${res.status})`;
+      arrivalPending = false;
+      arrivalSuccess = false;
       render();
     }
-  } else {
-    arrivalError = 'No verified stay reservation found. Please select an authorized route first.';
+  } catch {
+    arrivalError = 'Network error while reporting arrival. Please try again.';
     arrivalPending = false;
+    arrivalSuccess = false;
     render();
   }
 }
@@ -961,50 +1027,70 @@ async function toggleLocalRecording() {
   }
 }
 
-function applyQueuedVoiceActions() {
-  const actions = queuedVoiceActions;
-  queuedVoiceActions = [];
-  for (const action of actions) {
-    if (action.type === 'FOCUS_FEATURE' || action.type === 'HIGHLIGHT_FEATURE') {
-      if (action.target_id === 'RZ-DEMO-01' || action.target_id === 'RZDEMO-1') map?.fitBounds(mapData.hazardBounds as [[number, number], [number, number]], { padding: 80, duration: motionDuration() });
-      if (action.target_id === 'SZ-DEMO-01' || action.target_id === 'SZDEMO-1' || action.target_id === 'FACDEMO-1' || action.target_id === 'FAC-DEMO-01' || action.target_id === 'PLACE-DEMO-1' || action.target_id === 'PLACE-DEMO-2') map?.easeTo({ center: mapData.shelter as [number, number], zoom: 15, duration: motionDuration() });
-      if (action.target_id === 'MY-LOCATION-DEMO') recenterMap();
-      if (action.target_id === 'ROUTE-DEMO-01' || action.target_id === 'RTDEMO-1') focusRoute();
+function applyDestinationChoices(targetIds: string[]) {
+  if (!targetIds || targetIds.length === 0) return;
+  const firstId = targetIds[0];
+
+  const resolution = resolveChoiceAgainstGuidance(firstId, availableDestinations);
+  if (resolution.resolved && resolution.destination) {
+    selectedDestination = resolution.destination;
+    if (resolution.destination.coordinates) {
+      mapData.shelter = resolution.destination.coordinates;
     }
-    if (action.type === 'FIT_FEATURES' || action.type === 'SHOW_ROUTE') focusRoute();
-    if (action.type === 'ZOOM') map?.zoomTo(map.getZoom() + (action.direction === 'IN' ? 1 : -1), { duration: motionDuration() });
-    if (action.type === 'PAN') {
-      const [lng, lat] = map?.getCenter().toArray() || mapData.user;
-      const offsets = { NORTH: [0, 0.01], SOUTH: [0, -0.01], EAST: [0.01, 0], WEST: [-0.01, 0] } as const;
-      const [dx, dy] = offsets[action.direction];
-      map?.easeTo({ center: [lng + dx, lat + dy], duration: motionDuration() });
-    }
-    if (action.type === 'RECENTER') recenterMap();
+  } else {
+    // Unresolved: do not invent safe_zone_id or demo route, do not make reservable
+    selectedDestination = null;
+    guidanceStatus = 'ERROR';
+    guidanceErrorMessage = resolution.errorMessage || `Facility "${firstId}" is not verified in current guidance snapshot. Please refresh guidance.`;
+    commandResponse = `Facility ${firstId} cannot be confirmed from the active guidance snapshot.`;
   }
-  if (pendingZoneFocus === 'RED') map?.fitBounds(mapData.hazardBounds as [[number, number], [number, number]], { padding: 70, duration: motionDuration() });
-  if (pendingZoneFocus === 'RELOCATION') map?.fitBounds(mapData.relocationBounds as [[number, number], [number, number]], { padding: 70, duration: motionDuration() });
-  pendingZoneFocus = null;
 }
 
-function applyVoiceActions(actions: VoiceMapAction[]) {
-  queuedVoiceActions = actions;
-  for (const action of actions) {
+function dispatchVoiceProposal(proposal: VoiceProposal) {
+  const validated = validateVoiceResponse(proposal);
+  if (!validated) return;
+
+  // 1. Process non-map state side effects exactly once (no duplicate intermediate renders)
+  for (const action of validated.actions) {
     if (action.type === 'SET_LAYER_VISIBILITY') {
       if (action.layer === 'RED_ZONES') redZonesVisible = action.visible;
       if (action.layer === 'SAFE_ZONES') relocationZonesVisible = action.visible;
-      if (action.layer === 'ROUTES') routeStarted = action.visible;
+      if (action.layer === 'ROUTES') routesVisible = action.visible;
     }
     if (action.type === 'OPEN_PANEL') {
-      if (action.panel === 'ALERT_DETAILS') detailsOpen = true;
       if (action.panel === 'ROUTE_GUIDANCE' || action.panel === 'ROUTE_STEPS') directionsOpen = true;
+      if (action.panel === 'ALERT_DETAILS') detailsOpen = true;
       if (action.panel === 'EMERGENCY_CALL_CONFIRMATION') assistanceOpen = true;
       if (action.panel === 'ARRIVAL_CONFIRMATION') arrivalOpen = true;
     }
     if (action.type === 'SET_LANGUAGE') {
-      language = action.language === 'ml-IN' ? 'ML' : action.language === 'hi-IN' ? 'HI' : 'EN';
+      if (action.language === 'ml-IN') language = 'ML';
+      if (action.language === 'hi-IN') language = 'HI';
+      if (action.language === 'en-IN') language = 'EN';
       audioGuard.invalidate();
       lastApprovedAudio = undefined;
     }
+    if (action.type === 'SHOW_CHOICES') {
+      applyDestinationChoices(action.target_ids);
+    }
+  }
+
+  // 2. Dispatch to map if alive and ready, else queue once
+  if (map && map.isStyleLoaded()) {
+    queuedVoiceProposal = null;
+    executeMapActions(
+      map,
+      validated,
+      motionDuration() === 0,
+      () => {},
+      () => {},
+      (candidates) => {
+        ambiguousPlaces = candidates.map((id) => ({ place_id: id, place_kind: 'candidate' }));
+      }
+    );
+    recordCameraState();
+  } else {
+    queuedVoiceProposal = validated;
   }
 }
 
@@ -1036,7 +1122,7 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
       body: JSON.stringify(pipelineReq),
     });
 
-    if (reqId !== activeRequestId || document.hidden) {
+    if (shouldDropResponse(activeRequestId, reqId, document.hidden)) {
       return;
     }
 
@@ -1054,7 +1140,7 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
     }
 
     const envelope = (await res.json()) as VoiceResponseEnvelope;
-    if (reqId !== activeRequestId || document.hidden) return;
+    if (shouldDropResponse(activeRequestId, reqId, document.hidden)) return;
 
     const outcome = processVoiceEnvelope(envelope);
 
@@ -1084,37 +1170,7 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
 
     // outcome.kind === 'OK'
     if (outcome.proposal) {
-      if (map) {
-        executeMapActions(
-          map,
-          outcome.proposal,
-          motionDuration() === 0,
-          (panel) => {
-            if (panel === 'ROUTE_GUIDANCE' || panel === 'ROUTE_STEPS') directionsOpen = true;
-            if (panel === 'ALERT_DETAILS') detailsOpen = true;
-            if (panel === 'EMERGENCY_CALL_CONFIRMATION') assistanceOpen = true;
-            if (panel === 'ARRIVAL_CONFIRMATION') arrivalOpen = true;
-            render();
-          },
-          (newLang) => {
-            if (newLang === 'ml-IN') language = 'ML';
-            if (newLang === 'hi-IN') language = 'HI';
-            if (newLang === 'en-IN') language = 'EN';
-            audioGuard.invalidate();
-            lastApprovedAudio = undefined;
-            render();
-          },
-          (candidates) => {
-            ambiguousPlaces = candidates.map((id) => ({ place_id: id, place_kind: 'candidate' }));
-            render();
-          }
-        );
-      } else {
-        const validated = validateVoiceResponse(outcome.proposal);
-        if (validated && validated.actions) {
-          applyVoiceActions(validated.actions);
-        }
-      }
+      dispatchVoiceProposal(outcome.proposal as VoiceProposal);
     }
 
     if (outcome.template_text) {
@@ -1178,6 +1234,8 @@ function renderOnboarding() {
     </main>`;
   document.querySelectorAll<HTMLButtonElement>('[data-onboarding-language]').forEach((button) => button.addEventListener('click', () => {
     language = button.dataset.onboardingLanguage as Language;
+    audioGuard.invalidate();
+    lastApprovedAudio = undefined;
     try { localStorage.setItem('sthira-language', language); } catch { /* Continue without storage. */ }
     renderOnboarding();
   }));
@@ -1189,11 +1247,29 @@ function renderOnboarding() {
 
 function render() {
   const t = words[language];
-  if (mapAnimationFrame !== null) cancelAnimationFrame(mapAnimationFrame);
-  mapAnimationFrame = null;
-  map?.remove();
-  mapRenderVersion += 1;
-  if (onboardingStep) { renderOnboarding(); return; }
+  recordCameraState();
+  if (onboardingStep) {
+    if (mapAnimationFrame !== null) cancelAnimationFrame(mapAnimationFrame);
+    mapAnimationFrame = null;
+    map?.remove();
+    map = null;
+    mapRenderVersion += 1;
+    renderOnboarding();
+    return;
+  }
+
+  const existingCanvas = document.querySelector<HTMLElement>('#map-canvas');
+  const isMapAlive = !!(map && existingCanvas && existingCanvas.hasChildNodes());
+  if (isMapAlive) {
+    existingCanvas.remove();
+  } else {
+    if (mapAnimationFrame !== null) cancelAnimationFrame(mapAnimationFrame);
+    mapAnimationFrame = null;
+    map?.remove();
+    map = null;
+    mapRenderVersion += 1;
+  }
+
   document.documentElement.lang = language === 'ML' ? 'ml' : language === 'HI' ? 'hi' : 'en';
   document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <div class="app-shell ${hasRendered ? '' : 'is-entering'} ${voiceOpen ? 'voice-is-open' : ''} ${directionsOpen ? 'route-is-open' : ''}">
@@ -1324,50 +1400,151 @@ function render() {
       ${islOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.isl}</span><h2>${t.islTitle}</h2></div><button class="icon-button" data-action="isl-close" aria-label="${t.close}">${icons.close}</button></div><p>${t.islPending}</p><p>${t.summary}</p></dialog>` : ''}
       <div class="toast" role="status" aria-live="polite" hidden></div>
     </div>`;
+
+  if (isMapAlive && existingCanvas) {
+    const placeholder = document.querySelector<HTMLElement>('#map-canvas');
+    if (placeholder) {
+      placeholder.replaceWith(existingCanvas);
+    } else {
+      if (mapAnimationFrame !== null) cancelAnimationFrame(mapAnimationFrame);
+      mapAnimationFrame = null;
+      map?.remove();
+      map = null;
+    }
+  }
+
   hasRendered = true;
-  bindInteractions(); void initMap(mapRenderVersion);
+  bindInteractions();
+  void initMap(mapRenderVersion);
 }
 
 function mapColor(token: string) { return getComputedStyle(document.documentElement).getPropertyValue(token).trim(); }
+function updateMapDynamicProperties() {
+  if (!map) return;
+  try {
+    if (!map.isStyleLoaded()) return;
+  } catch {
+    return;
+  }
+  const rVis = redZonesVisible ? 'visible' : 'none';
+  ['hazard-band', 'hazard-fill', 'hazard-edge'].forEach((id) => {
+    if (map?.getLayer(id)) map.setLayoutProperty(id, 'visibility', rVis);
+  });
+  const relocVis = relocationZonesVisible ? 'visible' : 'none';
+  ['relocation-band', 'relocation-fill', 'relocation-edge', 'hospital-pulse', 'hospital-point', 'hospital-label'].forEach((id) => {
+    if (map?.getLayer(id)) map.setLayoutProperty(id, 'visibility', relocVis);
+  });
+  const routesVis = routesVisible ? 'visible' : 'none';
+  ['route-casing', 'approved-route', 'route-motion'].forEach((id) => {
+    if (map?.getLayer(id)) map.setLayoutProperty(id, 'visibility', routesVis);
+  });
+  if (map.getLayer('route-motion')) {
+    map.setPaintProperty('route-motion', 'line-opacity', (routesVisible && routeStarted) ? 0.9 : 0);
+  }
+  const t = words[language];
+  const hazardSource = map.getSource('hazard') as any;
+  if (hazardSource && typeof hazardSource.setData === 'function') {
+    hazardSource.setData({
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: mapData.hazard },
+      properties: { label: t.hazardLabel, detail: t.hazardDetail },
+    });
+  }
+  const relocSource = map.getSource('relocation') as any;
+  if (relocSource && typeof relocSource.setData === 'function') {
+    relocSource.setData({
+      type: 'FeatureCollection',
+      features: [
+        { type: 'Feature', geometry: { type: 'Polygon', coordinates: mapData.relocationZones[0] }, properties: { label: t.relocation1Label, detail: t.relocation1Detail } },
+        { type: 'Feature', geometry: { type: 'Polygon', coordinates: mapData.relocationZones[1] }, properties: { label: t.relocation2Label, detail: t.relocation2Detail } },
+      ],
+    });
+  }
+  const placesSource = map.getSource('places') as any;
+  if (placesSource && typeof placesSource.setData === 'function') {
+    placesSource.setData({
+      type: 'FeatureCollection',
+      features: [
+        { type: 'Feature', geometry: { type: 'Point', coordinates: mapData.user }, properties: { label: t.userMapLabel, kind: 'user' } },
+        { type: 'Feature', geometry: { type: 'Point', coordinates: mapData.shelter }, properties: { label: t.shelterMapLabel, kind: 'shelter' } },
+        { type: 'Feature', geometry: { type: 'Point', coordinates: mapData.hospital }, properties: { label: t.hospitalMapLabel, kind: 'hospital' } },
+        ...(deviceLocation ? [{ type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: deviceLocation }, properties: { label: t.deviceMapLabel, kind: 'device' } }] : []),
+      ],
+    });
+  }
+  revealMapLayers();
+  startMapAnimation();
+}
+
 async function initMap(renderVersion: number) {
-  const container = document.querySelector<HTMLElement>('#map-canvas'); if (!container) return;
+  const container = document.querySelector<HTMLElement>('#map-canvas');
+  if (!container) return;
+  if (map && container.contains(map.getCanvas())) {
+    map.resize();
+    updateMapDynamicProperties();
+    return;
+  }
   const { Map, Popup } = await import('maplibre-gl');
   if (renderVersion !== mapRenderVersion || !document.body.contains(container)) return;
   const t = words[language];
-  const mapZoom = mapTilted ? Math.max(perspectiveCamera?.zoom || 0, 15.5) : (perspectiveCamera?.zoom ?? 13.4);
-  map = new Map({ container, center: perspectiveCamera?.center || [76.112, 11.562], zoom: mapZoom, pitch: mapTilted ? 65 : 0, bearing: mapTilted ? -18 : 0, maxPitch: 75, dragRotate: true, pitchWithRotate: true, attributionControl: false, style: { version: 8, terrain: mapTilted ? { source: 'elevation', exaggeration: 1 } : undefined, light: { anchor: 'viewport', color: 'hsl(210, 55%, 93%)', intensity: 0.42, position: [1.5, 210, 30] }, sources: {
-    basemap: { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, attribution: 'Imagery © Esri' },
-    elevation: { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], tileSize: 256, encoding: 'terrarium', maxzoom: 15, attribution: '<a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noreferrer">Terrain Tiles</a>' },
-    hazard: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: mapData.hazard }, properties: { label: t.hazardLabel, detail: t.hazardDetail } } },
-    relocation: { type: 'geojson', data: { type: 'FeatureCollection', features: [
-      { type: 'Feature', geometry: { type: 'Polygon', coordinates: mapData.relocationZones[0] }, properties: { label: t.relocation1Label, detail: t.relocation1Detail } },
-      { type: 'Feature', geometry: { type: 'Polygon', coordinates: mapData.relocationZones[1] }, properties: { label: t.relocation2Label, detail: t.relocation2Detail } },
-    ] } },
-    route: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: mapData.route }, properties: {} } },
-    roads: { type: 'geojson', data: { type: 'FeatureCollection', features: mapData.roads.map((coordinates) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates }, properties: {} })) } },
-    places: { type: 'geojson', data: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: mapData.user }, properties: { label: t.userMapLabel, kind: 'user' } }, { type: 'Feature', geometry: { type: 'Point', coordinates: mapData.shelter }, properties: { label: t.shelterMapLabel, kind: 'shelter' } }, { type: 'Feature', geometry: { type: 'Point', coordinates: mapData.hospital }, properties: { label: t.hospitalMapLabel, kind: 'hospital' } }, ...(deviceLocation ? [{ type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: deviceLocation }, properties: { label: t.deviceMapLabel, kind: 'device' } }] : [])] } },
-  }, layers: [
-    { id: 'background', type: 'background', paint: { 'background-color': mapColor('--map-color-surface') } },
-    { id: 'basemap', type: 'raster', source: 'basemap', paint: { 'raster-opacity': 0.92, 'raster-saturation': -0.12, 'raster-contrast': 0.14, 'raster-brightness-max': 0.82 } },
-    { id: 'roads', type: 'line', source: 'roads', paint: { 'line-color': mapColor('--map-color-paper'), 'line-width': 1.5, 'line-opacity': 0.32 } },
-    { id: 'hazard-band', type: 'line', source: 'hazard', layout: { visibility: redZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-danger'), 'line-width': 22, 'line-blur': 7, 'line-opacity': 0, 'line-opacity-transition': { duration: motionDuration() } } },
-    { id: 'hazard-fill', type: 'fill', source: 'hazard', layout: { visibility: redZonesVisible ? 'visible' : 'none' }, paint: { 'fill-color': mapColor('--map-color-danger'), 'fill-opacity': 0, 'fill-opacity-transition': { duration: motionDuration() } } },
-    { id: 'hazard-edge', type: 'line', source: 'hazard', layout: { visibility: redZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-danger'), 'line-width': 3.5, 'line-opacity': 0, 'line-dasharray': [1, 1.4], 'line-opacity-transition': { duration: motionDuration() } } },
-    { id: 'relocation-band', type: 'line', source: 'relocation', layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-success'), 'line-width': 18, 'line-blur': 6, 'line-opacity': 0, 'line-opacity-transition': { duration: motionDuration() } } },
-    { id: 'relocation-fill', type: 'fill', source: 'relocation', layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'fill-color': mapColor('--map-color-success'), 'fill-opacity': 0, 'fill-opacity-transition': { duration: motionDuration() } } },
-    { id: 'relocation-edge', type: 'line', source: 'relocation', layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-success'), 'line-width': 3, 'line-opacity': 0, 'line-dasharray': [1.6, 1], 'line-opacity-transition': { duration: motionDuration() } } },
-    { id: 'route-casing', type: 'line', source: 'route', paint: { 'line-color': mapColor('--map-color-paper'), 'line-width': 9, 'line-opacity': 0.9 } },
-    { id: 'approved-route', type: 'line', source: 'route', paint: { 'line-color': mapColor('--map-color-accent'), 'line-width': 5, 'line-opacity': 0.98 } },
-    { id: 'route-motion', type: 'line', source: 'route', paint: { 'line-color': mapColor('--map-color-paper'), 'line-width': 2, 'line-opacity': routeStarted ? 0.9 : 0, 'line-dasharray': [0.2, 2.4, 1.6] } },
-    { id: 'shelter-pulse', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'shelter'], paint: { 'circle-radius': 15, 'circle-color': mapColor('--map-color-success'), 'circle-opacity': 0.24 } },
-    { id: 'hospital-pulse', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'hospital'], layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'circle-radius': 16, 'circle-color': mapColor('--map-color-paper'), 'circle-opacity': 0.28 } },
-    { id: 'device-pulse', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'device'], paint: { 'circle-radius': 17, 'circle-color': mapColor('--map-color-accent'), 'circle-opacity': 0 } },
-    { id: 'place-points', type: 'circle', source: 'places', filter: ['!=', ['get', 'kind'], 'hospital'], paint: { 'circle-radius': ['case', ['==', ['get', 'kind'], 'device'], 7, 8], 'circle-color': ['case', ['==', ['get', 'kind'], 'device'], mapColor('--map-color-paper'), mapColor('--map-color-accent')], 'circle-stroke-color': ['case', ['==', ['get', 'kind'], 'device'], mapColor('--map-color-accent'), mapColor('--map-color-paper')], 'circle-stroke-width': 3 } },
-    { id: 'hospital-point', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'hospital'], layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'circle-radius': 8, 'circle-color': mapColor('--map-color-paper'), 'circle-stroke-color': mapColor('--map-color-success'), 'circle-stroke-width': 3 } },
-    { id: 'place-labels', type: 'symbol', source: 'places', filter: ['all', ['!=', ['get', 'kind'], 'device'], ['!=', ['get', 'kind'], 'hospital']], layout: { 'text-field': ['get', 'label'], 'text-size': 13, 'text-offset': [0, 1.5], 'text-anchor': 'top' }, paint: { 'text-color': mapColor('--map-color-paper'), 'text-halo-color': mapColor('--map-color-surface'), 'text-halo-width': 2 } },
-    { id: 'hospital-label', type: 'symbol', source: 'places', filter: ['==', ['get', 'kind'], 'hospital'], layout: { visibility: relocationZonesVisible ? 'visible' : 'none', 'text-field': ['get', 'label'], 'text-size': 13, 'text-offset': [0, 1.5], 'text-anchor': 'top' }, paint: { 'text-color': mapColor('--map-color-paper'), 'text-halo-color': mapColor('--map-color-surface'), 'text-halo-width': 2 } },
-  ] } });
-  perspectiveCamera = null;
+  const mapZoom = mapTilted ? Math.max(savedCamera.zoom, 15.5) : savedCamera.zoom;
+  map = new Map({
+    container,
+    center: savedCamera.center,
+    zoom: mapZoom,
+    pitch: mapTilted ? 65 : savedCamera.pitch,
+    bearing: mapTilted ? -18 : savedCamera.bearing,
+    maxPitch: 75,
+    dragRotate: true,
+    pitchWithRotate: true,
+    attributionControl: false,
+    style: {
+      version: 8,
+      terrain: mapTilted ? { source: 'elevation', exaggeration: 1 } : undefined,
+      light: { anchor: 'viewport', color: 'hsl(210, 55%, 93%)', intensity: 0.42, position: [1.5, 210, 30] },
+      sources: {
+        basemap: { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, attribution: 'Imagery © Esri' },
+        elevation: { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], tileSize: 256, encoding: 'terrarium', maxzoom: 15, attribution: '<a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noreferrer">Terrain Tiles</a>' },
+        hazard: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: mapData.hazard }, properties: { label: t.hazardLabel, detail: t.hazardDetail } } },
+        relocation: { type: 'geojson', data: { type: 'FeatureCollection', features: [
+          { type: 'Feature', geometry: { type: 'Polygon', coordinates: mapData.relocationZones[0] }, properties: { label: t.relocation1Label, detail: t.relocation1Detail } },
+          { type: 'Feature', geometry: { type: 'Polygon', coordinates: mapData.relocationZones[1] }, properties: { label: t.relocation2Label, detail: t.relocation2Detail } },
+        ] } },
+        route: { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: mapData.route }, properties: {} } },
+        roads: { type: 'geojson', data: { type: 'FeatureCollection', features: mapData.roads.map((coordinates) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates }, properties: {} })) } },
+        places: { type: 'geojson', data: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: mapData.user }, properties: { label: t.userMapLabel, kind: 'user' } }, { type: 'Feature', geometry: { type: 'Point', coordinates: mapData.shelter }, properties: { label: t.shelterMapLabel, kind: 'shelter' } }, { type: 'Feature', geometry: { type: 'Point', coordinates: mapData.hospital }, properties: { label: t.hospitalMapLabel, kind: 'hospital' } }, ...(deviceLocation ? [{ type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: deviceLocation }, properties: { label: t.deviceMapLabel, kind: 'device' } }] : [])] } },
+      },
+      layers: [
+        { id: 'background', type: 'background', paint: { 'background-color': mapColor('--map-color-surface') } },
+        { id: 'basemap', type: 'raster', source: 'basemap', paint: { 'raster-opacity': 0.92, 'raster-saturation': -0.12, 'raster-contrast': 0.14, 'raster-brightness-max': 0.82 } },
+        { id: 'roads', type: 'line', source: 'roads', paint: { 'line-color': mapColor('--map-color-paper'), 'line-width': 1.5, 'line-opacity': 0.32 } },
+        { id: 'hazard-band', type: 'line', source: 'hazard', layout: { visibility: redZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-danger'), 'line-width': 22, 'line-blur': 7, 'line-opacity': 0, 'line-opacity-transition': { duration: motionDuration() } } },
+        { id: 'hazard-fill', type: 'fill', source: 'hazard', layout: { visibility: redZonesVisible ? 'visible' : 'none' }, paint: { 'fill-color': mapColor('--map-color-danger'), 'fill-opacity': 0, 'fill-opacity-transition': { duration: motionDuration() } } },
+        { id: 'hazard-edge', type: 'line', source: 'hazard', layout: { visibility: redZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-danger'), 'line-width': 3.5, 'line-opacity': 0, 'line-dasharray': [1, 1.4], 'line-opacity-transition': { duration: motionDuration() } } },
+        { id: 'relocation-band', type: 'line', source: 'relocation', layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-success'), 'line-width': 18, 'line-blur': 6, 'line-opacity': 0, 'line-opacity-transition': { duration: motionDuration() } } },
+        { id: 'relocation-fill', type: 'fill', source: 'relocation', layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'fill-color': mapColor('--map-color-success'), 'fill-opacity': 0, 'fill-opacity-transition': { duration: motionDuration() } } },
+        { id: 'relocation-edge', type: 'line', source: 'relocation', layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-success'), 'line-width': 3, 'line-opacity': 0, 'line-dasharray': [1.6, 1], 'line-opacity-transition': { duration: motionDuration() } } },
+        { id: 'route-casing', type: 'line', source: 'route', layout: { visibility: routesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-paper'), 'line-width': 9, 'line-opacity': 0.9 } },
+        { id: 'approved-route', type: 'line', source: 'route', layout: { visibility: routesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-accent'), 'line-width': 5, 'line-opacity': 0.98 } },
+        { id: 'route-motion', type: 'line', source: 'route', layout: { visibility: routesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-paper'), 'line-width': 2, 'line-opacity': (routesVisible && routeStarted) ? 0.9 : 0, 'line-dasharray': [0.2, 2.4, 1.6] } },
+        { id: 'shelter-pulse', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'shelter'], paint: { 'circle-radius': 15, 'circle-color': mapColor('--map-color-success'), 'circle-opacity': 0.24 } },
+        { id: 'hospital-pulse', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'hospital'], layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'circle-radius': 16, 'circle-color': mapColor('--map-color-paper'), 'circle-opacity': 0.28 } },
+        { id: 'device-pulse', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'device'], paint: { 'circle-radius': 17, 'circle-color': mapColor('--map-color-accent'), 'circle-opacity': 0 } },
+        { id: 'place-points', type: 'circle', source: 'places', filter: ['!=', ['get', 'kind'], 'hospital'], paint: { 'circle-radius': ['case', ['==', ['get', 'kind'], 'device'], 7, 8], 'circle-color': ['case', ['==', ['get', 'kind'], 'device'], mapColor('--map-color-paper'), mapColor('--map-color-accent')], 'circle-stroke-color': ['case', ['==', ['get', 'kind'], 'device'], mapColor('--map-color-accent'), mapColor('--map-color-paper')], 'circle-stroke-width': 3 } },
+        { id: 'hospital-point', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'hospital'], layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'circle-radius': 8, 'circle-color': mapColor('--map-color-paper'), 'circle-stroke-color': mapColor('--map-color-success'), 'circle-stroke-width': 3 } },
+        { id: 'place-labels', type: 'symbol', source: 'places', filter: ['all', ['!=', ['get', 'kind'], 'device'], ['!=', ['get', 'kind'], 'hospital']], layout: { 'text-field': ['get', 'label'], 'text-size': 13, 'text-offset': [0, 1.5], 'text-anchor': 'top' }, paint: { 'text-color': mapColor('--map-color-paper'), 'text-halo-color': mapColor('--map-color-surface'), 'text-halo-width': 2 } },
+        { id: 'hospital-label', type: 'symbol', source: 'places', filter: ['==', ['get', 'kind'], 'hospital'], layout: { visibility: relocationZonesVisible ? 'visible' : 'none', 'text-field': ['get', 'label'], 'text-size': 13, 'text-offset': [0, 1.5], 'text-anchor': 'top' }, paint: { 'text-color': mapColor('--map-color-paper'), 'text-halo-color': mapColor('--map-color-surface'), 'text-halo-width': 2 } },
+      ],
+    },
+  });
+
+  exposeWindowHelpers();
+
+  map.on('moveend', recordCameraState);
+  map.on('zoomend', recordCameraState);
+  map.on('pitchend', recordCameraState);
+  map.on('rotateend', recordCameraState);
+
   map.on('idle', () => {
     if (renderVersion === mapRenderVersion) document.querySelector<HTMLElement>('.map-loading')?.setAttribute('hidden', '');
   });
@@ -1375,9 +1552,24 @@ async function initMap(renderVersion: number) {
     if (renderVersion !== mapRenderVersion) return;
     document.querySelector<HTMLElement>('.map-loading')?.setAttribute('hidden', '');
     map?.resize();
+    recordCameraState();
     if (routeStarted) focusRoute();
     revealMapLayers();
-    applyQueuedVoiceActions();
+    if (queuedVoiceProposal) {
+      const p = queuedVoiceProposal;
+      queuedVoiceProposal = null;
+      executeMapActions(
+        map!,
+        p,
+        motionDuration() === 0,
+        () => {},
+        () => {},
+        (candidates) => {
+          ambiguousPlaces = candidates.map((id) => ({ place_id: id, place_kind: 'candidate' }));
+        }
+      );
+      recordCameraState();
+    }
     startMapAnimation();
     map?.on('mouseenter', 'place-points', () => { if (map) map.getCanvas().style.cursor = 'pointer'; });
     map?.on('mouseleave', 'place-points', () => { if (map) map.getCanvas().style.cursor = ''; });
@@ -1418,16 +1610,35 @@ function syncPerspectiveControl() {
 }
 function toggleMapPerspective() {
   if (!map) return;
-  perspectiveCamera = { center: map.getCenter().toArray(), zoom: map.getZoom() };
+  recordCameraState();
   mapTilted = !mapTilted;
+  if (mapTilted) {
+    try { map.setTerrain({ source: 'elevation', exaggeration: 1 }); } catch {}
+    map.easeTo({
+      pitch: 65,
+      bearing: -18,
+      zoom: Math.max(savedCamera.zoom, 15.5),
+      duration: motionDuration(),
+    });
+  } else {
+    try { map.setTerrain(null); } catch {}
+    map.easeTo({
+      pitch: 0,
+      bearing: 0,
+      zoom: savedCamera.zoom,
+      duration: motionDuration(),
+    });
+  }
+  syncPerspectiveControl();
   render();
 }
 function recenterMap() {
-  if (!deviceLocation) { requestLocation(); return; }
+  const target = (deviceLocation || mapData.user) as [number, number];
   mapTilted = false;
-  map?.setTerrain(null);
-  map?.easeTo({ center: deviceLocation, zoom: 15, pitch: 0, bearing: 0, duration: motionDuration() });
+  try { map?.setTerrain(null); } catch {}
+  map?.easeTo({ center: target, zoom: 15, pitch: 0, bearing: 0, duration: motionDuration() });
   syncPerspectiveControl();
+  recordCameraState();
 }
 function focusRoute() {
   map?.fitBounds(mapData.routeBounds as [[number, number], [number, number]], {
@@ -1447,6 +1658,10 @@ function revealMapLayers() {
   if (motionDuration() === 0) show(); else requestAnimationFrame(show);
 }
 function startMapAnimation() {
+  if (mapAnimationFrame !== null) {
+    cancelAnimationFrame(mapAnimationFrame);
+    mapAnimationFrame = null;
+  }
   if (!map || motionDuration() === 0 || (!routeStarted && !redZonesVisible && !relocationZonesVisible && !deviceLocation)) return;
   const dashFrames = [[0.2, 2.4, 1.6], [0.7, 2.4, 1.1], [1.2, 2.4, 0.6], [1.7, 2.4, 0.1]];
   let frame = 0;
@@ -1529,6 +1744,9 @@ function bindInteractions() {
       const found = availableDestinations.find((d) => d.facility_id === facId);
       if (found) {
         selectedDestination = found;
+        if (found.coordinates) {
+          mapData.shelter = found.coordinates;
+        }
         render();
       }
     })
@@ -1548,12 +1766,10 @@ function bindInteractions() {
   });
   document.querySelector<HTMLButtonElement>('[data-action="toggle-red-zones"]')?.addEventListener('click', () => {
     redZonesVisible = !redZonesVisible;
-    pendingZoneFocus = redZonesVisible ? 'RED' : null;
     render();
   });
   document.querySelector<HTMLButtonElement>('[data-action="toggle-relocation-zones"]')?.addEventListener('click', () => {
     relocationZonesVisible = !relocationZonesVisible;
-    pendingZoneFocus = relocationZonesVisible ? 'RELOCATION' : null;
     render();
   });
 
@@ -1671,7 +1887,78 @@ function bindInteractions() {
   });
 }
 
+function exposeWindowHelpers() {
+  if (typeof window === 'undefined') return;
+  const w = window as any;
+  w.map = map;
+  w.savedCamera = savedCamera;
+  w.openArrival = () => { arrivalOpen = true; render(); };
+  w.confirmArrival = confirmArrival;
+  w.getJourneyState = () => journeyState;
+  w.getArrivalSuccess = () => arrivalSuccess;
+  w.getArrivalError = () => arrivalError;
+  w.getActiveStayId = () => activeStayId;
+  w.setActiveStayId = (stayId: string | null) => { activeStayId = stayId; };
+  w.setTestDestinations = (dests: DestinationChoice[]) => {
+    availableDestinations = dests;
+    selectedDestination = dests[0] || null;
+    guidanceStatus = 'LOADED';
+    render();
+  };
+  w.simulatePosition = (lng: number, lat: number) => {
+    applyPositionUpdate({ longitude: lng, latitude: lat, accuracyMeters: 10, timestamp: Date.now() });
+  };
+  w.sendVoiceOrText = sendVoiceOrText;
+  w.dispatchVoiceProposal = dispatchVoiceProposal;
+  w.getSelectedDestination = () => selectedDestination;
+  w.getAvailableDestinations = () => availableDestinations;
+  w.getRedZonesVisible = () => redZonesVisible;
+  w.getRelocationZonesVisible = () => relocationZonesVisible;
+  w.getRoutesVisible = () => routesVisible;
+  w.setRoutesVisible = (vis: boolean) => { routesVisible = vis; render(); };
+  w.getRouteStarted = () => routeStarted;
+  w.getCurrentSnapshotVersion = () => currentSnapshotVersion;
+  w.setCurrentSnapshotVersion = (v: number | null) => { currentSnapshotVersion = v; };
+  w.startRouteReservation = startRouteReservation;
+  w.applyDestinationChoices = applyDestinationChoices;
+  w.queryGuidanceDestinations = queryGuidanceDestinations;
+  w.getGuidanceStatus = () => guidanceStatus;
+  w.getGuidanceErrorMessage = () => guidanceErrorMessage;
+  w.getReservationPending = () => reservationPending;
+  w.getReservationError = () => reservationError;
+  w.setLanguage = (lang: Language) => {
+    language = lang;
+    audioGuard.invalidate();
+    lastApprovedAudio = undefined;
+    commandSuggestions = [...words[language].voiceCommands];
+    commandResponse = words[language].voiceReady;
+    commandError = '';
+    voiceFeedbackKey = 'micPrivacy';
+    render();
+  };
+  w.getLanguage = () => language;
+  w.getDataVersion = () => currentDataVersion;
+  w.setDataVersion = (ver: string) => {
+    currentDataVersion = ver;
+    audioGuard.invalidate();
+    lastApprovedAudio = undefined;
+  };
+  w.getGuidanceFreshness = () => guidanceFreshness;
+  w.setGuidanceFreshness = (f: string) => { guidanceFreshness = f; };
+  w.verifyAndPlayAudio = verifyAndPlayAudio;
+  w.getLastApprovedAudio = () => lastApprovedAudio;
+  w.setLastApprovedAudio = (a: AudioMetadata | undefined) => { lastApprovedAudio = a; };
+  w.getCommandResponse = () => commandResponse;
+  w.getCommandError = () => commandError;
+  w.getCommandPending = () => commandPending;
+  w.getActiveRequestId = () => activeRequestId;
+  w.getVoiceOpen = () => voiceOpen;
+  w.openVoice = () => { voiceOpen = true; render(); };
+  w.forceRender = () => render();
+}
+
 // Initial bootstrap
+exposeWindowHelpers();
 render();
 void initSession();
 void checkRuntime();
@@ -1699,6 +1986,7 @@ window.addEventListener('offline', () => {
   lastApprovedAudio = undefined;
   guidanceFreshness = 'UNAVAILABLE';
   currentDataVersion = 'UNAVAILABLE';
+  currentSnapshotVersion = null;
   render();
 });
 

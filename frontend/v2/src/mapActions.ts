@@ -83,6 +83,10 @@ if (bounds['SZ-DEMO-01']) {
   bounds['FAC-DEMO-01'] = bounds['SZ-DEMO-01'];
   bounds['PLACE-DEMO-2'] = bounds['SZ-DEMO-01'];
 }
+if (bounds['SZ-DEMO-02']) {
+  bounds['SZDEMO-2'] = bounds['SZ-DEMO-02'];
+  bounds['FACDEMO-2'] = bounds['SZ-DEMO-02'];
+}
 
 const ids = new Set(Object.keys(bounds));
 
@@ -165,13 +169,30 @@ export function validateVoiceResponse(value: unknown): VoiceProposal | null {
   return response as unknown as VoiceProposal;
 }
 
+export const layerMap: Record<Layer, string[]> = {
+  RED_ZONES: ['hazard-band', 'hazard-fill', 'hazard-edge', 'red-zones-fill'],
+  SAFE_ZONES: [
+    'relocation-band',
+    'relocation-fill',
+    'relocation-edge',
+    'hospital-pulse',
+    'hospital-point',
+    'hospital-label',
+    'safe-zones',
+  ],
+  ROUTES: ['route-casing', 'approved-route', 'route-motion', 'routes'],
+  MY_LOCATION: ['device-pulse', 'my-location'],
+};
+
 export function executeMapActions(
   map: Map,
   response: unknown,
   reducedMotion: boolean,
   onPanel: (panel: Panel, targetId?: string | null) => void,
   onLanguage?: (language: string) => void,
-  onClarify?: (candidates: string[]) => void
+  onClarify?: (candidates: string[]) => void,
+  onLayerVisibility?: (layer: Layer, visible: boolean) => void,
+  onChoices?: (targetIds: string[]) => void
 ): boolean {
   const valid = validateVoiceResponse(response);
   if (!valid) return false;
@@ -190,7 +211,17 @@ export function executeMapActions(
   const duration = reducedMotion ? 0 : 900;
   for (const action of valid.actions) {
     if (action.type === 'SET_LAYER_VISIBILITY') {
-      map.setLayoutProperty(layers[action.layer], 'visibility', action.visible ? 'visible' : 'none');
+      const targetIds = layerMap[action.layer] || [layers[action.layer]];
+      for (const id of targetIds) {
+        if (typeof (map as any).getLayer === 'function') {
+          if ((map as any).getLayer(id)) {
+            map.setLayoutProperty(id, 'visibility', action.visible ? 'visible' : 'none');
+          }
+        } else {
+          map.setLayoutProperty(id, 'visibility', action.visible ? 'visible' : 'none');
+        }
+      }
+      onLayerVisibility?.(action.layer, action.visible);
     }
     if (action.type === 'FOCUS_FEATURE' || action.type === 'HIGHLIGHT_FEATURE') {
       const featureBounds = bounds[action.target_id];
@@ -207,6 +238,9 @@ export function executeMapActions(
         const north = Math.max(...selected.map((item) => item[1][1]));
         map.fitBounds([[west, south], [east, north]], { padding: 100, duration });
       }
+      if (action.type === 'SHOW_CHOICES') {
+        onChoices?.(action.target_ids);
+      }
     }
     if (action.type === 'SHOW_ROUTE') {
       const routeBounds = bounds[action.route_id];
@@ -215,13 +249,13 @@ export function executeMapActions(
       }
     }
     if (action.type === 'RECENTER') {
-      map.flyTo({ center: [78.9629, 20.5937], zoom: 3.5, bearing: 0, pitch: 0, duration });
+      map.flyTo({ center: [76.112, 11.562], zoom: 13.4, bearing: 0, pitch: 0, duration });
     }
     if (action.type === 'ZOOM') {
       map.zoomTo(map.getZoom() + (action.direction === 'IN' ? 1 : -1), { duration });
     }
     if (action.type === 'PAN') {
-      const delta = 1.5;
+      const delta = 0.01;
       const [lng, lat] = map.getCenter().toArray();
       const offsets = { NORTH: [0, delta], SOUTH: [0, -delta], EAST: [delta, 0], WEST: [-delta, 0] } as const;
       const [dx, dy] = offsets[action.direction];

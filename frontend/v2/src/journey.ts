@@ -216,3 +216,313 @@ export function transitionOnRevocation(currentState: JourneyState): JourneyState
   }
   return 'ROUTE_REVOKED';
 }
+
+export interface ArrivalVerificationRequest {
+  currentState: JourneyState;
+  activeStayId: string | null | undefined;
+  serverResponse?: {
+    ok: boolean;
+    status: number;
+    error?: string;
+  };
+}
+
+export interface ArrivalVerificationResult {
+  allowed: boolean;
+  nextState: JourneyState;
+  isNewTransition: boolean;
+  arrivalSuccess: boolean;
+  errorMessage?: string;
+  canRetry: boolean;
+}
+
+/**
+ * Validates arrival confirmation strictly according to fail-closed R04 rules:
+ * - Requires an active, verified stay reservation (no stay -> fail closed, no success claim)
+ * - Server rejection or network/timeout failure never invents success
+ * - Requires explicit server acknowledgement (res.ok) to transition to ARRIVAL_REPORTED
+ * - Idempotent: once arrival is recorded, subsequent attempts return already reported
+ */
+export function evaluateArrivalConfirmation(
+  request: ArrivalVerificationRequest
+): ArrivalVerificationResult {
+  if (request.currentState === 'ARRIVAL_REPORTED') {
+    return {
+      allowed: false,
+      nextState: 'ARRIVAL_REPORTED',
+      isNewTransition: false,
+      arrivalSuccess: true,
+      errorMessage: 'ALREADY_REPORTED',
+      canRetry: false,
+    };
+  }
+
+  if (request.currentState === 'ROUTE_REVOKED') {
+    return {
+      allowed: false,
+      nextState: 'ROUTE_REVOKED',
+      isNewTransition: false,
+      arrivalSuccess: false,
+      errorMessage: 'ROUTE_REVOKED',
+      canRetry: false,
+    };
+  }
+
+  if (!request.activeStayId) {
+    return {
+      allowed: false,
+      nextState: request.currentState,
+      isNewTransition: false,
+      arrivalSuccess: false,
+      errorMessage: 'No verified stay reservation found. Please select an authorized route and reserve a stay before confirming arrival.',
+      canRetry: true,
+    };
+  }
+
+  if (!request.serverResponse) {
+    return {
+      allowed: false,
+      nextState: request.currentState,
+      isNewTransition: false,
+      arrivalSuccess: false,
+      errorMessage: 'Network error or timeout while reporting arrival. Please try again.',
+      canRetry: true,
+    };
+  }
+
+  if (!request.serverResponse.ok) {
+    return {
+      allowed: false,
+      nextState: request.currentState,
+      isNewTransition: false,
+      arrivalSuccess: false,
+      errorMessage: request.serverResponse.error || `Server rejected arrival (${request.serverResponse.status})`,
+      canRetry: true,
+    };
+  }
+
+  return {
+    allowed: true,
+    nextState: 'ARRIVAL_REPORTED',
+    isNewTransition: true,
+    arrivalSuccess: true,
+    canRetry: false,
+  };
+}
+
+/**
+ * Guard for in-flight voice/network responses:
+ * Drops responses when:
+ * 1. Document is in the background (hidden)
+ * 2. Active request ID has moved past the response request ID (superseded by a newer request or cancelled)
+ */
+export function shouldDropResponse(activeRequestId: number, responseRequestId: number, isHidden: boolean): boolean {
+  if (isHidden) return true;
+  if (activeRequestId !== responseRequestId) return true;
+  return false;
+}
+
+export interface GuidanceSnapshotValidation {
+  isValid: boolean;
+  dataVersion?: string;
+  snapshotVersion?: number;
+  errorMessage?: string;
+}
+
+/**
+ * Validates guidance snapshot and package version from server response:
+ * - source_status must be 'CURRENT'
+ * - data_version must be non-empty and cannot be 'none'
+ * - snapshot_version must be a positive integer
+ */
+export function validateGuidanceSnapshot(
+  sourceStatus: string | undefined,
+  dataVersion: string | undefined,
+  snapshotVersion: unknown
+): GuidanceSnapshotValidation {
+  if (!sourceStatus || sourceStatus !== 'CURRENT') {
+    return {
+      isValid: false,
+      errorMessage: `Source status is ${sourceStatus || 'UNAVAILABLE'}. Guidance unavailable.`,
+    };
+  }
+  if (!dataVersion || dataVersion === 'none' || dataVersion.trim() === '') {
+    return {
+      isValid: false,
+      errorMessage: 'Missing authoritative data version (data_version cannot be empty or "none").',
+    };
+  }
+  if (typeof snapshotVersion !== 'number' || !Number.isInteger(snapshotVersion) || snapshotVersion <= 0) {
+    return {
+      isValid: false,
+      errorMessage: 'Missing or non-positive snapshot_version in guidance payload.',
+    };
+  }
+  return {
+    isValid: true,
+    dataVersion,
+    snapshotVersion,
+  };
+}
+
+export interface RawGuidanceDestination {
+  facility_id: string;
+  safe_zone_id: string;
+  capacity_known: boolean;
+  free: number | null;
+  route_id?: string;
+  route_verified: boolean;
+}
+
+export interface ResolvedDestinationChoice {
+  facility_id: string;
+  safe_zone_id: string;
+  facility_name: string;
+  capacity_known: boolean;
+  free: number | null;
+  route_id?: string;
+  route_verified: boolean;
+  coordinates?: [number, number];
+  distance_km?: number;
+  duration_minutes?: number;
+  is_illustrative: boolean;
+}
+
+/**
+ * Maps raw server guidance destinations without inventing routes or using other facilities' coordinates.
+ */
+export function mapGuidanceDestinations(
+  rawList: RawGuidanceDestination[],
+  demoFacilityId: string,
+  demoCoordinates?: [number, number],
+  userPosition?: { longitude: number; latitude: number } | null
+): ResolvedDestinationChoice[] {
+  return rawList.map((d) => {
+    // Only associate coordinates if facility matches known coordinates; do NOT use another facility's coordinates!
+    const coords = d.facility_id === demoFacilityId ? demoCoordinates : undefined;
+    const dist =
+      coords && userPosition
+        ? Math.round(computeDistanceMeters(userPosition.longitude, userPosition.latitude, coords[0], coords[1]) / 100) / 10
+        : undefined;
+
+    return {
+      facility_id: d.facility_id,
+      safe_zone_id: d.safe_zone_id,
+      facility_name: d.facility_id === demoFacilityId ? `Demo Safe Facility (${d.safe_zone_id})` : `Facility ${d.facility_id}`,
+      capacity_known: d.capacity_known,
+      free: d.free,
+      route_id: d.route_id, // Preserved as supplied by server; no demo fallback!
+      route_verified: d.route_verified,
+      coordinates: coords,
+      distance_km: dist,
+      duration_minutes: undefined,
+      is_illustrative: false,
+    };
+  });
+}
+
+export interface ChoiceResolutionResult {
+  resolved: boolean;
+  destination: ResolvedDestinationChoice | null;
+  errorMessage?: string;
+}
+
+/**
+ * Resolves a selected facility against current verified guidance.
+ * Never fabricates safe_zone_id or assigns a demo route.
+ */
+export function resolveChoiceAgainstGuidance(
+  targetId: string,
+  verifiedDestinations: ResolvedDestinationChoice[]
+): ChoiceResolutionResult {
+  const match = verifiedDestinations.find((d) => d.facility_id === targetId && !d.is_illustrative);
+  if (match) {
+    return { resolved: true, destination: match };
+  }
+  return {
+    resolved: false,
+    destination: null,
+    errorMessage: `Facility "${targetId}" is not verified in current guidance snapshot. Please refresh guidance.`,
+  };
+}
+
+export interface BuildReservationRequest {
+  facilityId: string;
+  packageId: string;
+  routeId?: string | null;
+  partySize: number;
+  startDate: string;
+  endDate: string;
+  idempotencyKey: string;
+  snapshotVersion: number | null | undefined;
+  isIllustrative?: boolean;
+}
+
+export interface ReservationPayloadResult {
+  canAllocate: boolean;
+  errorMessage?: string;
+  payload?: {
+    facility_id: string;
+    package_id: string;
+    route_id?: string;
+    party_size: number;
+    start_date: string;
+    end_date: string;
+    idempotency_key: string;
+    snapshot_version: number;
+  };
+}
+
+/**
+ * Builds and validates reservation submission payload bound strictly to guidance snapshot_version.
+ * Fails allocation if snapshot_version is non-positive/missing or guidance is illustrative.
+ * Preserves missing route identity (never supplies demo fallback).
+ */
+export function buildReservationPayload(req: BuildReservationRequest): ReservationPayloadResult {
+  if (req.isIllustrative) {
+    return {
+      canAllocate: false,
+      errorMessage: 'Cannot allocate reservation against illustrative preview. Guidance must be verified.',
+    };
+  }
+  if (!req.snapshotVersion || req.snapshotVersion <= 0 || !Number.isInteger(req.snapshotVersion)) {
+    return {
+      canAllocate: false,
+      errorMessage: 'Missing or non-positive snapshot version. Cannot allocate reservation.',
+    };
+  }
+  if (!req.facilityId) {
+    return {
+      canAllocate: false,
+      errorMessage: 'facility_id is required.',
+    };
+  }
+
+  const payload: {
+    facility_id: string;
+    package_id: string;
+    route_id?: string;
+    party_size: number;
+    start_date: string;
+    end_date: string;
+    idempotency_key: string;
+    snapshot_version: number;
+  } = {
+    facility_id: req.facilityId,
+    package_id: req.packageId,
+    party_size: req.partySize,
+    start_date: req.startDate,
+    end_date: req.endDate,
+    idempotency_key: req.idempotencyKey,
+    snapshot_version: req.snapshotVersion,
+  };
+
+  // Preserve missing route identity: if server supplied none, retain that absence
+  if (req.routeId && req.routeId.trim() !== '') {
+    payload.route_id = req.routeId.trim();
+  }
+
+  return { canAllocate: true, payload };
+}
+
+
