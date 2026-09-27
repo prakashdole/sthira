@@ -397,6 +397,80 @@ func TestProtoScenario_MockWorkersExecutable(t *testing.T) {
 	}
 }
 
+// TestProtoSnapshotVersionTwoReservationAndStaleNoMutation: proves two more
+// snapshot-coherence properties beyond string formatting:
+//  1. once translation isn't the blocker, a fresh version-2 guidance
+//     snapshot_version permits a version-2 reservation (policy gates aside,
+//     the version bump alone does not block a new, correctly-bound request);
+//  2. a request rejected for a stale version leaves facility capacity
+//     (held) completely unchanged — the rejection is a pure read, not a
+//     partial mutation.
+func TestProtoSnapshotVersionTwoReservationAndStaleNoMutation(t *testing.T) {
+	dsn, cleanup := disposableTestDB(t)
+	defer cleanup()
+	st, err := store.Open(dsn)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+	const pkgID, jur = "PKG-SNAP2-1", "JUR-SNAP2-1"
+	seedProtoPackage(t, st, pkgID, jur)
+	ts := wireProtoServer(t, st, startMockWorker(t, buildMockWorkers(t), "silent-zoom"))
+
+	g1 := queryProtoGuidance(t, ts, pkgID, jur)
+	if g1.Data.SnapshotVersion != 1 {
+		t.Fatalf("expected snapshot_version=1 before bump, got %+v", g1)
+	}
+	_, token := createSession(t, ts)
+	now := time.Now().UTC()
+	d0, d1 := now.Format("2006-01-02"), now.AddDate(0, 0, 1).Format("2006-01-02")
+	svcDate := now // facility_inventory is seeded for today..today+2 in seedProtoPackage
+
+	before := heldCount(t, st, protoFacilityID, svcDate)
+
+	// A request still bound to version 1 after the bump is rejected...
+	if _, err := st.DB().ExecContext(context.Background(), `UPDATE packages SET version = 2 WHERE package_id = $1`, pkgID); err != nil {
+		t.Fatalf("bump version: %v", err)
+	}
+	staleRec := doAuthed(t, ts, http.MethodPost, "/api/v3/reservations", token,
+		reservationBody(protoFacilityID, pkgID, 1, d0, d1, "snap2-stale", g1.Data.SnapshotVersion))
+	if staleRec.code != http.StatusConflict {
+		t.Fatalf("stale-version reservation: code=%d body=%s", staleRec.code, staleRec.body)
+	}
+	// ...and leaves held capacity exactly as it was: the rejection is a read
+	// (revalidate-then-reject inside one transaction that never reaches the
+	// capacity write), not a partial commit.
+	if got := heldCount(t, st, protoFacilityID, svcDate); got != before {
+		t.Fatalf("held capacity changed on rejected stale request: before=%d after=%d", before, got)
+	}
+
+	// A fresh guidance read now reports version 2, and a reservation bound
+	// to THAT version succeeds (the version bump alone is not a blocker).
+	g2 := queryProtoGuidance(t, ts, pkgID, jur)
+	if g2.Data.SnapshotVersion != 2 {
+		t.Fatalf("expected snapshot_version=2 after bump, got %+v", g2)
+	}
+	okRec := doAuthed(t, ts, http.MethodPost, "/api/v3/reservations", token,
+		reservationBody(protoFacilityID, pkgID, 1, d0, d1, "snap2-ok", g2.Data.SnapshotVersion))
+	if okRec.code != http.StatusCreated {
+		t.Fatalf("version-2 reservation: code=%d body=%s", okRec.code, okRec.body)
+	}
+	if got := heldCount(t, st, protoFacilityID, svcDate); got != before+1 {
+		t.Fatalf("held capacity after accepted reservation: got=%d want=%d", got, before+1)
+	}
+
+	// Replay of the same idempotency key returns the same result without a
+	// second capacity mutation (existing replay semantics still intact).
+	replayRec := doAuthed(t, ts, http.MethodPost, "/api/v3/reservations", token,
+		reservationBody(protoFacilityID, pkgID, 1, d0, d1, "snap2-ok", g2.Data.SnapshotVersion))
+	if replayRec.code != http.StatusCreated && replayRec.code != http.StatusOK {
+		t.Fatalf("idempotent replay: code=%d body=%s", replayRec.code, replayRec.body)
+	}
+	if got := heldCount(t, st, protoFacilityID, svcDate); got != before+1 {
+		t.Fatalf("held capacity changed on replay: got=%d want=%d", got, before+1)
+	}
+}
+
 type protoGuidance struct {
 	DataVersion  string `json:"data_version"`
 	SourceStatus string `json:"source_status"`
