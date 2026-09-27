@@ -1,6 +1,14 @@
 # Prototype verification by evidence class — 2026-09-27
 
-## Current: mac-final integration at `0d290da` (harness `e7e2171`), 2026-09-27 ~17:55 IST
+## Current: `329633b`, 2026-09-27 ~19:10 IST
+
+Same harness and stack type (fresh disposable DB, mock-workers destination-choice, ports 18790–18792,
+Python with Playwright from `~/.venvs/scrapling`). All 11 sections incl. new `draft`: **76 PASS, 0 FAIL,
+exit 0**. `npm test` 92/92, tsc/build 0, hooks absent from `dist`. `draft` (3 checks): a GPS update
+while tracking replaces `#command-input` and the typed text survives; at `c1966f9` the text is lost
+(FAIL ''). asrworker/ttsworker/middleworker module tests ok; `corpus-check` v1/v2 ok.
+
+## Previous: mac-final integration at `0d290da` (harness `e7e2171`), 2026-09-27 ~17:55 IST
 
 Headless Chromium (Playwright 1.61 headless shell, installed cache), owned synthetic stack
 (`sthira-exercise` + `mock-workers -scenario destination-choice` built from HEAD, disposable DB with

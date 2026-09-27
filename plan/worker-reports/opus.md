@@ -112,5 +112,5 @@ Untracked and left as-is: `plan/prompts/`, `plan/worker-reports/{round-2,round-3
 
 Real microphone and speaker, Safari (remote automation disabled), human speech review, real models
 (BLOCKED_HARDWARE / no paid window), true 200 % browser zoom, backgrounding via real tab hide.
-Lower-priority findings not fixed: `voiceFeedbackKey` is written but never rendered; a re-render while
-typing keeps focus in the command input but clears its text; `focusRoute` ignores a manual pitch.
+Lower-priority findings not fixed: `voiceFeedbackKey` is written but never rendered; `focusRoute` ignores
+a manual pitch. (Typed text cleared by a re-render: fixed in `329633b`.)

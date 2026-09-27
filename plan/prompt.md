@@ -1,6 +1,25 @@
 # Sthira autonomous execution playbook
 
-## CURRENT EXECUTOR HANDOFF — 2026-09-27 18:00, mac-final integration (read first)
+## CURRENT EXECUTOR HANDOFF — 2026-09-27 19:15, post-integration review (read first)
+
+Branch `CLEAN`, local commits only, nothing pushed. Reviewer takeover found the tree clean: every
+assignment in the 19:00 handoff (async supersession, reservation/arrival consistency, test hooks,
+worker integration) was already committed in the mac-final section below. One new fix:
+
+| Commit | Content |
+|---|---|
+| `329633b` | `render()` keeps the typed command (value + caret) — each GPS fix while tracking used to wipe it. Harness section `draft` fails at `c1966f9`, passes now |
+
+Verification at `329633b`: tsc 0, `npm test` 92/92, build 0, hooks absent from `dist`; headless
+Chromium all 11 sections **76 PASS, 0 FAIL**; asr/tts/middle module tests ok; `corpus-check` ok.
+Run the harness with `~/.venvs/scrapling/bin/python3` (system python has no Playwright).
+Still NOT_RUN: real microphone, Safari/phone, human speech review, real models, true 200 % zoom.
+Open low-priority: `voiceFeedbackKey` dead state; `focusRoute` ignores manual pitch.
+
+Next action: owner manual pass (real mic + Safari/phone, ~15 min), then the bounded paid real-model
+window only with explicit authorization.
+
+## PREVIOUS HANDOFF — 2026-09-27 18:00, mac-final integration (historical)
 
 Branch `CLEAN`, local commits only, nothing pushed; workstation migration cancelled. Full record,
 evidence and all 34 worker dispositions: `plan/worker-reports/opus.md`.

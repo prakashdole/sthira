@@ -1,6 +1,6 @@
 # Sthira — where we are and what is left
 
-Updated: 2026-09-27 18:00. Snapshot: `CLEAN` at the mac-final integration (commits `11ddcfc`…`e7e2171`, see `plan/prompt.md` top and `plan/worker-reports/opus.md`). No pending code edits. This is the owner's overview, not a replacement for the detailed execution plan.
+Updated: 2026-09-27 19:15. Snapshot: `CLEAN` at `329633b` (typed command kept across re-renders) on top of the mac-final integration (`11ddcfc`…`e7e2171`; see `plan/prompt.md` top and `plan/worker-reports/opus.md`). No pending code edits; no worker holds files. This is the owner's overview, not a replacement for the detailed execution plan.
 
 ## Where we are now
 
@@ -48,8 +48,8 @@ Legend: `[x]` = completed within the stated scope; `[ ]` = remaining, in progres
 
 ### C. Prepare and run real models
 
-- [ ] Finish offline audio-format/adapter compatibility checks. (first batch integrated `b35a875`; a later revision is uncommitted)
-- [ ] Finish the reusable model evaluation corpus and its offline validation. (`corpus-check` integrated `edb8aad`; a later revision is uncommitted)
+- [x] Offline audio-format/adapter boundary checks (`b35a875`, `a79c461`; module tests ok at `329633b`). Says nothing about recognition or voice quality.
+- [x] Offline evaluation corpus and `-mode corpus-check` (`edb8aad`, `7100466`). The live `-mode benchmark` is not implemented (exits 2); real-model smoke is manual.
 - [x] Confirm locally that launch instructions match the actual modules, configuration and host/container paths (`6861d42`, `real-inference-launch-check.md` §7).
 - [ ] Obtain an explicit bounded paid verification window before starting cloud work.
 - [ ] During that window, verify the actual ASR, Sarvam and TTS services individually.
@@ -61,7 +61,7 @@ Selected models: **IndicConformer-600M-Multi → Sarvam-30B FP8 → Indic Parler
 
 ### D. Make the demo understandable
 
-- [ ] Correct and verify the presenter guide against actual frontend/backend responsibilities.
+- [ ] Correct and verify the presenter guide against actual frontend/backend responsibilities. (corrected and committed `f4547c1`; code references spot-checked; owner read-through pending)
 - [ ] Rehearse the five-minute demo with explicit synthetic versus real-model labels.
 - [ ] Prepare an honest fallback for network/model failure.
 - [ ] Finish the presentation using verified capabilities, sources, authority dependencies and limitations.
@@ -110,16 +110,7 @@ These gates do not prevent an honestly labelled synthetic prototype. They do pre
 
 ## 5. Current worker ownership
 
-| Worker | Current lane | Completion rule |
-|---|---|---|
-| Opus | Correctness, integration and commits | Reviews deliverables and records final integrated evidence. |
-| Gemini | Responsive/accessibility CSS | Earlier logic fixes still require integration; new CSS needs browser checks. |
-| MiniMax A | Presenter-guide factual corrections | Source-backed guide, no unsupported capability claims. |
-| MiniMax B | Browser verification | Actual browser observations or explicit NOT_RUN/blocker. |
-| MiniMax C | Model evaluation corpus | Compatible corpus/oracle verified offline; real inference remains separate. |
-| MiniMax D | Audio format/adapter boundaries | Meaningful local codec checks; no claim of recognition or voice quality. |
-
-Worker-reported completion is not integrated acceptance. Keep finished-but-unreviewed work unchecked above. Avoid assigning more overlapping implementation until Opus integrates the current batch.
+No worker lane is open. All round-3 and mac-final deliverables were integrated, corrected or rejected (`plan/worker-reports/opus.md`). The integration coordinator reviews and commits; worker-reported completion is not integrated acceptance.
 
 ## How to keep this useful
 
