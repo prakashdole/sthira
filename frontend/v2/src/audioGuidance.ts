@@ -395,3 +395,88 @@ export function processVoiceEnvelope(envelope: VoiceResponseEnvelope | null | un
     captionUnavailable,
   };
 }
+
+export type VoicePipelineInput =
+  | {
+      kind: 'audio';
+      body_b64: string;
+      content_type: string;
+    }
+  | {
+      kind: 'transcript';
+      text: string;
+      confidence?: number;
+    };
+
+export type VoicePipelineRequest = {
+  request_id?: string;
+  jurisdiction: string;
+  language: string;
+  input: VoicePipelineInput;
+  render: {
+    kind: 'tts' | 'none';
+  };
+};
+
+export function buildVoicePipelineRequest(
+  input:
+    | { kind: 'audio'; body_b64: string; content_type: string }
+    | { kind: 'transcript'; text: string; confidence?: number },
+  language: string,
+  jurisdiction: string = 'DEMO-EXERCISE',
+  requestId?: string
+): VoicePipelineRequest {
+  return {
+    ...(requestId ? { request_id: requestId } : {}),
+    jurisdiction,
+    language,
+    input:
+      input.kind === 'audio'
+        ? {
+            kind: 'audio',
+            body_b64: input.body_b64,
+            content_type: input.content_type,
+          }
+        : {
+            kind: 'transcript',
+            text: input.text,
+            confidence: input.confidence ?? 1.0,
+          },
+    render: { kind: 'tts' },
+  };
+}
+
+export type ReadinessEvaluation = {
+  runtime: 'demo' | 'blocked' | 'offline';
+  runtimeDetail: 'blocked' | 'responding' | 'disconnected';
+};
+
+/**
+ * Evaluates backend health check against the fail-closed invariant.
+ * Connection failure, non-200, or non-READY status must NEVER yield 'demo'.
+ */
+export function evaluateReadinessState(
+  status: number | null,
+  body?: { status?: string } | null
+): ReadinessEvaluation {
+  if (status === null) {
+    return { runtime: 'blocked', runtimeDetail: 'disconnected' };
+  }
+  if (status === 200 && body?.status === 'READY') {
+    return { runtime: 'demo', runtimeDetail: 'responding' };
+  }
+  if (status === 503 || (status === 200 && body && body.status !== 'READY')) {
+    return { runtime: 'blocked', runtimeDetail: 'blocked' };
+  }
+  return { runtime: 'blocked', runtimeDetail: 'disconnected' };
+}
+
+/**
+ * Guards against transmitting recording after cancellation or when page is backgrounded.
+ */
+export function shouldDropRecordedAudio(
+  isCancelled: boolean,
+  isPageHidden: boolean
+): boolean {
+  return isCancelled || isPageHidden;
+}

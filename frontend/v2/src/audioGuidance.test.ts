@@ -6,6 +6,9 @@ import {
   verifyAudioIntegrity,
   AudioPlaybackGuard,
   processVoiceEnvelope,
+  buildVoicePipelineRequest,
+  evaluateReadinessState,
+  shouldDropRecordedAudio,
   type AudioMetadata,
   type VoiceResponseEnvelope,
 } from './audioGuidance.ts';
@@ -411,3 +414,76 @@ test('AudioPlaybackGuard: blocked autoplay followed by invalidation cannot be re
   assert.equal(guard.pendingAutoplay, null);
   assert.equal(guard.consumePending(), null);
 });
+
+test('buildVoicePipelineRequest: strictly builds PipelineRequest envelope for audio and transcript', () => {
+  const audioReq = buildVoicePipelineRequest(
+    { kind: 'audio', body_b64: sampleWavB64, content_type: 'audio/wav' },
+    'ml-IN',
+    'DEMO-EXERCISE',
+    'req-custom-1'
+  );
+  assert.equal(audioReq.request_id, 'req-custom-1');
+  assert.equal(audioReq.jurisdiction, 'DEMO-EXERCISE');
+  assert.equal(audioReq.language, 'ml-IN');
+  assert.equal(audioReq.input.kind, 'audio');
+  if (audioReq.input.kind === 'audio') {
+    assert.equal(audioReq.input.body_b64, sampleWavB64);
+    assert.equal(audioReq.input.content_type, 'audio/wav');
+  }
+  assert.deepEqual(audioReq.render, { kind: 'tts' });
+
+  const transcriptReq = buildVoicePipelineRequest(
+    { kind: 'transcript', text: 'show my route' },
+    'hi-IN'
+  );
+  assert.equal(transcriptReq.jurisdiction, 'DEMO-EXERCISE');
+  assert.equal(transcriptReq.language, 'hi-IN');
+  assert.equal(transcriptReq.input.kind, 'transcript');
+  if (transcriptReq.input.kind === 'transcript') {
+    assert.equal(transcriptReq.input.text, 'show my route');
+    assert.equal(transcriptReq.input.confidence, 1.0);
+  }
+  assert.deepEqual(transcriptReq.render, { kind: 'tts' });
+});
+
+test('evaluateReadinessState: fail-closed on disconnected/degraded backend and never returns demo on failure', () => {
+  // Connection error (fetch throws or fails)
+  const failConn = evaluateReadinessState(null, null);
+  assert.equal(failConn.runtime, 'blocked');
+  assert.equal(failConn.runtimeDetail, 'disconnected');
+
+  // 503 Service Unavailable
+  const fail503 = evaluateReadinessState(503, { status: 'NOT_READY' });
+  assert.equal(fail503.runtime, 'blocked');
+  assert.equal(fail503.runtimeDetail, 'blocked');
+
+  // 200 with non-READY status
+  const nonReady = evaluateReadinessState(200, { status: 'DEGRADED' });
+  assert.equal(nonReady.runtime, 'blocked');
+  assert.equal(nonReady.runtimeDetail, 'blocked');
+
+  // 200 with missing body
+  const emptyBody = evaluateReadinessState(200, null);
+  assert.equal(emptyBody.runtime, 'blocked');
+  assert.equal(emptyBody.runtimeDetail, 'disconnected');
+
+  // 200 with READY
+  const ready = evaluateReadinessState(200, { status: 'READY' });
+  assert.equal(ready.runtime, 'demo');
+  assert.equal(ready.runtimeDetail, 'responding');
+});
+
+test('shouldDropRecordedAudio: enforces cancellation and foreground execution guards', () => {
+  // Cancelled recording must be dropped
+  assert.equal(shouldDropRecordedAudio(true, false), true);
+
+  // Hidden/background document must be dropped
+  assert.equal(shouldDropRecordedAudio(false, true), true);
+
+  // Both cancelled and hidden must be dropped
+  assert.equal(shouldDropRecordedAudio(true, true), true);
+
+  // Active foreground recording is kept
+  assert.equal(shouldDropRecordedAudio(false, false), false);
+});
+

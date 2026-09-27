@@ -769,3 +769,110 @@ button:active, a:active { transform: translateY(1px); }
   .dock-action--voice-primary .dock-icon { padding: .35rem; border: 0; border-radius: 50%; }
   .dock-action--voice-primary .dock-icon svg { transform: translateX(-1px); }
 }
+
+/* Journey tracking, arrival stepper, and guidance advisory components */
+.journey-tracker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-paper-2);
+  border: var(--rule-thin) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+}
+.journey-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--text-xs);
+}
+.journey-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-pill);
+  font-weight: 700;
+  font-size: var(--text-xs);
+}
+.journey-status-badge--tracking {
+  color: var(--color-accent-ink);
+  background: var(--color-accent);
+}
+.journey-status-badge--near {
+  color: var(--color-accent-ink);
+  background: var(--color-success);
+}
+.journey-status-badge--paused, .journey-status-badge--unavailable {
+  color: var(--color-muted);
+  background: var(--color-paper);
+  border: var(--rule-thin) solid var(--color-rule);
+}
+.journey-status-badge--revoked {
+  color: var(--color-accent-ink);
+  background: var(--color-danger);
+}
+.near-destination-advisory {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+  color: var(--color-ink);
+  background: var(--color-success-soft);
+  border: 2px solid var(--color-success);
+  border-radius: var(--radius-sm);
+}
+.near-destination-advisory p {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+.warning-banner {
+  padding: var(--space-sm) var(--space-md);
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  border: var(--rule-thin) solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+.ambiguous-places-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-paper-2);
+  border: var(--rule-thin) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+}
+.ambiguous-places-panel p {
+  margin: 0;
+}
+.stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-lg);
+  padding: var(--space-lg);
+  background: var(--color-paper-2);
+  border-radius: var(--radius-sm);
+}
+.stepper button {
+  width: 2.75rem;
+  height: 2.75rem;
+  color: var(--color-accent-ink);
+  background: var(--color-ink);
+  border: 0;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-md);
+  cursor: pointer;
+}
+.success-message {
+  margin-block-start: var(--space-md);
+  padding: var(--space-md);
+  color: var(--color-success);
+  background: var(--color-success-soft);
+  border-radius: var(--radius-sm);
+}
+

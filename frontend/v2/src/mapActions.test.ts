@@ -357,3 +357,36 @@ test('executeMapActions: does not execute map actions for non-OK status (UNSUPPO
   assert.equal(calls.length, 0);
 });
 
+test('validateVoiceResponse & executeMapActions: accepts backend fixture IDs (RZDEMO-1, SZDEMO-1, FACDEMO-1, RTDEMO-1)', () => {
+  const proposal: VoiceProposal = {
+    schema_version: '3.0',
+    status: 'OK',
+    actions: [
+      { type: 'FOCUS_FEATURE', target_id: 'SZDEMO-1' },
+      { type: 'FOCUS_FEATURE', target_id: 'FACDEMO-1' },
+      { type: 'FOCUS_FEATURE', target_id: 'RZDEMO-1' },
+      { type: 'SHOW_ROUTE', route_id: 'RTDEMO-1' },
+      { type: 'OPEN_PANEL', panel: 'ROUTE_GUIDANCE', target_id: 'FACDEMO-1' },
+    ],
+  };
+
+  const validated = validateVoiceResponse(proposal);
+  assert.ok(validated !== null);
+  assert.equal(validated.actions.length, 5);
+
+  const panels: string[] = [];
+  const mockMap: any = {
+    fitBounds() {},
+    easeTo() {},
+  };
+  const executed = executeMapActions(
+    mockMap,
+    validated,
+    false,
+    (panel) => panels.push(panel)
+  );
+  assert.equal(executed, true);
+  assert.deepEqual(panels, ['ROUTE_GUIDANCE']);
+});
+
+
