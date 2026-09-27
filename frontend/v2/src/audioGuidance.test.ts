@@ -9,6 +9,7 @@ import {
   buildVoicePipelineRequest,
   evaluateReadinessState,
   shouldDropRecordedAudio,
+  pickSupportedRecorderMimeType,
   type AudioMetadata,
   type VoiceResponseEnvelope,
 } from './audioGuidance.ts';
@@ -487,3 +488,12 @@ test('shouldDropRecordedAudio: enforces cancellation and foreground execution gu
   assert.equal(shouldDropRecordedAudio(false, false), false);
 });
 
+
+test('pickSupportedRecorderMimeType: only returns types the backend transcription allow-list accepts', () => {
+  const only = (...types: string[]) => (mime: string) => types.includes(mime);
+  assert.equal(pickSupportedRecorderMimeType(only('audio/webm;codecs=opus', 'audio/webm')), 'audio/webm;codecs=opus');
+  assert.equal(pickSupportedRecorderMimeType(only('audio/ogg;codecs=opus')), 'audio/ogg;codecs=opus');
+  // Safari-style recorder: audio/mp4 is not on the backend allow-list, so the mic must not open.
+  assert.equal(pickSupportedRecorderMimeType(only('audio/mp4', 'audio/aac')), null);
+  assert.equal(pickSupportedRecorderMimeType(() => false), null);
+});

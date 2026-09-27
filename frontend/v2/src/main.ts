@@ -52,6 +52,7 @@ import {
   buildVoicePipelineRequest,
   evaluateReadinessState,
   shouldDropRecordedAudio,
+  pickSupportedRecorderMimeType,
 } from './audioGuidance';
 
 type RuntimeState = 'checking' | 'demo' | 'blocked' | 'offline';
@@ -157,7 +158,9 @@ let voiceFeedbackKey: Exclude<keyof typeof words.EN, 'suggestions'> = 'micPrivac
 let mediaRecorder: MediaRecorder | null = null;
 let mediaStream: MediaStream | null = null;
 let recordingStartedAt = 0;
-let recordingCancelled = false;
+// Bumped by cancelRecording(). A microphone grant or recorder callback from an
+// older generation is stale: it must release its stream and never submit audio.
+let recordingGeneration = 0;
 let recordingTimer: number | null = null;
 
 let commandPending = false;
@@ -1063,19 +1066,18 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binary);
 }
 
+// Discards any recording in progress or still waiting for microphone access.
 function cancelRecording() {
-  recordingCancelled = true;
+  recordingGeneration++;
   if (recordingTimer !== null) {
     clearTimeout(recordingTimer);
     recordingTimer = null;
   }
-  if (mediaStream) {
-    mediaStream.getTracks().forEach((track) => track.stop());
-    mediaStream = null;
-  }
+  mediaStream?.getTracks().forEach((track) => track.stop());
+  mediaStream = null;
   if (mediaRecorder) {
     try {
-      if (mediaRecorder.state === 'recording') mediaRecorder.stop();
+      if (mediaRecorder.state !== 'inactive') mediaRecorder.stop();
     } catch {}
     mediaRecorder = null;
   }
@@ -1084,50 +1086,82 @@ function cancelRecording() {
 
 async function toggleLocalRecording() {
   if (voiceListening && mediaRecorder) {
-    recordingCancelled = false;
+    // Citizen pressed stop: finish this recording and submit it.
     if (recordingTimer !== null) {
       clearTimeout(recordingTimer);
       recordingTimer = null;
     }
-    mediaRecorder.stop();
+    if (mediaRecorder.state !== 'inactive') mediaRecorder.stop();
     return;
   }
 
-  recordingCancelled = false;
+  cancelRecording(); // supersedes an earlier start still waiting for permission
+  const gen = recordingGeneration;
+  const isCurrent = () => gen === recordingGeneration;
+  const fail = () => {
+    if (!isCurrent()) return;
+    cancelRecording();
+    voiceFeedbackKey = 'micStopped';
+    commandError = words[language].micStopped;
+    render();
+  };
+
+  const mimeType = typeof MediaRecorder === 'undefined'
+    ? null
+    : pickSupportedRecorderMimeType((mime) => MediaRecorder.isTypeSupported(mime));
+  if (!mimeType) {
+    fail();
+    return;
+  }
+
+  let stream: MediaStream;
   try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch {
+    fail();
+    return;
+  }
+  if (!isCurrent() || document.hidden) {
+    stream.getTracks().forEach((track) => track.stop());
+    return;
+  }
+
+  try {
+    const recorder = new MediaRecorder(stream, { mimeType });
     const chunks: Blob[] = [];
-    mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
-    mediaRecorder.ondataavailable = (event) => {
+    recorder.ondataavailable = (event) => {
       if (event.data.size) chunks.push(event.data);
     };
-    mediaRecorder.onstop = async () => {
-      if (shouldDropRecordedAudio(recordingCancelled, document.hidden)) {
-        return;
+    recorder.onerror = fail;
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((track) => track.stop());
+      if (shouldDropRecordedAudio(!isCurrent(), document.hidden)) return;
+      if (recordingTimer !== null) {
+        clearTimeout(recordingTimer);
+        recordingTimer = null;
       }
-      const recording = new Blob(chunks, { type: mimeType });
-      mediaStream?.getTracks().forEach((track) => track.stop());
       mediaStream = null;
       mediaRecorder = null;
       voiceListening = false;
-      const b64 = await blobToBase64(recording);
+      const b64 = await blobToBase64(new Blob(chunks, { type: mimeType }));
+      if (shouldDropRecordedAudio(!isCurrent(), document.hidden)) return;
       void sendVoiceOrText({ kind: 'audio', body_b64: b64, content_type: mimeType });
     };
+    recorder.start();
+    mediaStream = stream;
+    mediaRecorder = recorder;
     recordingStartedAt = Date.now();
     voiceListening = true;
     voiceFeedbackKey = 'recording';
-    render();
-    mediaRecorder.start();
+    commandError = '';
     recordingTimer = window.setTimeout(() => {
-      if (mediaRecorder?.state === 'recording') {
-        mediaRecorder.stop();
-      }
+      if (recorder.state === 'recording') recorder.stop();
     }, 20_000);
-  } catch {
-    voiceListening = false;
-    voiceFeedbackKey = 'micStopped';
     render();
+  } catch {
+    // Constructor or start() rejected the stream/MIME type; release the microphone.
+    stream.getTracks().forEach((track) => track.stop());
+    fail();
   }
 }
 
@@ -1236,6 +1270,7 @@ function dispatchVoiceProposal(proposal: VoiceProposal) {
       if (action.language === 'ml-IN') language = 'ML';
       if (action.language === 'hi-IN') language = 'HI';
       if (action.language === 'en-IN') language = 'EN';
+      cancelRecording();
       audioGuard.invalidate();
       lastApprovedAudio = undefined;
     }
@@ -1859,6 +1894,7 @@ function bindInteractions() {
       commandResponse = words[language].voiceReady;
       commandError = '';
       voiceFeedbackKey = 'micPrivacy';
+      cancelRecording(); // speech recorded in the old language must not be sent under the new one
       supersedeInFlight();
       render();
     })

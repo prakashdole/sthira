@@ -480,3 +480,17 @@ export function shouldDropRecordedAudio(
 ): boolean {
   return isCancelled || isPageHidden;
 }
+
+/**
+ * Recorder MIME types the backend transcription allow-list accepts
+ * (contracts.IsSupportedTranscriptionContentType), in preference order.
+ * Returns null when the browser can record none of them (e.g. Safari's
+ * audio/mp4), so the caller never opens the microphone for audio the
+ * backend would reject.
+ */
+export function pickSupportedRecorderMimeType(isTypeSupported: (mime: string) => boolean): string | null {
+  for (const mime of ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg']) {
+    if (isTypeSupported(mime)) return mime;
+  }
+  return null;
+}
