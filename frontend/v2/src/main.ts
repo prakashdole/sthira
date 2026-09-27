@@ -1297,12 +1297,6 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
 
     if (!res.ok) {
       if (res.status === 503 || res.status === 504) {
-        if (input.kind === 'transcript' && input.text.trim()) {
-          commandPending = false;
-          render();
-          await resolvePlace(input.text.trim(), reqId);
-          return;
-        }
         throw new Error('MODEL_UNAVAILABLE');
       }
       throw new Error(`Voice pipeline returned ${res.status}`);
@@ -1368,7 +1362,7 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
   } catch {
     if (reqId !== activeRequestId) return;
     commandPending = false;
-    commandError = words[language].commandUnavailable;
+    commandError = words[language].assistantUnavailable;
     voiceFeedbackKey = 'backendUnavailable';
     render();
   }
