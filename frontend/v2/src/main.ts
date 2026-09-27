@@ -332,7 +332,7 @@ function onDestinationSelectionChanged(newDest: DestinationChoice | null) {
     const accepted = availableDestinations.find((d) => d.facility_id === locked);
     if (accepted) selectedDestination = accepted;
     if (newDest && newDest.facility_id !== locked) {
-      reservationError = `A stay is reserved or pending for ${locked}. The destination cannot change while it is active.`;
+      reservationError = `${words[language].stayLockedPrefix} ${locked}${words[language].stayLockedSuffix}`;
     }
     render();
     return;
@@ -635,7 +635,7 @@ async function queryGuidanceDestinations(): Promise<void> {
       audioGuard.invalidate();
       lastApprovedAudio = undefined;
       availableDestinations = [];
-      guidanceErrorMessage = `Authority returned HTTP ${res.status}. Guidance unavailable.`;
+      guidanceErrorMessage = `${words[language].authorityHttpPrefix} ${res.status}${words[language].authorityHttpSuffix}`;
       onDestinationSelectionChanged(null);
     }
   } catch {
@@ -648,7 +648,7 @@ async function queryGuidanceDestinations(): Promise<void> {
     audioGuard.invalidate();
     lastApprovedAudio = undefined;
     availableDestinations = [];
-    guidanceErrorMessage = 'Network error: could not connect to guidance service.';
+    guidanceErrorMessage = words[language].guidanceNetworkError;
     onDestinationSelectionChanged(null);
   }
   render();
@@ -816,7 +816,7 @@ async function startRouteReservation() {
   }
 
   if (!selectedDestination || isIllustrativePreview || selectedDestination.is_illustrative) {
-    reservationError = 'Cannot reserve route for illustrative preview. Waiting for authorized operational guidance.';
+    reservationError = words[language].reserveIllustrative;
     render();
     return;
   }
@@ -837,7 +837,7 @@ async function startRouteReservation() {
 
   if (!buildResult.canAllocate || !buildResult.payload) {
     reservationPending = false;
-    reservationError = buildResult.errorMessage || 'Cannot allocate reservation: snapshot is missing or invalid.';
+    reservationError = buildResult.errorMessage || words[language].allocateFailed;
     render();
     return;
   }
@@ -893,10 +893,10 @@ async function submitReservation(payload: Record<string, unknown> & { idempotenc
   routeStarted = false;
   reservationPending = false;
   if (keepPendingReservation(status, errJson)) {
-    reservationError = `Reservation outcome for ${payload.facility_id} is not confirmed. Retry sends the same request and will not create a second stay.`;
+    reservationError = `${words[language].unconfirmedPrefix} ${payload.facility_id}${words[language].unconfirmedSuffix}`;
   } else {
     sessionStorage.removeItem('pending_reservation');
-    reservationError = serverErrorMessage(errJson) || `Reservation failed (${status})`;
+    reservationError = serverErrorMessage(errJson) || `${words[language].reservationFailed} (${status})`;
   }
   render();
 }
@@ -914,7 +914,7 @@ async function confirmArrival() {
   render();
 
   if (!activeStayId) {
-    arrivalError = 'No verified stay reservation found. Please select an authorized route and reserve a stay before confirming arrival.';
+    arrivalError = words[language].noStayReservation;
     arrivalPending = false;
     arrivalSuccess = false;
     render();
@@ -945,13 +945,13 @@ async function confirmArrival() {
       render();
     } else {
       const errJson = await res.json().catch(() => null);
-      arrivalError = serverErrorMessage(errJson) || `Server rejected arrival (${res.status})`;
+      arrivalError = serverErrorMessage(errJson) || `${words[language].arrivalRejected} (${res.status})`;
       arrivalPending = false;
       arrivalSuccess = false;
       render();
     }
   } catch {
-    arrivalError = 'Network error while reporting arrival. Please try again.';
+    arrivalError = words[language].arrivalNetworkError;
     arrivalPending = false;
     arrivalSuccess = false;
     render();
@@ -1174,8 +1174,8 @@ function applyDestinationChoices(targetIds: string[]) {
     // Unresolved: do not invent safe_zone_id or demo route, do not make reservable
     onDestinationSelectionChanged(null);
     guidanceStatus = 'ERROR';
-    guidanceErrorMessage = resolution.errorMessage || `Facility or safe zone "${firstId}" is not verified in current guidance snapshot. Please refresh guidance.`;
-    commandResponse = `Facility or safe zone ${firstId} cannot be confirmed from the active guidance snapshot.`;
+    guidanceErrorMessage = resolution.errorMessage || `${words[language].unverifiedFacilityPrefix}${firstId}${words[language].unverifiedFacilitySuffix}`;
+    commandResponse = `${words[language].unconfirmedSnapshotPrefix}${firstId}${words[language].unconfirmedSnapshotSuffix}`;
     commandError = commandResponse;
     render();
   }
@@ -1185,7 +1185,7 @@ function handleOpenPanelAction(panel: Panel, targetId?: string | null): boolean 
   if (targetId) {
     const resolution = resolveChoiceAgainstGuidance(targetId, availableDestinations);
     if (!resolution.resolved || !resolution.destination) {
-      commandResponse = resolution.errorMessage || `Facility or safe zone "${targetId}" is not verified in current guidance snapshot.`;
+      commandResponse = resolution.errorMessage || `${words[language].unverifiedFacilityPrefix}${targetId}${words[language].unverifiedFacilityShortSuffix}`;
       commandError = commandResponse;
       render();
       return false;
@@ -1214,7 +1214,7 @@ function handleOpenPanelAction(panel: Panel, targetId?: string | null): boolean 
       break;
     case 'RESERVATION_CONFIRMATION':
       if (!selectedDestination || isIllustrativePreview || selectedDestination.is_illustrative) {
-        commandResponse = 'Cannot reserve route for illustrative preview. Waiting for authorized operational guidance.';
+        commandResponse = words[language].reserveIllustrative;
         commandError = commandResponse;
         render();
         return false;
@@ -1263,7 +1263,7 @@ function dispatchVoiceProposal(proposal: VoiceProposal) {
       try { map?.setTerrain(null); } catch {}
     }
     if ((action.type === 'OPEN_PANEL' || action.type === 'SHOW_CHOICES') && !guidanceCurrent) {
-      commandError = 'Response was built for different guidance data; please ask again.';
+      commandError = words[language].staleGuidance;
       continue;
     }
     if (action.type === 'OPEN_PANEL') {
@@ -1377,10 +1377,10 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
         const playRes = await verifyAndPlayAudio(outcome.audio);
         if (reqId !== activeRequestId) return;
         if (!playRes.success && !playRes.autoplayBlocked) {
-          commandError = `Audio verification notice: ${playRes.error}`;
+          commandError = `${words[language].audioNotice} ${playRes.error}`;
         }
       } else if (outcome.guidanceSpeechExpected) {
-        commandError = 'Audio verification notice: Audio integrity metadata missing or invalid';
+        commandError = words[language].audioMetadataInvalid;
       }
     } else if (outcome.captionUnavailable) {
       commandError = words[language].assistantUnavailable;
@@ -1599,7 +1599,7 @@ function render() {
 
           ${reservationError && !reservationConfirmOpen ? `<p class="command-error" role="alert">${escapeHtml(reservationError)}</p>` : ''}
           <button class="primary-action ${routeStarted ? 'is-success' : ''}" data-testid="start-route" type="button" data-action="route">
-            ${icons.route}<span>${reservationPending ? 'Reserving...' : routeStarted ? t.routeActive : t.startRoute}</span>${icons.arrow}
+            ${icons.route}<span>${reservationPending ? t.reserving : routeStarted ? t.routeActive : t.startRoute}</span>${icons.arrow}
           </button>
           <ol class="instructions"><li><span>1</span><p><strong>${t.instruction1Title}</strong> ${t.instruction1Body}</p></li><li><span>2</span><p>${t.instruction2}</p></li><li><span>3</span><p>${t.instruction3}</p></li></ol>
           <p class="grounding-line">${t.groundingLine}</p>
@@ -1632,13 +1632,13 @@ function render() {
         <p class="voice-boundary"><strong>${t.voiceBoundaryLabel}</strong> ${t.voiceBoundary}</p>
       </aside>
       ${directionsOpen ? `<aside class="side-sheet" aria-labelledby="directions-title"><div class="sheet-head"><div><span>${t.routeKicker}</span><h2 id="directions-title">${t.routeTitle}</h2></div><button class="icon-button" data-action="directions-close" aria-label="${t.closeDirections}">${icons.close}</button></div><ol><li><b>1</b><p>${t.routeStep1}<small>${t.routeStep1Note}</small></p></li><li><b>2</b><p>${t.routeStep2}<small>${t.routeStep2Note}</small></p></li><li><b>3</b><p>${t.routeStep3}<small>${t.routeStep3Note}</small></p></li></ol></aside>` : ''}
-      ${detailsOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.sourceFreshness}</span><h2>${t.alertDetails}</h2></div><button class="icon-button" data-action="details-close" aria-label="${t.closeDetails}">${icons.close}</button></div><p>${t.demoNotice}</p><dl><div><dt>${t.authorityFormat}</dt><dd>NDMA SACHET / CAP (Source: SRCDEMO-1)</dd></div><div><dt>Package ID</dt><dd>${PACKAGE_ID} (Jurisdiction: ${JURISDICTION})</dd></div><div><dt>Freshness State</dt><dd>${guidanceFreshness}</dd></div><div><dt>Valid Dates</dt><dd>${getTodayYMD()} to ${getTomorrowYMD()}</dd></div><div><dt>${t.backend}</dt><dd>${runtimeCopy()}</dd></div></dl></dialog>` : ''}
+      ${detailsOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.sourceFreshness}</span><h2>${t.alertDetails}</h2></div><button class="icon-button" data-action="details-close" aria-label="${t.closeDetails}">${icons.close}</button></div><p>${t.demoNotice}</p><dl><div><dt>${t.authorityFormat}</dt><dd>NDMA SACHET / CAP (${t.sourceLabel}SRCDEMO-1)</dd></div><div><dt>${t.packageId}</dt><dd>${PACKAGE_ID} (${t.jurisdiction}: ${JURISDICTION})</dd></div><div><dt>${t.freshnessState}</dt><dd>${guidanceFreshness}</dd></div><div><dt>${t.validDates}</dt><dd>${getTodayYMD()}${t.dateSeparator}${getTomorrowYMD()}</dd></div><div><dt>${t.backend}</dt><dd>${runtimeCopy()}</dd></div></dl></dialog>` : ''}
       ${assistanceOpen ? `<dialog class="modal modal--critical" open><div class="sheet-head"><div><span>${t.emergencyAssistance}</span><h2>${t.callHelp}</h2></div><button class="icon-button" data-action="assist-close" aria-label="${t.close}">${icons.close}</button></div><p>${t.assistNotice}</p><div class="help-actions"><a class="primary-action" href="tel:112">${t.callRescue}</a><a class="primary-action" href="tel:112">${t.callAmbulance}</a><a class="primary-action" href="tel:112">${t.call112Now}</a></div></dialog>` : ''}
-      ${arrivalOpen ? `<dialog id="arrival-modal" class="modal"><div class="sheet-head"><div><span>${t.arrivalCheck}</span><h2>${t.arrivedSafely}</h2></div><button class="icon-button" data-action="arrival-close" aria-label="${t.closeArrival}">${icons.close}</button></div>${arrivalSuccess ? `<div class="success-message"><strong>${t.arrivalRecorded}</strong>${arrivalRecordedAt ? `<p><small>Recorded at: ${arrivalRecordedAt}</small></p>` : ''}</div>` : `<p>${t.confirmParty}</p><div class="stepper"><button type="button" data-action="party-minus" aria-label="${t.decreaseParty}">-</button><strong>${partySize} ${partySize === 1 ? t.person : t.people}</strong><button type="button" data-action="party-plus" aria-label="${t.increaseParty}">+</button></div>${arrivalError ? `<p class="command-error" role="alert" style="margin-block: 0.5rem;">${escapeHtml(arrivalError)}</p>` : ''}<div class="help-actions" style="margin-top: 1rem;"><button class="primary-action is-success" type="button" data-action="arrival-yes" ${arrivalPending ? 'disabled' : ''}>${arrivalPending ? 'Confirming...' : t.confirmArrivalPrompt}</button><button class="secondary-action" type="button" data-action="arrival-no">${t.callHelp}</button></div>`}</dialog>` : ''}
+      ${arrivalOpen ? `<dialog id="arrival-modal" class="modal"><div class="sheet-head"><div><span>${t.arrivalCheck}</span><h2>${t.arrivedSafely}</h2></div><button class="icon-button" data-action="arrival-close" aria-label="${t.closeArrival}">${icons.close}</button></div>${arrivalSuccess ? `<div class="success-message"><strong>${t.arrivalRecorded}</strong>${arrivalRecordedAt ? `<p><small>${t.recordingAt}${arrivalRecordedAt}</small></p>` : ''}</div>` : `<p>${t.confirmParty}</p><div class="stepper"><button type="button" data-action="party-minus" aria-label="${t.decreaseParty}">-</button><strong>${partySize} ${partySize === 1 ? t.person : t.people}</strong><button type="button" data-action="party-plus" aria-label="${t.increaseParty}">+</button></div>${arrivalError ? `<p class="command-error" role="alert" style="margin-block: 0.5rem;">${escapeHtml(arrivalError)}</p>` : ''}<div class="help-actions" style="margin-top: 1rem;"><button class="primary-action is-success" type="button" data-action="arrival-yes" ${arrivalPending ? 'disabled' : ''}>${arrivalPending ? t.confirming : t.confirmArrivalPrompt}</button><button class="secondary-action" type="button" data-action="arrival-no">${t.callHelp}</button></div>`}</dialog>` : ''}
       ${audioOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.listen}</span><h2>${lastApprovedAudio && isAudioValidForReplayCheck(lastApprovedAudio) ? t.listen : t.approvedAudioUnavailable}</h2></div><button class="icon-button" data-action="audio-close" aria-label="${t.close}">${icons.close}</button></div>${lastApprovedAudio && isAudioValidForReplayCheck(lastApprovedAudio) ? `<p>${t.summary}</p><div class="help-actions"><button class="primary-action" type="button" data-action="audio-play-modal">${icons.volume} ${t.tapToPlay}</button></div>` : `<p>${t.approvedAudioUnavailable}</p><p>${t.summary}</p>`}</dialog>` : ''}
       ${islOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.isl}</span><h2>${t.islTitle}</h2></div><button class="icon-button" data-action="isl-close" aria-label="${t.close}">${icons.close}</button></div><p>${t.islPending}</p><p>${t.summary}</p></dialog>` : ''}
-      ${reservationConfirmOpen ? `<dialog id="reservation-confirm-modal" class="modal" aria-labelledby="reservation-confirm-title"><div class="sheet-head"><div><span>${t.startRoute}</span><h2 id="reservation-confirm-title">Confirm Route Reservation</h2></div><button class="icon-button" data-action="reservation-confirm-close" aria-label="${t.close}">${icons.close}</button></div><p>Please confirm route reservation for <strong>${selectedDestination ? escapeHtml(selectedDestination.facility_name) : 'selected facility'}</strong>.</p><dl><div><dt>Facility ID</dt><dd>${selectedDestination ? escapeHtml(selectedDestination.facility_id) : '—'}</dd></div><div><dt>Party Size</dt><dd>${partySize} ${partySize === 1 ? t.person : t.people}</dd></div><div><dt>Route Status</dt><dd>${selectedDestination?.route_verified ? 'Verified Approved Route' : 'Illustrative / Pending'}</dd></div></dl>${reservationError ? `<p class="command-error" role="alert" style="margin-block: 0.5rem;">${escapeHtml(reservationError)}</p>` : ''}<div class="help-actions" style="margin-top: 1rem;"><button class="primary-action is-success" type="button" data-action="reservation-confirm-submit" ${reservationPending ? 'disabled' : ''}>${reservationPending ? 'Reserving...' : t.startRoute}</button><button class="secondary-action" type="button" data-action="reservation-confirm-close">${t.close}</button></div></dialog>` : ''}
-      ${destinationDetailsOpen ? `<dialog class="modal" open aria-labelledby="destination-details-title"><div class="sheet-head"><div><span>${t.destinationLabel}</span><h2 id="destination-details-title">${selectedDestination ? escapeHtml(selectedDestination.facility_name) : 'Safe Zone Details'}</h2></div><button class="icon-button" data-action="destination-details-close" aria-label="${t.close}">${icons.close}</button></div>${selectedDestination ? `<dl><div><dt>Facility ID</dt><dd>${escapeHtml(selectedDestination.facility_id)}</dd></div><div><dt>Safe Zone ID</dt><dd>${escapeHtml(selectedDestination.safe_zone_id)}</dd></div><div><dt>Capacity</dt><dd>${destinationCapacityText()}</dd></div><div><dt>Distance</dt><dd>${destinationDistanceText(selectedDestination).kmText} (${destinationDistanceText(selectedDestination).durationText})</dd></div><div><dt>Coordinates</dt><dd>${selectedDestination.coordinates ? `${selectedDestination.coordinates[0].toFixed(5)}, ${selectedDestination.coordinates[1].toFixed(5)}` : 'Unavailable'}</dd></div><div><dt>Route Status</dt><dd>${selectedDestination.route_verified ? 'Verified' : selectedDestination.is_illustrative ? 'Illustrative' : 'Unverified'}</dd></div></dl>` : `<p>No destination information available.</p>`}<div class="help-actions" style="margin-top: 1rem;"><button class="primary-action" type="button" data-action="destination-details-close">${t.close}</button></div></dialog>` : ''}
+      ${reservationConfirmOpen ? `<dialog id="reservation-confirm-modal" class="modal" aria-labelledby="reservation-confirm-title"><div class="sheet-head"><div><span>${t.startRoute}</span><h2 id="reservation-confirm-title">${t.confirmReservationTitle}</h2></div><button class="icon-button" data-action="reservation-confirm-close" aria-label="${t.close}">${icons.close}</button></div><p>${t.confirmReservationFor}<strong>${selectedDestination ? escapeHtml(selectedDestination.facility_name) : t.selectedFacility}</strong>.</p><dl><div><dt>${t.facilityId}</dt><dd>${selectedDestination ? escapeHtml(selectedDestination.facility_id) : '—'}</dd></div><div><dt>${t.partySize}</dt><dd>${partySize} ${partySize === 1 ? t.person : t.people}</dd></div><div><dt>${t.routeStatus}</dt><dd>${selectedDestination?.route_verified ? t.routeVerified : t.routePending}</dd></div></dl>${reservationError ? `<p class="command-error" role="alert" style="margin-block: 0.5rem;">${escapeHtml(reservationError)}</p>` : ''}<div class="help-actions" style="margin-top: 1rem;"><button class="primary-action is-success" type="button" data-action="reservation-confirm-submit" ${reservationPending ? 'disabled' : ''}>${reservationPending ? t.reserving : t.startRoute}</button><button class="secondary-action" type="button" data-action="reservation-confirm-close">${t.close}</button></div></dialog>` : ''}
+      ${destinationDetailsOpen ? `<dialog class="modal" open aria-labelledby="destination-details-title"><div class="sheet-head"><div><span>${t.destinationLabel}</span><h2 id="destination-details-title">${selectedDestination ? escapeHtml(selectedDestination.facility_name) : t.safeZoneDetails}</h2></div><button class="icon-button" data-action="destination-details-close" aria-label="${t.close}">${icons.close}</button></div>${selectedDestination ? `<dl><div><dt>${t.facilityId}</dt><dd>${escapeHtml(selectedDestination.facility_id)}</dd></div><div><dt>${t.safeZoneId}</dt><dd>${escapeHtml(selectedDestination.safe_zone_id)}</dd></div><div><dt>${t.capacity}</dt><dd>${destinationCapacityText()}</dd></div><div><dt>${t.distanceLabel}</dt><dd>${destinationDistanceText(selectedDestination).kmText} (${destinationDistanceText(selectedDestination).durationText})</dd></div><div><dt>${t.coordinates}</dt><dd>${selectedDestination.coordinates ? `${selectedDestination.coordinates[0].toFixed(5)}, ${selectedDestination.coordinates[1].toFixed(5)}` : t.coordinatesUnavailable}</dd></div><div><dt>${t.routeStatus}</dt><dd>${selectedDestination.route_verified ? t.statusVerified : selectedDestination.is_illustrative ? t.statusIllustrative : t.statusUnverified}</dd></div></dl>` : `<p>${t.noDestinationInfo}</p>`}<div class="help-actions" style="margin-top: 1rem;"><button class="primary-action" type="button" data-action="destination-details-close">${t.close}</button></div></dialog>` : ''}
       <div class="toast" role="status" aria-live="polite" hidden></div>
     </div>`;
 

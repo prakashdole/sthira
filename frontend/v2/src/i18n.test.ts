@@ -70,4 +70,19 @@ test('i18n: script authenticity for Malayalam and Devanagari', () => {
   assert.ok(devanagariRegex.test(words.HI.severeWarning), 'HI severeWarning must contain Devanagari characters');
   assert.ok(devanagariRegex.test(words.HI.leave), 'HI leave must contain Devanagari characters');
   assert.ok(devanagariRegex.test(words.HI.callHelp), 'HI callHelp must contain Devanagari characters');
+
+  // The key-parity test only proves a value is non-empty, so a value pasted back in
+  // English would pass it. Every ML/HI string must actually be in its own script.
+  for (const key of Object.keys(words.ML) as (keyof typeof words.ML)[]) {
+    const val = words.ML[key];
+    if (typeof val === 'string') {
+      assert.ok(malayalamRegex.test(val), `ML translation for "${key}" must contain Malayalam characters`);
+    }
+  }
+  for (const key of Object.keys(words.HI) as (keyof typeof words.HI)[]) {
+    const val = words.HI[key];
+    if (typeof val === 'string') {
+      assert.ok(devanagariRegex.test(val), `HI translation for "${key}" must contain Devanagari characters`);
+    }
+  }
 });
