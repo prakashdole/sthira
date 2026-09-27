@@ -152,3 +152,61 @@ authorized run, not estimated in advance.
 - `aws ec2 describe-instances --instance-ids i-01d17e39266c292c2` (read-only)
   returned state `stopped`, `PublicIpAddress: null` — consistent with prior
   handoff notes. No mutating AWS call was made.
+
+## 7. Reconciled launch commands and ordered paid smoke sequence (2026-09-27, local reconciliation only)
+
+Reconciled against source, not memory: `backend/internal/{asrworker,middleworker,ttsworker}/cmd/*/main.go`,
+`src/sthira_v2/speech_{asr,tts}_adapter.py`, `middleworker/sarvam_config.go`, `tools/preflight/main.go`.
+Nothing here was executed against the GPU host.
+
+**Corrections to `plan/prompt.md` Procedure B (which is now superseded by this section):**
+
+- Paths: use §1 corrected host paths (`/home/ubuntu/models/...`, `/home/ubuntu/.venvs/voice/bin/python`),
+  not `/models/...` (container mount) or `/home/ubuntu/.venv/bin/python3`.
+- `PYTHONPATH` is **not** read by any Go worker; the child adapter inherits the worker's environment
+  (`cmd.Env = append(os.Environ(), ...)`), so export `PYTHONPATH` in the worker's shell.
+  `STHIRA_PYTHONPATH` is only read by opt-in adapter tests.
+- `STHIRA_{ASR,TTS}_ARTIFACT_DIR`, `STHIRA_TTS_DEVICE`, `STHIRA_TTS_TEXT_ENCODER_DIR`,
+  `STHIRA_TTS_VOICES_FILE`, `STHIRA_*_APPROVED_LANGUAGES` are read by the Python adapters (inherited env),
+  not by Go `main.go`. Procedure B omitted `STHIRA_TTS_TEXT_ENCODER_DIR` and `PYTHONPATH`.
+- The middle worker sends `model = "sarvamai/sarvam-30b"` (`SarvamModelID`) with `max_tokens 512` and a
+  request-level JSON schema. The `sthira-sarvam` container must serve that exact name: check
+  `curl -s 127.0.0.1:8000/v1/models`. If the served name differs, stop — do not edit code on the host.
+  The reported revision label defaults to `sarvam-30b-fp8-v1` (`STHIRA_MIDDLE_REVISION`); it is a label,
+  not a weight digest.
+- Ports (loopback only): vLLM 8000 (container), ASR 8001, middle 8002, TTS 8003. Do not reuse 8000.
+- TTS `ttsworker` refuses to start without `STHIRA_TTS_SYNTHETIC_EXERCISE=1` (demo catalog only) and
+  pre-generates the approved template catalog at startup; hot path is cache-only.
+- ASR language is always the UI-selected `language` field (`X-Language` / pipeline `language`).
+  No autodetection exists.
+
+**Host environment (remote shell, once):**
+
+```bash
+export PYTHONPATH=/opt/pytorch/lib/python3.12/site-packages
+export PY=/home/ubuntu/.venvs/voice/bin/python
+export TOK="$(openssl rand -hex 24)"   # shared worker token; never commit or paste into evidence
+cd ~/MonitoringZ && git rev-parse HEAD  # record; must equal the reviewed local commit
+(cd tools/preflight && go run .)        # must show artifact/interpreter/PYTHONPATH PASS on the host
+```
+
+**Ordered smoke sequence — stop at the first FAIL; each step has a budget.**
+
+| # | Step | Command sketch | Pass criterion | Budget |
+|---|---|---|---|---|
+| 0 | Instance + preflight | owner-authorized start; preflight above | all host checks PASS | 10 min |
+| 1 | vLLM up | `docker start sthira-sarvam`; `curl 127.0.0.1:8000/v1/models` | lists `sarvamai/sarvam-30b` | 10 min |
+| 2 | ASR worker alone | `STHIRA_ASR_ADDR=127.0.0.1:8001 STHIRA_ASR_TOKEN=$TOK STHIRA_ASR_PYTHON=$PY STHIRA_ASR_ADAPTER=sthira_v2.speech_asr_adapter STHIRA_ASR_ARTIFACT_DIR=/home/ubuntu/models/indic-conformer-600m-multilingual ./asrworker`; `GET /health` | ready+warm, languages listed; one hi-IN WAV → non-empty text; silence → no command | 10 min |
+| 3 | Middle worker alone | `STHIRA_MIDDLE_ADDR=127.0.0.1:8002 STHIRA_MIDDLE_TOKEN=$TOK STHIRA_VLLM_URL=http://127.0.0.1:8000 ./middleworker`; three typed requests (silent zoom, destination, arrival) | strict JSON only; destination uses facility IDs; arrival = `OPEN_PANEL ARRIVAL_CONFIRMATION`; no prose/thinking; invalid output rejected, not repaired | 15 min |
+| 4 | TTS worker alone | `STHIRA_TTS_ADDR=127.0.0.1:8003 STHIRA_TTS_TOKEN=$TOK STHIRA_TTS_PYTHON=$PY STHIRA_TTS_ADAPTER=sthira_v2.speech_tts_adapter STHIRA_TTS_ARTIFACT_DIR=/home/ubuntu/models/indic-parler-tts STHIRA_TTS_TEXT_ENCODER_DIR=/home/ubuntu/models/flan-t5-large-tokenizer STHIRA_TTS_DEVICE=cuda STHIRA_TTS_SYNTHETIC_EXERCISE=1 ./ttsworker` | startup pre-generation completes; en-IN and hi-IN cache hits; WAV header = declared rate (44,100 Hz), checksum matches; unknown template/digest rejected | 20 min |
+| 5 | Full pipeline | SSH `-L 8001/8002/8003`; local `sthira-exercise` with `STHIRA_{ASR,MIDDLE,TTS}_URL` + `_TOKEN=$TOK`; `POST /api/v3/voice/process` (en-IN destination, hi-IN destination, silent zoom) | `data_version` equals guidance `PKGDEMO-1:1`; hi-IN audio `language=hi-IN`; no `stage_failures` on success; zoom has no TTS | 15 min |
+| 6 | Real browser + microphone | Vite → local backend; laptop Safari/phone browser | mic permission grant/deny; spoken hi-IN destination → chips + audible approved Hindi; replay refused after language switch; arrival only after server ack | 20 min |
+
+Hard stop: 100 minutes from instance start, or any FAIL in steps 1–4 that is not a documented
+configuration typo. Stop the instance (not terminate) at the end; confirm `stopped` read-only.
+
+**Preserve as evidence (compact Markdown in this file, no raw logs/recordings/weights/tokens):**
+commit SHA; `/v1/models` served name; each step's PASS/FAIL with HTTP status and 1–2 line excerpts;
+TTS WAV header fields + checksums (not audio bytes); per-step latency; the exact failing request/response
+shape for any FAIL. Keep evidence classes separate: adapter smoke, full pipeline, browser, microphone,
+human listening quality. Human speech quality is recorded only as a reviewer's observation, never inferred.
