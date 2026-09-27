@@ -51,14 +51,77 @@ scope) are still open unless explicitly closed here.**
      correctly rejects (`"non-OK status carries a non-null intent"`, HTTP
      503). The mock response is wrong, not the validator; the test then
      asserts the wrong expected status code (200).
-  2. `TestProtoScenario_DestinationChoice` **FAILS**: the test decodes the
-     response audio into a local anonymous struct field `AudioB64`, but the
-     real wire type `contracts.PipelineAudio`
-     (`backend/internal/contracts/pipeline.go`) has no such field — it uses
-     `content_type` / `byte_size` / `checksum_sha256`. The assertion can
-     never pass regardless of pipeline correctness; the test needs to check
-     `byte_size`/`checksum_sha256` (see `voice_integration_test.go` for the
-     correct pattern already in the codebase).
+  2. `TestProtoScenario_DestinationChoice` **FAILS**. *Correction
+     (2026-09-27 11:40, supersedes the explanation originally written here
+     and in commit `8109404`'s message):* the earlier claim that
+     `PipelineAudio` has no `audio_b64` field was **wrong** —
+     `contracts.PipelineAudio` does carry `AudioB64 string
+     json:"audio_b64,omitempty"`, and the test's assertion is valid and must
+     be kept. Actual cause, reproduced: the test's own mock TTS fixture
+     `protoWAVBytes` writes the RIFF `fmt ` chunk size as 2 bytes (uint16)
+     instead of 4 (uint32), shifting every later header field by two bytes.
+     The orchestrator's `readWAVHeader` correctly rejects it
+     (`wav: only 16-bit PCM is accepted`), the TTS stage fails, and the
+     response is HTTP 200 `state:"OK"` with `stage_failures:["tts"]` and no
+     `audio` object (omitempty). Validated proposal, facility choice
+     `FAC-PKG-DEST-1` and template text were all correct. Fix belongs in the
+     fixture (4-byte fmt size), not in the assertion; also assert
+     `byte_size` and `checksum_sha256` over the decoded bytes and
+     `stage_failures` is empty. The standalone `cmd/mock-workers` binary's
+     WAV is well-formed (844 bytes, fmt size 16, 16 kHz/16-bit/mono,
+     checksum matches) — the defect is test-only.
+
+### Integrated real-HTTP path review (2026-09-27 11:35–11:40)
+
+Owned stack: fresh migrated DB, `cmd/sthira-exercise` (seeded), labelled
+`cmd/mock-workers` (PLUMBING_ONLY, built from the working tree including
+Agent 2's uncommitted Clarify fix), Vite dev proxy. Requests went through
+the Vite proxy exactly as the browser sends them; envelopes were then run
+through the committed browser modules (`processVoiceEnvelope`,
+`validateVoiceResponse`, `verifyAudioIntegrity`, `isAudioValidForReplay`)
+in Node. This is **not** browser acceptance.
+
+| Scenario | HTTP / state | UI classification | Audio |
+| --- | --- | --- | --- |
+| silent-zoom | 200 OK | OK, validates, no speech expected | none (correct) |
+| destination-choice | 200 OK, `SHOW_CHOICES [FACDEMO-1]` | OK, caption = approved template text | 844 B, checksum PASS, RIFF 16 kHz = declared |
+| arrival-confirm | 200 OK, `OPEN_PANEL ARRIVAL_CONFIRMATION` | OK, no speech expected | none (correct) |
+| clarify | 200 CLARIFY, `[SZDEMO-1, FACDEMO-1]` | CLARIFY chips + caption | none |
+| data-unavailable | 200 DATA_UNAVAILABLE (3/3 stable) | ERROR ("assistant unavailable" wording) | none |
+| worker-failure | 503 MODEL_UNAVAILABLE | ERROR | none |
+
+One earlier data-unavailable run returned 503 immediately after a worker
+restart; not reproduced in 4 further runs — recorded, not claimed fixed.
+
+**Defect found — destination audio never plays in the real browser path
+(backend/frontend contract, unowned file; reported, not fixed):**
+`/api/v3/guidance/query` emits `data_version = req.PackageID`
+(`"PKGDEMO-1"`, `httpserver/stay_handlers.go` writeData call), while
+`/api/v3/voice/process` emits the scoped-context version
+`"PKGDEMO-1:1"` (`store/context.go` `fmt.Sprintf("%s:%d")`). The browser
+sets `currentDataVersion` from guidance and `isAudioValidForReplay`
+requires equality, so on the real envelopes: replay gate with guidance
+version → **false**, with voice version → true. Integrity checks pass;
+playback is refused, and the UI reports "invalid, expired, or does not
+match" — a false, fail-closed denial. Responsible layer: the backend should
+emit one consistent `data_version` for the same package snapshot; do not
+loosen the browser equality check.
+
+**Observation for backend orchestration (not reproduced with real
+models):** `stageTemplate` renders in `proposal.Language`, but `stageTTS`
+receives `req.Language` and the digest for `req.Language`. With a hi-IN
+request and a proposal in en-IN, English text was sent to TTS labelled
+hi-IN. The mock accepts it; a real catalog-bound TTS worker should reject
+it. Needs a regression test before the paid run.
+
+**Browser acceptance: NOT_RUN.** Only Safari is installed; `safaridriver`
+refused: "You must enable 'Allow remote automation' in the Developer
+section of Safari Settings". That is a user system setting; not changed.
+Agents 1 and 2 had new unstaged edits during this review
+(`main.ts`, `mapActions.ts`, mock-workers, prototype test); they are
+unreviewed and uncommitted. The new `main.ts` hunk now runs both
+`executeMapActions` and `applyVoiceActions` for the same proposal — Agent 1
+should confirm this does not double-apply panel/language side effects.
   The other four scenarios (`silent-zoom`, `arrival-confirm`,
   `data-unavailable`, `worker-failure`) **PASS** as written.
 - Backend integrated checks (this executor, once independently, at the
