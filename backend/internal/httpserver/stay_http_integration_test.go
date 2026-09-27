@@ -284,6 +284,77 @@ func TestHTTPCrossSessionDenial(t *testing.T) {
 	}
 }
 
+// TestCitizenOwnershipRegression_PostDenialIdempotencyKeySurvives: a foreign
+// session's denied event using the same idempotency key string must not claim
+// or poison the owner's key; the owner's first ARRIVE with that key succeeds
+// and moves capacity exactly once.
+func TestCitizenOwnershipRegression_PostDenialIdempotencyKeySurvives(t *testing.T) {
+	s, st := newStayServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	pkgID, facID, snap := seedHTTPPackageFacility(t, st, 3, httpDayT(1), httpDayT(4))
+	_, tokenA := createSession(t, srv)
+	_, tokenB := createSession(t, srv)
+
+	recA := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", tokenA,
+		reservationBody(facID, pkgID, 1, httpDay(1), httpDay(2), "res-a", snap))
+	if recA.code != http.StatusCreated {
+		t.Fatalf("A reserve: code=%d body=%s", recA.code, recA.body)
+	}
+	var created struct {
+		StayID string `json:"stay_id"`
+	}
+	b, err := json.Marshal(decodeEnvelope(t, recA).Data)
+	if err != nil {
+		t.Fatalf("re-marshal reservation data: %v", err)
+	}
+	if err := json.Unmarshal(b, &created); err != nil || created.StayID == "" {
+		t.Fatalf("reservation response has no stay_id (err=%v): %s", err, recA.body)
+	}
+	buckets := func() (held, occ int, state string) {
+		t.Helper()
+		if err := st.DB().QueryRowContext(t.Context(),
+			`SELECT held, occupied FROM facility_inventory WHERE facility_id=$1 AND service_date=$2`,
+			facID, httpDayT(1)).Scan(&held, &occ); err != nil {
+			t.Fatalf("read buckets: %v", err)
+		}
+		if err := st.DB().QueryRowContext(t.Context(),
+			`SELECT state FROM stays WHERE stay_id=$1`, created.StayID).Scan(&state); err != nil {
+			t.Fatalf("read stay state: %v", err)
+		}
+		return held, occ, state
+	}
+	arrive := func(token string) response {
+		return doAuthed(t, srv, http.MethodPost, "/api/v3/reservations/"+created.StayID+"/events", token,
+			`{"type":"ARRIVE","idempotency_key":"shared-key"}`)
+	}
+
+	// B uses the key first on A's stay -> 403 (ownership check inside InTx).
+	// Business state must be exactly as reserved; denial audit records are
+	// legitimate and deliberately not asserted here.
+	if evB := arrive(tokenB); evB.code != http.StatusForbidden {
+		t.Fatalf("B arrive on A's stay: code=%d, want 403; body=%s", evB.code, evB.body)
+	}
+	if held, occ, state := buckets(); held != 1 || occ != 0 || state != "RESERVED" {
+		t.Fatalf("after foreign denial: held=%d occupied=%d state=%s, want 1/0/RESERVED", held, occ, state)
+	}
+
+	// A's first use of the same key string is a fresh, successful ARRIVE.
+	if evA := arrive(tokenA); evA.code != http.StatusOK {
+		t.Fatalf("A arrive after B denied: code=%d, want 200; body=%s", evA.code, evA.body)
+	}
+	if held, occ, _ := buckets(); held != 0 || occ != 1 {
+		t.Fatalf("after arrive: held=%d occupied=%d, want 0/1", held, occ)
+	}
+	// A's identical retry replays without moving capacity again.
+	if evA2 := arrive(tokenA); evA2.code != http.StatusOK {
+		t.Fatalf("A arrive replay: code=%d, want 200; body=%s", evA2.code, evA2.body)
+	}
+	if held, occ, _ := buckets(); held != 0 || occ != 1 {
+		t.Fatalf("after replay: held=%d occupied=%d, want 0/1", held, occ)
+	}
+}
+
 // TestHTTPDuplicateConfirmationReplay: same idempotency key + payload replays
 // the stored result without a duplicate reservation or double capacity.
 func TestHTTPDuplicateConfirmationReplay(t *testing.T) {
