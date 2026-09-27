@@ -280,9 +280,25 @@ export class AudioPlaybackGuard {
     return this.pending;
   }
 
+  // The clip currently playing. invalidate() stops it: clearing the queued
+  // autoplay alone never silences audio that has already started.
+  private active: HTMLAudioElement | null = null;
+
   invalidate(): void {
     this.generation++;
     this.pending = null;
+    this.active?.pause();
+    this.active = null;
+  }
+
+  /**
+   * Call once `audio.play()` has resolved for a still-current context. The
+   * new clip supersedes older playback, queued autoplay and in-flight
+   * verifications, and becomes the clip the next invalidate() stops.
+   */
+  claimPlayback(audio: HTMLAudioElement): void {
+    this.invalidate();
+    this.active = audio;
   }
 
   setPending(params: {

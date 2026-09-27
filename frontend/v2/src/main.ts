@@ -762,7 +762,7 @@ async function verifyAndPlayAudio(audioInfo: AudioMetadata): Promise<{ success: 
             resolve({ success: false, autoplayBlocked: false, error: 'Context changed during playback start' });
             return;
           }
-          audioGuard.invalidate();
+          audioGuard.claimPlayback(audio);
           resolve({ success: true, autoplayBlocked: false });
         })
         .catch((err: Error) => {

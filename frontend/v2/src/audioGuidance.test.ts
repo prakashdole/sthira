@@ -497,3 +497,32 @@ test('pickSupportedRecorderMimeType: only returns types the backend transcriptio
   assert.equal(pickSupportedRecorderMimeType(only('audio/mp4', 'audio/aac')), null);
   assert.equal(pickSupportedRecorderMimeType(() => false), null);
 });
+
+function fakeAudio() {
+  return { pauses: 0, pause() { this.pauses++; } } as unknown as HTMLAudioElement & { pauses: number };
+}
+
+test('AudioPlaybackGuard: invalidation stops the clip that is already playing', () => {
+  const guard = new AudioPlaybackGuard();
+  const playing = fakeAudio();
+  guard.claimPlayback(playing);
+  assert.equal(playing.pauses, 0, 'claiming must not stop the clip that just started');
+  guard.invalidate(); // language change, hide, offline, revocation, new request
+  assert.equal(playing.pauses, 1);
+  guard.invalidate();
+  assert.equal(playing.pauses, 1, 'a stopped clip is released, not paused again');
+});
+
+test('AudioPlaybackGuard: a newly started clip supersedes older playback and queued autoplay', () => {
+  const guard = new AudioPlaybackGuard();
+  const older = fakeAudio();
+  const newer = fakeAudio();
+  guard.claimPlayback(older);
+  guard.setPending({ audio: fakeAudio(), metadata: {} as AudioMetadata, expectedLanguage: 'en-IN', expectedDataVersion: 'v1' });
+  const genBefore = guard.currentGeneration;
+  guard.claimPlayback(newer);
+  assert.equal(older.pauses, 1);
+  assert.equal(newer.pauses, 0);
+  assert.equal(guard.pendingAutoplay, null);
+  assert.ok(guard.currentGeneration > genBefore, 'in-flight verifications from before the new clip become stale');
+});
