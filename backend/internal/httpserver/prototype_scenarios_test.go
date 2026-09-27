@@ -392,6 +392,11 @@ func TestProtoScenario_MockWorkersExecutable(t *testing.T) {
 			if code == 200 && (env.DataVersion != wantVersion || env.Data.DataVersion != wantVersion) {
 				t.Fatalf("data_version envelope=%q data=%q want %q", env.DataVersion, env.Data.DataVersion, wantVersion)
 			}
+			// The browser applies SHOW_CHOICES/OPEN_PANEL only when the proposal's
+			// own data_version equals the displayed guidance data_version.
+			if code == 200 && env.Data.ValidatedProposal.Status == "OK" && env.Data.ValidatedProposal.DataVersion != wantVersion {
+				t.Fatalf("validated_proposal.data_version=%q want %q", env.Data.ValidatedProposal.DataVersion, wantVersion)
+			}
 			tc.check(t, code, env)
 		})
 	}
