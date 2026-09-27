@@ -24,13 +24,18 @@ Harness limits worth knowing when reading a FAIL:
   * MapLibre's `load` event is what releases a queued voice proposal, so
     queued-voice holds the basemap tile route with an explicit gate rather than
     sleeping, and proves the ordering from the recorded camera call timestamps.
+  * ctx.set_offline() also fires the window offline event, which sets
+    currentDataVersion to UNAVAILABLE and clears currentSnapshotVersion. So any
+    check that goes offline must build its reservation BEFORE going offline, and a
+    held request must be fetched from the backend before the network drops.
 
 Synthetic stack only; this does not prove real microphones, audible speech
 quality, Safari or real models.
 
 Usage: python3 prototype_accept.py BASE_URL SECTION [SECTION...] [--json OUT]
 Sections: core outage language reservation recorder audio audio-denied dialog
-map layout draft destination-identity modal queued-voice
+map layout draft destination-identity hi-ml guidance-change offline-reservation
+modal queued-voice
 Exit 0 only if every executed check passes.
 """
 import asyncio, base64, hashlib, json, os, struct, subprocess, sys
@@ -204,6 +209,22 @@ async def reserve_visible(page, timeout=20000):
     resp = await info.value
     await page.wait_for_timeout(1200)  # the accepted stay calls startTracking() internally
     return resp
+
+
+async def guidance_destinations(page):
+    """The destinations the REAL backend returned, read off the page's own response
+    object. Observation only: nothing is intercepted or altered."""
+    seen = []
+
+    async def on_response(r):
+        if r.url.endswith("/api/v3/guidance/query") and r.request.method == "POST" and r.status == 200:
+            try:
+                seen.append((await r.json()).get("data", {}).get("destinations"))
+            except Exception:
+                pass
+
+    page.on("response", on_response)
+    return seen
 
 
 async def section_language(browser, base):
@@ -748,56 +769,364 @@ async def section_draft(browser, base):
 
 # ---------------------------------------------------------------- destination identity
 
-async def section_destination_identity(browser, base):
-    """Item 4: a destination with missing coordinates must never show proximity or
-    'near destination' for another shelter. Intercept guidance to add FACDEMO-2 without
-    coordinates and verify the UI shows 'Unavailable' for coordinates and does not
-    show NEAR_DESTINATION state."""
-    s = "destination-identity"
-    ctx, page = await new_page(browser)
+def journey_facts(page):
+    """Only what the page renders: no window hooks."""
+    return page.evaluate("""() => ({
+        badge: document.querySelector('.journey-status-badge')?.textContent?.trim() ?? null,
+        detail: document.querySelector('.journey-tracker small')?.textContent?.trim() ?? null,
+        near: document.querySelectorAll('.near-destination-advisory').length,
+        arrival: document.querySelectorAll('[data-action="arrival-open"]').length,
+        destination: document.querySelector('.destination h2')?.textContent?.trim() ?? null,
+        distance: document.querySelector('.destination .distance')?.innerText?.replace(/\\s+/g, ' ') ?? null,
+    })""")
 
-    # Intercept guidance BEFORE onboarding so the route is set before queryGuidanceDestinations() runs at module load
-    async def add_facdemo2_no_coords(route):
-        resp = await route.fetch()
+
+async def reserve_at(browser, base, facility):
+    """One complete citizen journey at `facility` with the emulated GPS standing on
+    the shelter coordinate. Returns what the page rendered, plus the server and the
+    database's view of the stay."""
+    ctx, page = await new_page(browser)
+    seen = await guidance_destinations(page)
+    await onboard(page, base)
+    await settle(page, 1200)
+    guidance = seen[-1] if seen else None
+    await page.click(f'[data-select-facility="{facility}"]')
+    await settle(page, 400)
+    chosen = await journey_facts(page)
+    resp = await reserve_visible(page)
+    await settle(page, 1200)
+    after = await journey_facts(page)
+    stay_id = ((await resp.json()).get("data") or {}).get("stay_id")
+    safe = stay_id if stay_id and stay_id.replace("-", "").isalnum() else None
+    stay = db_scalar(f"select facility_id from stays where stay_id = '{safe}'") if safe else None
+    errs = list(page.errors)
+    await ctx.close()
+    return guidance, chosen, resp, after, stay, errs
+
+
+async def section_destination_identity(browser, base):
+    """A destination the authority returns WITHOUT coordinates must never borrow
+    another facility's position.
+
+    The rule (journey.ts:447 mapGuidanceDestinations -> main.ts:309
+    getDestinationTarget -> journey.ts:89-103 evaluateProximity): coordinates are
+    bound to the exercise facility only, so every other authority destination
+    arrives with none and proximity is UNAVAILABLE_COORDINATES, never 'near'. The
+    facilities table has no coordinate column at all and guidance/query never sends
+    one, so the coordinate-less destination here is real authority data, seeded by
+    STHIRA_EXERCISE_SEED_COORDLESS=1 - not a rewritten response. Nothing in this
+    section intercepts or rewrites a request.
+
+    What stops the negative half from passing for the wrong reason: the POSITIVE
+    CONTROL repeats the identical journey at FACDEMO-1, which does have coordinates,
+    and requires the near-destination prompt. It also reports '0m from shelter',
+    which is what pins the emulated GPS to the app's own shelter coordinate. If
+    tracking or proximity were broken the control fails, and a failing control means
+    the negative half proved nothing.
+    """
+    s = "destination-identity"
+    guidance, chosen, resp, after, stay, errs = await reserve_at(browser, base, "FACDEMO-2")
+    ids = [d.get("facility_id") for d in guidance] if guidance else []
+    rec(s, "the authority lists two destinations and sends no coordinates for either",
+        bool(guidance) and "FACDEMO-2" in ids and all(
+            not any(k in d for k in ("coordinates", "latitude", "longitude", "lat", "lon", "lng")) for d in guidance),
+        f"facility_ids={ids} keys={sorted(guidance[0].keys()) if guidance else None}")
+    rec(s, "the coordinate-less facility is offered as a real, reservable choice",
+        any(d.get("facility_id") == "FACDEMO-2" and d.get("safe_zone_id") == "SZDEMO-1" and d.get("free") is not None
+            for d in (guidance or [])),
+        next((d for d in (guidance or []) if d.get("facility_id") == "FACDEMO-2"), None))
+    rec(s, "the coordinate-less destination is selected through its visible chip",
+        chosen["destination"] == "Facility FACDEMO-2" and chosen["distance"] == "— —",
+        f"{chosen['destination']!r} distance={chosen['distance']!r}")
+    rec(s, "the stay is accepted for the coordinate-less facility (server 201, database agrees)",
+        resp.status == 201 and stay == "FACDEMO-2", f"status={resp.status} db_facility={stay}")
+    rec(s, "GPS standing on FACDEMO-1's coordinates does NOT raise a near-destination or arrival prompt",
+        after["near"] == 0 and after["arrival"] == 0, f"near={after['near']} arrival={after['arrival']} {after}")
+    rec(s, "journey stays TRACKING and says the destination coordinates are unavailable",
+        after["badge"] == "Tracking active (foreground only)" and after["detail"] == "Destination coordinates unavailable",
+        f"badge={after['badge']!r} detail={after['detail']!r}")
+    rec(s, "no uncaught page errors (coordinate-less journey)", not errs, "; ".join(errs))
+
+    g1, c1, r1, a1, s1, e1 = await reserve_at(browser, base, "FACDEMO-1")
+    rec(s, "positive control: the same GPS position at FACDEMO-1 DOES raise the near-destination prompt",
+        r1.status == 201 and a1["near"] == 1 and a1["arrival"] == 1 and a1["detail"] is not None
+        and a1["detail"].endswith("m from shelter (±10m)"),
+        f"near={a1['near']} arrival={a1['arrival']} detail={a1['detail']!r}")
+    rec(s, "the two journeys differ only by the destination's coordinates, and the control pins the GPS to 0 m",
+        stay == "FACDEMO-2" and s1 == "FACDEMO-1" and after["near"] != a1["near"] and after["arrival"] != a1["arrival"]
+        and after["badge"] != a1["badge"] and after["detail"] != a1["detail"],
+        f"FACDEMO-2: stay={stay} {after['badge']!r} near={after['near']} detail={after['detail']!r}"
+        f" | FACDEMO-1: stay={s1} {a1['badge']!r} near={a1['near']} detail={a1['detail']!r}")
+    rec(s, "no uncaught page errors (positive control)", not e1, "; ".join(e1))
+
+
+# ---------------------------------------------------------------- hi / ml journeys
+
+async def section_hi_ml(browser, base):
+    """A full journey in Hindi and in Malayalam. Language-agnostic by construction:
+    the only expected text is the backend's own `data.template.text`, compared
+    byte-for-byte against what the page rendered, so the check cannot pass by
+    asserting an English string. Everything else is a data-action / class selector.
+    """
+    s = "hi-ml"
+    for code, html_lang in (("HI", "hi"), ("ML", "ml")):
+        ctx, page = await new_page(browser)
+        langs = []
+        page.on("request", lambda r: langs.append((json.loads(r.post_data or "{}")).get("language"))
+                if r.method == "POST" and r.url.endswith("/api/v3/voice/process") else None)
+        await onboard(page, base, lang=code)
+        rec(s, f"{code}: onboarding completes and the document declares the chosen language",
+            await page.evaluate("document.documentElement.lang") == html_lang
+            and await page.locator('[data-testid="emergency-card"]').count() == 1,
+            f"lang={await page.evaluate('document.documentElement.lang')!r}")
+
+        resp = await submit(page, "where can I go")
         body = await resp.json()
-        destinations = body.get("data", {}).get("destinations", [])
-        # Add FACDEMO-2 without coordinates (facility without coords must not show proximity)
-        destinations.append({
-            "facility_id": "FACDEMO-2",
-            "safe_zone_id": "SZDEMO-2",
-            "capacity_known": True,
-            "free": 5,
-            "route_id": "RTDEMO-2",
-            "route_verified": False,
-        })
-        body["data"]["destinations"] = destinations
+        tmpl = ((body.get("data") or {}).get("template") or {}).get("text")
+        rendered = await page.locator(".command-result p").inner_text()
+        st = await console_state(page)
+        rec(s, f"{code}: request carried the {html_lang}-IN tag and the backend answered 200 with template text",
+            resp.status == 200 and langs == [f"{html_lang}-IN"] and isinstance(tmpl, str) and tmpl != "",
+            f"status={resp.status} languages={langs} template={tmpl!r}")
+        rec(s, f"{code}: the page shows the backend template byte-for-byte, with no error line",
+            rendered == tmpl and not st["errors"], f"rendered={rendered!r} template={tmpl!r} errors={st['errors']}")
+
+        res = await reserve_visible(page)
+        await settle(page, 800)
+        rec(s, f"{code}: a stay is accepted through the visible control and tracking starts",
+            res.status == 201 and await page.locator(".journey-tracker").count() == 1
+            and await page.locator('[data-action="stop-tracking"]').count() == 1,
+            f"status={res.status} tracker={await page.locator('.journey-tracker').count()}")
+
+        await page.wait_for_selector('[data-action="arrival-open"]', timeout=15000)
+        await page.locator('[data-action="arrival-open"]').first.click()
+        await page.wait_for_selector("#arrival-modal[open]", timeout=5000)
+        async with page.expect_response(lambda r: "/events" in r.url and r.request.method == "POST", timeout=10000) as ev:
+            await page.click('[data-action="arrival-yes"]')
+        arrive = await ev.value
+        stay_id = ((await res.json()).get("data") or {}).get("stay_id")
+        safe = stay_id if stay_id and stay_id.replace("-", "").isalnum() else None
+        state = db_scalar(f"select state from stays where stay_id = '{safe}'") if safe else None
+        await page.wait_for_selector("#arrival-modal .success-message", timeout=8000)
+        rec(s, f"{code}: arrival is recorded only after the server acknowledges (200, stay ARRIVED, success shown)",
+            arrive.status == 200 and state == "ARRIVED"
+            and await page.locator("#arrival-modal .success-message").count() == 1
+            and await page.locator("#arrival-modal .stepper").count() == 0,
+            f"status={arrive.status} db_state={state} success={await page.locator('#arrival-modal .success-message').count()}")
+        rec(s, f"{code}: no uncaught page errors", not page.errors, "; ".join(page.errors))
+        await ctx.close()
+
+
+# ---------------------------------------------------------------- guidance change mid-flight
+
+async def section_guidance_change(browser, base):
+    """Guidance changes while a voice request is in flight.
+
+    A proposal that was built against the guidance snapshot that is no longer
+    current must not be allowed to act on destinations or open panels
+    (main.ts:1265-1268), while a camera action in the same proposal is not
+    guidance-dependent and may apply. The pending indicator must clear.
+
+    How the version change is produced: the real voice response is fetched from the
+    backend FIRST (while the app is online), then held; the app is then taken
+    offline, whose window handler sets currentDataVersion to UNAVAILABLE
+    (main.ts:2279-2287) WITHOUT superseding the in-flight request; the held 200 is
+    released. The proposal therefore reaches dispatchVoiceProposal carrying a
+    data_version that no longer matches, and takes the real gate. The camera
+    application is counted from the MapLibre recorder, because a RECENTER is
+    invisible in the DOM.
+    """
+    s = "guidance-change"
+    gate, fetched = asyncio.Event(), asyncio.Event()
+    wire = {}
+    seen = []
+    ACTIONS = [{"type": "OPEN_PANEL", "panel": "ALERT_DETAILS", "target_id": None}, {"type": "RECENTER"}]
+
+    async def on_response(r):
+        if r.url.endswith("/api/v3/voice/process"):
+            seen.append(r)
+
+    def rewrite(body):
+        body["data"]["validated_proposal"]["actions"] = ACTIONS
+        return body
+
+    async def rewrite_now(route):
+        resp = await route.fetch()
+        await route.fulfill(response=resp, json=rewrite(await resp.json()))
+
+    async def hold_then_rewrite(route):
+        resp = await route.fetch()          # the real backend response, fetched while online
+        body = rewrite(await resp.json())
+        wire["data_version"] = (body["data"]["validated_proposal"] or {}).get("data_version")
+        wire["status"] = resp.status
+        fetched.set()
+        await asyncio.wait_for(gate.wait(), timeout=30)
         await route.fulfill(response=resp, json=body)
 
-    await page.route("**/api/v3/guidance/query", add_facdemo2_no_coords)
+    async def ask(page, text="show me the alert details"):
+        await open_console(page)
+        await page.fill("#command-input", text)
+        await page.click('[data-command-form] button[type="submit"]')
 
+    ctx, page = await new_page(browser)
+    await ctx.add_init_script(CAMERA_RECORDER)
+    page.on("response", on_response)
     await onboard(page, base, query="?sthira-test-hooks=1")
-    await page.wait_for_timeout(1000)  # Wait for guidance to load after onboarding
+    await page.wait_for_selector("[data-select-facility]", timeout=10000)
 
-    destinations = await page.evaluate("window.getAvailableDestinations()")
-    facdemo2 = next((d for d in destinations if d["facility_id"] == "FACDEMO-2"), None)
-    rec(s, "FACDEMO-2 present in guidance after route intercept",
-        facdemo2 is not None, f"found={facdemo2 is not None}")
-    if facdemo2:
-        rec(s, "FACDEMO-2 has no coordinates (coordinates field is absent/undefined)",
-            not facdemo2.get("coordinates"), f"coordinates={facdemo2.get('coordinates')}")
+    # --- CONTROL: the identical proposal, while the guidance version still matches.
+    # This is what proves the panel CAN open, so its absence below means the version
+    # change stopped it rather than the panel being unreachable in the first place.
+    await page.route("**/api/v3/voice/process", rewrite_now)
+    await ask(page)
+    await page.wait_for_selector("dialog.modal[open]", timeout=15000)
+    control_cam = [c for c in await page.evaluate("() => window.__cam") if c["fn"] == "flyTo"]
+    rec(s, "control: with a current guidance version the same proposal DOES open the panel and fly the camera",
+        await page.locator("dialog.modal[open]").count() == 1
+        and await page.locator('[data-action="details-close"]').count() == 1 and len(control_cam) == 1,
+        f"openDialogs={await page.locator('dialog.modal[open]').count()} flyTo={len(control_cam)}")
+    await page.keyboard.press("Escape")
+    await settle(page, 400)
+    rec(s, "control: the panel closed cleanly, so the next run starts from no dialog",
+        await page.locator("dialog.modal[open]").count() == 0, f"openDialogs={await page.locator('dialog.modal[open]').count()}")
 
-    # Select FACDEMO-2 via visible control
-    await page.click('[data-select-facility="FACDEMO-2"]')
-    await page.wait_for_timeout(500)
+    # --- THE TEST: same proposal, held across a guidance version change.
+    await page.route("**/api/v3/voice/process", hold_then_rewrite)
+    await ask(page)
+    await asyncio.wait_for(fetched.wait(), timeout=20)
+    rec(s, "the real backend response was fetched and is being held; the app is genuinely pending",
+        wire.get("status") == 200 and await page.locator(".command-thinking").count() == 1
+        and await page.locator(".command-result").get_attribute("aria-busy") == "true"
+        and await page.locator("#command-input").is_disabled()
+        and len([c for c in await page.evaluate("() => window.__cam") if c["fn"] == "flyTo"]) == 1,
+        f"status={wire.get('status')} thinking={await page.locator('.command-thinking').count()} "
+        f"aria-busy={await page.locator('.command-result').get_attribute('aria-busy')} flyToSoFar=1")
 
-    selected = await page.evaluate("window.getSelectedDestination()")
-    rec(s, "FACDEMO-2 is selected",
-        selected is not None and selected.get("facility_id") == "FACDEMO-2",
-        f"selected={selected.get('facility_id') if selected else None}")
-    rec(s, "Selected destination has no coordinates",
-        selected is not None and selected.get("coordinates") is None,
-        f"coordinates={selected.get('coordinates') if selected else None}")
+    await ctx.set_offline(True)
+    await page.wait_for_selector(".system-state--offline", timeout=5000)
+    rec(s, "the app observes the guidance source going unavailable while the request is still held",
+        await page.locator(".system-state--offline").count() == 1
+        and await page.evaluate("() => window.getDataVersion()") == "UNAVAILABLE"
+        and await page.locator(".command-thinking").count() == 1,
+        f"offline={await page.locator('.system-state--offline').count()} "
+        f"dataVersion={await page.evaluate('() => window.getDataVersion()')!r} "
+        f"stillPending={await page.locator('.command-thinking').count()}")
 
+    gate.set()
+    for _ in range(60):
+        if seen:
+            break
+        await settle(page, 100)
+    await page.wait_for_function("!document.querySelector('#command-input')?.disabled", timeout=20000)
+    await settle(page, 1200)
+    status = seen[0].status if seen else None
+    cam = await page.evaluate("() => window.__cam")
+    flies = [c for c in cam if c["fn"] == "flyTo"]
+    recenter = [c for c in flies if c["args"].get("center")
+                and abs(c["args"]["center"][0] - 76.112) < 1e-6 and abs(c["args"]["center"][1] - 11.562) < 1e-6]
+    errors = await page.evaluate("[...document.querySelectorAll('.command-error')].map((e) => e.textContent)")
+    rec(s, "the stale proposal's panel action is refused: the panel that opened in the control stays shut",
+        status == 200 and await page.locator("dialog.modal[open]").count() == 0
+        and await page.locator('[data-action="details-close"]').count() == 0,
+        f"status={status} openDialogs={await page.locator('dialog.modal[open]').count()} errors={errors}")
+    rec(s, "the citizen is told something failed rather than shown a stale panel (an error line is present)",
+        len(errors) >= 1, f"errors={errors}")
+    rec(s, "a camera action in the same stale proposal still applies (exactly one further RECENTER flyTo)",
+        len(flies) == 2 and len(recenter) == 2,
+        f"flyTo={len(flies)} recenter={len(recenter)} all={[(c['fn'], c['args'].get('center')) for c in cam]}")
+    rec(s, "the pending indicator clears; the app is not stuck",
+        await page.locator(".command-thinking").count() == 0
+        and await page.locator(".command-result").get_attribute("aria-busy") == "false"
+        and await page.locator("#command-input").is_enabled(),
+        f"thinking={await page.locator('.command-thinking').count()} "
+        f"aria-busy={await page.locator('.command-result').get_attribute('aria-busy')} "
+        f"inputEnabled={await page.locator('#command-input').is_enabled()}")
+    rec(s, "the held proposal carried a data_version that no longer matched the app's",
+        bool(wire.get("data_version")) and wire["data_version"] != "UNAVAILABLE", f"wire={wire}")
+    rec(s, "no uncaught page errors", not page.errors, "; ".join(page.errors))
+    await ctx.set_offline(False)
+    await ctx.close()
+
+
+# ---------------------------------------------------------------- offline during reservation
+
+UNCERTAIN = "is not confirmed"
+
+
+async def section_offline_reservation(browser, base):
+    """The network drops at the reservation POST: the server commits, the client
+    never sees the answer, and the citizen retries.
+
+    The request is fetched to the real backend first (so the server really commits)
+    and only then is the app taken offline and the response dropped, so the failure
+    the app sees is a genuine network failure at the moment of the POST rather than a
+    synthesised error body. The retry must replay the committed stay, not allocate a
+    second one, and no success may be shown before the server acknowledged.
+    """
+    s = "offline-reservation"
+    ctx, page = await new_page(browser)
+    posts = []
+    page.on("request", lambda r: posts.append(r.post_data) if r.method == "POST" and r.url.endswith("/api/v3/reservations") else None)
+    got = asyncio.Event()
+
+    async def commit_then_go_offline(route):
+        if got.is_set():
+            await route.continue_()
+            return
+        await route.fetch()            # the server receives and commits this stay
+        await ctx.set_offline(True)    # the network drops while the answer is in flight
+        got.set()
+        await route.abort("internetdisconnected")
+
+    await onboard(page, base)
+    await page.wait_for_selector("[data-select-facility]", timeout=10000)
+    # Scope the database proof to THIS browser session. A global `select count(*) from
+    # stays` is wrong the moment any other section books a stay concurrently.
+    sid = await page.evaluate("sessionStorage.getItem('sthira_session_id')")
+    mine = lambda: db_scalar(f"select count(*) from stays where session_id = '{sid}'") if sid else None
+    await page.route("**/api/v3/reservations", commit_then_go_offline)
+    await page.locator('[data-action="route"]').first.click()
+    await got.wait()
+    await page.wait_for_timeout(2500)
+
+    uncertain = await page.evaluate("[...document.querySelectorAll('p.command-error[role=alert]')].map((e) => e.textContent)")
+    button = (await page.locator('[data-action="route"]').first.inner_text()).strip()
+    class_now = await page.locator('[data-action="route"]').first.get_attribute("class")
+    stay_now = await page.evaluate("sessionStorage.getItem('sthira_stay_id')")
+    rec(s, "the server committed the stay but the client is told the outcome is unknown",
+        len(posts) == 1 and got.is_set() and any(UNCERTAIN in u for u in uncertain),
+        f"posts={len(posts)} uncertain={uncertain}")
+    rec(s, "no success is shown before the server acknowledged: no route-active, no tracker, no stay id",
+        "Route active" not in button and await page.locator(".journey-tracker").count() == 0
+        and stay_now is None and "is-success" not in (class_now or ""),
+        f"button={button!r} tracker={await page.locator('.journey-tracker').count()} stayId={stay_now!r} class={class_now!r}")
+    rec(s, "the pending request is kept so the retry can be byte-identical",
+        bool(await page.evaluate("JSON.parse(sessionStorage.getItem('pending_reservation') || 'null')?.payload?.idempotency_key")),
+        (await page.evaluate("sessionStorage.getItem('pending_reservation')") or "")[:120])
+    rec(s, "the dropped attempt really did commit exactly one stay, for this session",
+        bool(sid) and mine() == "1", f"session={sid} staysForSession={mine()}")
+
+    await ctx.set_offline(False)
+    await page.wait_for_selector('[data-action="route"]', timeout=20000)
+    await settle(page, 2500)
+    async with page.expect_response(lambda r: r.url.endswith("/api/v3/reservations"), timeout=20000) as info:
+        await page.locator('[data-action="route"]').first.click()
+    retry = await info.value
+    await page.wait_for_timeout(1500)
+    stay_id = ((await retry.json()).get("data") or {}).get("stay_id")
+    safe = stay_id if stay_id and stay_id.replace("-", "").isalnum() else None
+    fac = db_scalar(f"select facility_id from stays where stay_id = '{safe}'") if safe else None
+    stored = db_scalar(f"select stay_id from stays where session_id = '{sid}'") if sid else None
+    rec(s, "the retry is byte-identical, including the idempotency key",
+        len(posts) == 2 and posts[0] == posts[1] and bool(json.loads(posts[0] or "{}").get("idempotency_key")),
+        f"posts={len(posts)} identical={len(posts) == 2 and posts[0] == posts[1]}")
+    rec(s, "the retry replays the committed stay (200 not 201) and allocates no second stay for this session",
+        retry.status == 200 and fac == "FACDEMO-1" and safe is not None and safe == stored and mine() == "1",
+        f"status={retry.status} stay={stay_id} storedForSession={stored} staysForSession={mine()}")
+    rec(s, "success is shown only now, after the 200",
+        "Route active" in (await page.locator('[data-action="route"]').first.inner_text())
+        and await page.locator(".journey-tracker").count() == 1,
+        f"button={(await page.locator('[data-action=route]').first.inner_text()).strip()!r}")
     rec(s, "no uncaught page errors", not page.errors, "; ".join(page.errors))
     await ctx.close()
 
@@ -1123,6 +1452,9 @@ async def section_queued_voice(browser, base):
 SECTIONS = {
     "draft": (section_draft, []),
     "destination-identity": (section_destination_identity, []),
+    "hi-ml": (section_hi_ml, []),
+    "guidance-change": (section_guidance_change, []),
+    "offline-reservation": (section_offline_reservation, []),
     "modal": (section_modal, []),
     "queued-voice": (section_queued_voice, []),
     "core": (section_core, []),

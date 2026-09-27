@@ -38,6 +38,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -103,6 +104,15 @@ const (
 	exerciseZoneID       = "SZDEMO-1"
 	exerciseRedZoneID    = "RZDEMO-1"
 	exerciseFacilityID   = "FACDEMO-1"
+	// coordlessFacilityID is seeded only when
+	// STHIRA_EXERCISE_SEED_COORDLESS=1. It is a second reservable
+	// facility that carries no coordinates anywhere, so the browser
+	// acceptance run can prove guidance and reservation work end to end
+	// without ever holding a location.
+	coordlessFacilityID = "FACDEMO-2"
+	// coordlessMarker is the exact facilities[] entry in exerciseBody
+	// that the coordless facility is appended to.
+	coordlessMarker = `{"id":"FACDEMO-1","safe_zone_id":"SZDEMO-1"}`
 )
 
 // seedExercise inserts the demo package into a fresh task-owned database.
@@ -111,6 +121,19 @@ const (
 // existing reservations, stays, and inventory.
 func seedExercise(ctx context.Context, st *store.Store) error {
 	body := []byte(exerciseBody)
+	// STHIRA_EXERCISE_SEED_COORDLESS is process-env only, like
+	// STHIRA_EXERCISE_SEED: no header, body field or query parameter can
+	// set it. It exists so the browser acceptance evidence run has a
+	// second reservable facility to book, one the frontend can never
+	// give coordinates to.
+	coordless := os.Getenv("STHIRA_EXERCISE_SEED_COORDLESS") == "1"
+	if coordless {
+		if strings.Count(exerciseBody, coordlessMarker) != 1 {
+			return errors.New("exercise body: coordless facility marker not found")
+		}
+		body = []byte(strings.Replace(exerciseBody, coordlessMarker,
+			coordlessMarker+`,{"id":"`+coordlessFacilityID+`","safe_zone_id":"`+exerciseZoneID+`"}`, 1))
+	}
 	var pb struct {
 		AllocationPolicy struct {
 			Order []string `json:"order"`
@@ -200,6 +223,27 @@ func seedExercise(ctx context.Context, st *store.Store) error {
 				 VALUES ($1,$2::date,100,0,0,1,$3)`,
 				exerciseFacilityID, day, now); err != nil {
 				return err
+			}
+		}
+
+		// The coordless facility lives in the same OPEN safe zone, so
+		// allocation_policy.order needs no change; the package body
+		// already lists it and the zone row is shared.
+		if coordless {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO facilities (facility_id, package_id, safe_zone_id, timezone, version, updated_at)
+				 VALUES ($1,$2,$3,'Asia/Kolkata',1,$4)`,
+				coordlessFacilityID, exercisePackageID, exerciseZoneID, now); err != nil {
+				return err
+			}
+			for d := 0; d < 30; d++ {
+				day := now.AddDate(0, 0, d).Format("2006-01-02")
+				if _, err := tx.ExecContext(ctx,
+					`INSERT INTO facility_inventory (facility_id, service_date, capacity, held, occupied, version, updated_at)
+					 VALUES ($1,$2::date,100,0,0,1,$3)`,
+					coordlessFacilityID, day, now); err != nil {
+					return err
+				}
 			}
 		}
 
