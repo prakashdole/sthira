@@ -1599,6 +1599,7 @@ function render() {
             </div>
           ` : ''}
 
+          ${reservationError && !reservationConfirmOpen ? `<p class="command-error" role="alert">${escapeHtml(reservationError)}</p>` : ''}
           <button class="primary-action ${routeStarted ? 'is-success' : ''}" data-testid="start-route" type="button" data-action="route">
             ${icons.route}<span>${reservationPending ? 'Reserving...' : routeStarted ? t.routeActive : t.startRoute}</span>${icons.arrow}
           </button>
