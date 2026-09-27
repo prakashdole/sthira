@@ -1,6 +1,114 @@
 # Sthira autonomous execution playbook
 
-## CURRENT EXECUTOR HANDOFF — 2026-09-27 13:40, Worker 3 integrated-checkpoint closure
+## CURRENT EXECUTOR HANDOFF — 2026-09-27 15:00, integrated prototype checkpoint
+
+Read this section first. Every section below it is historical: keep it for evidence, but do not
+follow its "next steps". Branch `CLEAN`; local commits only, nothing pushed.
+
+### Integrated commits (after `6861d42`)
+
+| Commit | Content |
+|---|---|
+| `fc0128b` | Worker 1 frontend: proximity when coordinates are missing, `MY_LOCATION` layer, panel handling |
+| `aa97e69` | Stale voice work superseded; stays pinned; identical reservation retries; test hooks dev-only |
+| `996787e` | Test: prototype proposal `data_version` equals the guidance snapshot |
+| `b35a875` | ASR decoder MIME/codec and TTS WAV boundary tests (use the local ffmpeg) |
+| `edb8aad` | Eval: offline `corpus-check` and the synthetic v2 corpus (hi-IN downgraded to `DRAFT_REQUIRES_NATIVE_REVIEW`) |
+| `41a0278` | A safe-zone target resolves only when it identifies exactly one facility |
+| `e066056` | Geolocation watch starts after reservation; the onboarding language switch also supersedes in-flight work |
+| `5d57c9b` | Middle worker: strict wire struct decodes `SET_LAYER_VISIBILITY` `layer`/`visible` |
+| docs commit | This handoff, `TODO.md`, the browser evidence, and presenter-guide/slide corrections |
+
+### Corrections completed
+
+**Language changes, cancellation, hidden page, guidance changes**
+- One helper, `supersedeInFlight()`, runs on the language buttons, the onboarding language choice, a hidden document, and a guidance version change. It:
+  - bumps the request ID;
+  - drops the queued map proposal;
+  - clears `commandPending`;
+  - invalidates audio.
+- `sendVoiceOrText` re-checks the request after the audio await. The `resolvePlace` fallback is guarded by the request ID.
+- Guidance refreshes use a generation token, so a slower, older refresh cannot overwrite a newer one.
+
+**Stale proposals**
+- `SHOW_CHOICES` and `OPEN_PANEL` apply only when the proposal's `data_version` equals the displayed guidance.
+- Camera and layer actions still apply.
+- A current `SET_LANGUAGE` still applies.
+
+**Reservations**
+- The exact payload is stored with its idempotency key (`sessionStorage pending_reservation`).
+- Uncertain outcomes keep the pair and retry byte-identically: network loss, 5xx, or an in-progress key.
+- Definitive rejections clear it.
+- Start Route never allocates again once a stay exists.
+
+**Stay identity and arrival**
+- The accepted facility is stored as `sthira_stay_facility_id`, which is also restored by the server reconcile.
+- Neither user selection nor a guidance refresh can rebind the destination while a stay is accepted or pending.
+- Arrival uses the accepted stay and shows success only after the server acknowledges it.
+- Previously, a reservation set `TRACKING` without starting geolocation, so the "near destination" prompt could never appear.
+
+**Error messages:** server messages are now read from `errors[0].message`; the old code read the wrong field.
+
+**Test hooks:** only on the dev server with `?sthira-test-hooks=1` (`import.meta.env.DEV`). There are 0 matches in `dist/`.
+
+### Checks executed (on the committed revisions)
+
+- **Frontend:** `npm test` 89/89 PASS; `npm run build` PASS.
+- **DB/HTTP integration:** `go test -tags integration ./internal/httpserver/ -count=1` on a fresh disposable DB. 238 PASS, 0 FAIL, 0 SKIP, at `41a0278`; no backend handler changed afterwards. `TestProto*` re-run with the new `data_version` check: PASS.
+- **Unit tests:**
+  - `asrworker` and `ttsworker` decoder/WAV tests: PASS, with the local ffmpeg.
+  - `middleworker`: PASS.
+  - Eval: PASS, 4 SKIPs by design.
+  - `corpus-check`: v1 15 cases and v2 13 cases OK.
+- **Mock plumbing (curl via the Vite proxy):** guidance and voice both at `PKGDEMO-1:1`. Reserve 201; identical retry 200 with the same stay; changed payload 409; GET `RESERVED FACDEMO-1`; ARRIVE 200; unknown stay 404.
+- **Browser, headless Chromium (pre-installed Playwright), real UI, `e066056`:**
+  - 9/9 PASS and outage/recovery 2/2 PASS.
+  - Against `fc0128b`, the same script fails 4 checks: hooks, spinner, duplicate reservation, arrival.
+  - Evidence: `plan/evidence/prototype-browser-verification.md`.
+- All disposable DBs and owned processes were removed.
+
+### Status
+
+| Area | Status |
+|---|---|
+| Local engineering checkpoint | PASS for the items above |
+| Browser acceptance | PARTIAL: headless Chromium PASS. Safari, real microphone and audible playback NOT_RUN. Safari WebDriver answers "enable Allow remote automation" |
+| Real-model acceptance | NOT_RUN |
+| Human speech/language review | NOT_RUN |
+| P8/P9, production readiness | Not claimed |
+
+### Remaining local defects (known, not blocking the mock demo)
+
+- During a worker outage, a typed command falls back to place lookup and shows `Location "…" not found` instead of a clear "assistant unavailable" message.
+- Mock `destination-choice` returned no audio via the transcript path in the curl check. Do not promise audio in the mock demo.
+
+### Worker deliverables NOT integrated (uncommitted in the working tree; left intact)
+
+- `frontend/v2/src/styles.css` (Worker 1 responsive CSS): still being edited. It needs a browser layout check before commit.
+- Second revisions of `backend/internal/{asrworker,ttsworker}/audio_mime_test.go` and of `backend/internal/middleworker/eval/{main.go,main_test.go,corpus.go,corpus/synthetic_v2.jsonl}`: still being edited after the integrated first versions. Check that the v2 corpus still keeps hi-IN at `DRAFT_REQUIRES_NATIVE_REVIEW`.
+- `backend/internal/httpserver/citizen_ownership_regression_test.go`: new and unreviewed.
+
+### External decisions outstanding
+
+- Authorize a bounded paid GPU window.
+- Enable Safari "Allow Remote Automation", or run the manual Safari/phone checks in the browser evidence file.
+- The O01/O05/O06/O07/O14 authority gates (`plan/open-decisions.md`).
+
+### Next action
+
+The mock plumbing can be demonstrated now: `sthira-exercise` + `mock-workers -scenario destination-choice` + Vite.
+
+The local checkpoint is ready for the owner to authorize a bounded real-model window. Run it using
+`plan/evidence/real-inference-launch-check.md` §7 exactly:
+- preflight;
+- vLLM `/v1/models` must list `sarvamai/sarvam-30b`;
+- ASR 8001, middle worker 8002 and TTS 8003 each on their own;
+- the full pipeline;
+- the browser microphone.
+
+Budget: 100-minute hard stop; stop the instance afterwards. No AWS action is taken until the owner authorizes it.
+
+## PREVIOUS HANDOFF — 2026-09-27 13:40, Worker 3 integrated-checkpoint closure (historical)
 
 **Read first; supersedes the 12:50 section below where they conflict.** Branch
 `CLEAN`, reviewed base `66cd6b2`. This session verified the corrected
@@ -389,7 +497,7 @@ should confirm this does not double-apply panel/language side effects.
   commit IDs recorded in the next update to this section once staged (see
   the commit-coordination note directly above the still-open items below).
 
-## CURRENT EXECUTOR HANDOFF — 2026-09-25, after interrupted live inference
+## HISTORICAL HANDOFF — 2026-09-25, after interrupted live inference
 
 **Read this first. This checkpoint overrides older cloud permissions, DONE labels and launch instructions below.** Goal: finish the minimum local corrections needed for an honest Hindi prototype, then prepare a bounded real-model/browser test. Do not restart the architecture, production program, mobile work or later phases.
 
