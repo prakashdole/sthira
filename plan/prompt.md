@@ -1,5 +1,14 @@
 # Sthira autonomous execution playbook
 
+## CURRENT EXECUTOR HANDOFF — 2026-09-27 23:35 (read first)
+
+Integrated (local, CLEAN): `ee0b83a` readiness reports dead workers · `debc39e` worker lifecycle tests (+9 env-gated
+`TestDefect_*` in middleworker, all real: `LC_DEFECT_REPRO=1`) · `1271257` coordless seed + browser sections
+destination-identity/hi-ml/guidance-change/offline-reservation · `3c28504` dialog/error i18n (HI/ML drafts) ·
+`b15cc4a` `tools/demo/demo.sh`. Checked by the coordinator: build/vet, npm 92/92, English strings byte-identical,
+readiness test fails with the fix reverted, integrated harness (8 sections via demo.sh) 77/0, destination-identity
+fails 3 checks on a coordinate-fallback copy. Next: fix the demo-relevant middle-worker defects before the paid window.
+
 ## CURRENT EXECUTOR HANDOFF — 2026-09-27 21:05, lane-1 integrated (read first)
 
 `CLEAN` now contains lane-1 (`b595926` = 1d7b963 minus its duplicate draft code and dead cancel
