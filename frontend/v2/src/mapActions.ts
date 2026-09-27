@@ -181,14 +181,14 @@ export const layerMap: Record<Layer, string[]> = {
     'safe-zones',
   ],
   ROUTES: ['route-casing', 'approved-route', 'route-motion', 'routes'],
-  MY_LOCATION: ['device-pulse', 'my-location'],
+  MY_LOCATION: ['device-pulse', 'device-point', 'my-location'],
 };
 
 export function executeMapActions(
   map: Map,
   response: unknown,
   reducedMotion: boolean,
-  onPanel: (panel: Panel, targetId?: string | null) => void,
+  onPanel?: (panel: Panel, targetId?: string | null) => void,
   onLanguage?: (language: string) => void,
   onClarify?: (candidates: string[]) => void,
   onLayerVisibility?: (layer: Layer, visible: boolean) => void,
@@ -219,6 +219,17 @@ export function executeMapActions(
           }
         } else {
           map.setLayoutProperty(id, 'visibility', action.visible ? 'visible' : 'none');
+        }
+      }
+      if (action.layer === 'MY_LOCATION' && typeof (map as any).setFilter === 'function') {
+        const hasPlacePoints = typeof (map as any).getLayer === 'function' ? !!(map as any).getLayer('place-points') : true;
+        if (hasPlacePoints) {
+          const deviceFilter = action.visible
+            ? ['!=', ['get', 'kind'], 'hospital']
+            : ['all', ['!=', ['get', 'kind'], 'hospital'], ['!=', ['get', 'kind'], 'device']];
+          try {
+            map.setFilter('place-points', deviceFilter as any);
+          } catch {}
         }
       }
       onLayerVisibility?.(action.layer, action.visible);
@@ -262,7 +273,7 @@ export function executeMapActions(
       map.easeTo({ center: [lng + dx, lat + dy], duration });
     }
     if (action.type === 'OPEN_PANEL') {
-      onPanel(action.panel as Panel, action.target_id);
+      onPanel?.(action.panel as Panel, action.target_id);
     }
     if (action.type === 'SET_LANGUAGE') {
       onLanguage?.(action.language);

@@ -25,8 +25,8 @@ export interface PositionReading {
 export interface DestinationTarget {
   id: string;
   name: string;
-  longitude: number;
-  latitude: number;
+  longitude?: number;
+  latitude?: number;
 }
 
 export interface JourneyOptions {
@@ -46,7 +46,7 @@ export interface ProximityEvaluation {
   isNear: boolean;
   isStale: boolean;
   isAccurateEnough: boolean;
-  reason: 'VERIFIED_NEAR' | 'OUTSIDE_RANGE' | 'LOW_ACCURACY' | 'STALE' | 'INVALID_COORDINATES';
+  reason: 'VERIFIED_NEAR' | 'OUTSIDE_RANGE' | 'LOW_ACCURACY' | 'STALE' | 'INVALID_COORDINATES' | 'UNAVAILABLE_COORDINATES';
 }
 
 /**
@@ -78,13 +78,46 @@ export function computeDistanceMeters(lon1: number, lat1: number, lon2: number, 
 
 /**
  * Evaluates citizen proximity to destination taking into account sensor uncertainty and staleness.
+ * Missing or undefined destination coordinates produce UNAVAILABLE_COORDINATES (unavailable proximity).
  */
 export function evaluateProximity(
-  pos: PositionReading,
-  dest: DestinationTarget,
+  pos: PositionReading | null | undefined,
+  dest: DestinationTarget | null | undefined,
   options: JourneyOptions = DEFAULT_JOURNEY_OPTIONS,
   currentTimeMs: number = Date.now()
 ): ProximityEvaluation {
+  if (
+    !dest ||
+    typeof dest.longitude !== 'number' ||
+    typeof dest.latitude !== 'number' ||
+    !Number.isFinite(dest.longitude) ||
+    !Number.isFinite(dest.latitude)
+  ) {
+    return {
+      distanceMeters: Number.NaN,
+      isNear: false,
+      isStale: false,
+      isAccurateEnough: false,
+      reason: 'UNAVAILABLE_COORDINATES',
+    };
+  }
+
+  if (
+    !pos ||
+    typeof pos.longitude !== 'number' ||
+    typeof pos.latitude !== 'number' ||
+    !Number.isFinite(pos.longitude) ||
+    !Number.isFinite(pos.latitude)
+  ) {
+    return {
+      distanceMeters: Number.NaN,
+      isNear: false,
+      isStale: false,
+      isAccurateEnough: false,
+      reason: 'INVALID_COORDINATES',
+    };
+  }
+
   const distance = computeDistanceMeters(pos.longitude, pos.latitude, dest.longitude, dest.latitude);
 
   if (Number.isNaN(distance)) {
@@ -153,7 +186,11 @@ export function transitionOnPosition(
 
   if (currentState === 'LOCATION_UNAVAILABLE') {
     // If we recovered a valid reading
-    if (evaluation.reason !== 'INVALID_COORDINATES' && !evaluation.isStale) {
+    if (
+      evaluation.reason !== 'INVALID_COORDINATES' &&
+      evaluation.reason !== 'UNAVAILABLE_COORDINATES' &&
+      !evaluation.isStale
+    ) {
       return evaluation.isNear ? 'NEAR_DESTINATION' : 'TRACKING';
     }
     return currentState;
@@ -167,9 +204,17 @@ export function transitionOnPosition(
   }
 
   if (currentState === 'NEAR_DESTINATION') {
-    // If the citizen moved back away, transition back to tracking
-    if (!evaluation.isNear && evaluation.isAccurateEnough && !evaluation.isStale) {
-      return 'TRACKING';
+    // If citizen moved away, or coordinates became unavailable, transition back to tracking
+    if (!evaluation.isNear) {
+      if (evaluation.isAccurateEnough && !evaluation.isStale) {
+        return 'TRACKING';
+      }
+      if (
+        evaluation.reason === 'UNAVAILABLE_COORDINATES' ||
+        evaluation.reason === 'INVALID_COORDINATES'
+      ) {
+        return 'TRACKING';
+      }
     }
     return 'NEAR_DESTINATION';
   }
@@ -435,14 +480,16 @@ export function resolveChoiceAgainstGuidance(
   targetId: string,
   verifiedDestinations: ResolvedDestinationChoice[]
 ): ChoiceResolutionResult {
-  const match = verifiedDestinations.find((d) => d.facility_id === targetId && !d.is_illustrative);
+  const match = verifiedDestinations.find(
+    (d) => (d.facility_id === targetId || d.safe_zone_id === targetId) && !d.is_illustrative
+  );
   if (match) {
     return { resolved: true, destination: match };
   }
   return {
     resolved: false,
     destination: null,
-    errorMessage: `Facility "${targetId}" is not verified in current guidance snapshot. Please refresh guidance.`,
+    errorMessage: `Facility or safe zone "${targetId}" is not verified in current guidance snapshot. Please refresh guidance.`,
   };
 }
 

@@ -488,6 +488,11 @@ test('resolveChoiceAgainstGuidance: resolves against verified destinations and r
   assert.equal(match1.destination?.facility_id, 'FACDEMO-1');
   assert.equal(match1.destination?.safe_zone_id, 'SZDEMO-1');
 
+  // 1b. Matches verified safe_zone_id
+  const matchSafeZone = resolveChoiceAgainstGuidance('SZDEMO-2', verifiedList);
+  assert.equal(matchSafeZone.resolved, true);
+  assert.equal(matchSafeZone.destination?.facility_id, 'FACDEMO-2');
+
   // 2. Unresolved facility is rejected and does not fabricate safe_zone_id or route
   const unverified = resolveChoiceAgainstGuidance('FAC-UNKNOWN-99', verifiedList);
   assert.equal(unverified.resolved, false);
@@ -499,4 +504,60 @@ test('resolveChoiceAgainstGuidance: resolves against verified destinations and r
   assert.equal(previewMatch.resolved, false);
   assert.equal(previewMatch.destination, null);
 });
+
+test('evaluateProximity: missing or undefined destination coordinates produce UNAVAILABLE_COORDINATES without throwing or fabricating distance', () => {
+  const now = Date.now();
+  const pos: PositionReading = {
+    longitude: 76.1053,
+    latitude: 11.5702,
+    accuracyMeters: 10,
+    timestamp: now,
+  };
+
+  // Destination with undefined coordinates (e.g. alternate facility without geo bounds)
+  const destNoCoords: DestinationTarget = {
+    id: 'FACDEMO-2',
+    name: 'Alternate Facility',
+    longitude: undefined,
+    latitude: undefined,
+  };
+
+  const evalNoCoords = evaluateProximity(pos, destNoCoords, DEFAULT_JOURNEY_OPTIONS, now);
+  assert.equal(evalNoCoords.reason, 'UNAVAILABLE_COORDINATES');
+  assert.equal(evalNoCoords.isNear, false);
+  assert.ok(Number.isNaN(evalNoCoords.distanceMeters));
+
+  // Destination object null or undefined
+  const evalNullDest = evaluateProximity(pos, null, DEFAULT_JOURNEY_OPTIONS, now);
+  assert.equal(evalNullDest.reason, 'UNAVAILABLE_COORDINATES');
+  assert.equal(evalNullDest.isNear, false);
+  assert.ok(Number.isNaN(evalNullDest.distanceMeters));
+
+  // Position null or invalid
+  const evalNullPos = evaluateProximity(null, DEMO_SHELTER, DEFAULT_JOURNEY_OPTIONS, now);
+  assert.equal(evalNullPos.reason, 'INVALID_COORDINATES');
+  assert.equal(evalNullPos.isNear, false);
+  assert.ok(Number.isNaN(evalNullPos.distanceMeters));
+});
+
+test('transitionOnPosition: transitions NEAR_DESTINATION back to TRACKING when coordinates become unavailable', () => {
+  const fromNearToTracking = transitionOnPosition('NEAR_DESTINATION', {
+    distanceMeters: Number.NaN,
+    isNear: false,
+    isStale: false,
+    isAccurateEnough: false,
+    reason: 'UNAVAILABLE_COORDINATES',
+  });
+  assert.equal(fromNearToTracking, 'TRACKING', 'Must transition away from NEAR_DESTINATION when coordinates unavailable');
+
+  const fromNearOnInvalid = transitionOnPosition('NEAR_DESTINATION', {
+    distanceMeters: Number.NaN,
+    isNear: false,
+    isStale: false,
+    isAccurateEnough: false,
+    reason: 'INVALID_COORDINATES',
+  });
+  assert.equal(fromNearOnInvalid, 'TRACKING');
+});
+
 

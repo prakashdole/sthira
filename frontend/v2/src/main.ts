@@ -168,10 +168,13 @@ let activeStayId: string | null = sessionStorage.getItem('sthira_stay_id');
 
 let routeStarted = false;
 let routesVisible = true;
+let myLocationVisible = true;
 let directionsOpen = false;
 let detailsOpen = false;
 let assistanceOpen = false;
 let arrivalOpen = false;
+let reservationConfirmOpen = false;
+let destinationDetailsOpen = false;
 let audioOpen = false;
 let islOpen = false;
 
@@ -284,28 +287,46 @@ function requestLocation() {
   );
 }
 
-function getDestinationTarget(): DestinationTarget {
-  const coords = (selectedDestination && selectedDestination.coordinates) ? selectedDestination.coordinates : mapData.shelter;
+function getDestinationTarget(): DestinationTarget | null {
+  if (!selectedDestination) return null;
   return {
-    id: selectedDestination ? selectedDestination.facility_id : EXERCISE_CONFIG.facility_id,
-    name: selectedDestination ? selectedDestination.facility_name : 'Safe Shelter',
-    longitude: coords[0],
-    latitude: coords[1],
+    id: selectedDestination.facility_id,
+    name: selectedDestination.facility_name,
+    longitude: selectedDestination.coordinates?.[0],
+    latitude: selectedDestination.coordinates?.[1],
   };
+}
+
+function onDestinationSelectionChanged(newDest: DestinationChoice | null) {
+  selectedDestination = newDest;
+  lastProximityEval = null;
+  const target = getDestinationTarget();
+  if (target && currentPosition) {
+    const evalResult = evaluateProximity(currentPosition, target, DEFAULT_JOURNEY_OPTIONS);
+    lastProximityEval = evalResult;
+    journeyState = transitionOnPosition(journeyState, evalResult);
+  } else if (journeyState === 'NEAR_DESTINATION') {
+    journeyState = 'TRACKING';
+  }
+  render();
 }
 
 function destinationDistanceText(d: DestinationChoice | null): { kmText: string; durationText: string } {
   const t = words[language];
   if (!d) return { kmText: '—', durationText: '—' };
-  if (d.is_illustrative) return { kmText: t.distance || '2.8 km', durationText: t.duration || '35 min' };
   if (d.coordinates && currentPosition) {
     const distM = computeDistanceMeters(currentPosition.longitude, currentPosition.latitude, d.coordinates[0], d.coordinates[1]);
-    const km = (distM / 1000).toFixed(1);
-    const mins = Math.max(1, Math.round(distM / 80));
-    return { kmText: `${km} km`, durationText: `${mins} min` };
+    if (!Number.isNaN(distM)) {
+      const km = (distM / 1000).toFixed(1);
+      const mins = Math.max(1, Math.round(distM / 80));
+      return { kmText: `${km} km`, durationText: `${mins} min` };
+    }
   }
-  if (typeof d.distance_km === 'number') {
+  if (typeof d.distance_km === 'number' && Number.isFinite(d.distance_km)) {
     return { kmText: `${d.distance_km} km`, durationText: typeof d.duration_minutes === 'number' ? `${d.duration_minutes} min` : '—' };
+  }
+  if (d.is_illustrative && d.coordinates) {
+    return { kmText: t.distance || '2.8 km', durationText: t.duration || '35 min' };
   }
   return { kmText: '—', durationText: '—' };
 }
@@ -365,6 +386,9 @@ function journeyTrackingDetail(
   }
   if (!pos) {
     return state === 'NOT_STARTED' ? 'GPS idle' : 'Waiting for GPS fix...';
+  }
+  if (evalResult?.reason === 'UNAVAILABLE_COORDINATES' || evalResult?.reason === 'INVALID_COORDINATES') {
+    return 'Destination coordinates unavailable';
   }
   if (evalResult && evalResult.isNear) {
     return `${evalResult.distanceMeters}m from shelter (±${Math.round(pos.accuracyMeters)}m)`;
@@ -513,9 +537,8 @@ async function queryGuidanceDestinations(): Promise<void> {
         audioGuard.invalidate();
         lastApprovedAudio = undefined;
         availableDestinations = [];
-        selectedDestination = null;
         isIllustrativePreview = false;
-        render();
+        onDestinationSelectionChanged(null);
         return;
       }
 
@@ -544,15 +567,16 @@ async function queryGuidanceDestinations(): Promise<void> {
         const stillSupported = prevSelectedId
           ? availableDestinations.find((d) => d.facility_id === prevSelectedId)
           : null;
-        selectedDestination = stillSupported || availableDestinations[0]!;
+        const nextDest = stillSupported || availableDestinations[0] || null;
 
         isIllustrativePreview = false;
         guidanceStatus = 'LOADED';
+        onDestinationSelectionChanged(nextDest);
       } else {
         availableDestinations = [];
-        selectedDestination = null;
         isIllustrativePreview = false;
         guidanceStatus = 'EMPTY';
+        onDestinationSelectionChanged(null);
       }
     } else {
       isIllustrativePreview = false;
@@ -563,8 +587,8 @@ async function queryGuidanceDestinations(): Promise<void> {
       audioGuard.invalidate();
       lastApprovedAudio = undefined;
       availableDestinations = [];
-      selectedDestination = null;
       guidanceErrorMessage = `Authority returned HTTP ${res.status}. Guidance unavailable.`;
+      onDestinationSelectionChanged(null);
     }
   } catch {
     isIllustrativePreview = false;
@@ -575,8 +599,8 @@ async function queryGuidanceDestinations(): Promise<void> {
     audioGuard.invalidate();
     lastApprovedAudio = undefined;
     availableDestinations = [];
-    selectedDestination = null;
     guidanceErrorMessage = 'Network error: could not connect to guidance service.';
+    onDestinationSelectionChanged(null);
   }
   render();
 }
@@ -1033,17 +1057,79 @@ function applyDestinationChoices(targetIds: string[]) {
 
   const resolution = resolveChoiceAgainstGuidance(firstId, availableDestinations);
   if (resolution.resolved && resolution.destination) {
-    selectedDestination = resolution.destination;
-    if (resolution.destination.coordinates) {
-      mapData.shelter = resolution.destination.coordinates;
-    }
+    onDestinationSelectionChanged(resolution.destination);
   } else {
     // Unresolved: do not invent safe_zone_id or demo route, do not make reservable
-    selectedDestination = null;
+    onDestinationSelectionChanged(null);
     guidanceStatus = 'ERROR';
-    guidanceErrorMessage = resolution.errorMessage || `Facility "${firstId}" is not verified in current guidance snapshot. Please refresh guidance.`;
-    commandResponse = `Facility ${firstId} cannot be confirmed from the active guidance snapshot.`;
+    guidanceErrorMessage = resolution.errorMessage || `Facility or safe zone "${firstId}" is not verified in current guidance snapshot. Please refresh guidance.`;
+    commandResponse = `Facility or safe zone ${firstId} cannot be confirmed from the active guidance snapshot.`;
+    commandError = commandResponse;
+    render();
   }
+}
+
+function handleOpenPanelAction(panel: Panel, targetId?: string | null): boolean {
+  if (targetId) {
+    const resolution = resolveChoiceAgainstGuidance(targetId, availableDestinations);
+    if (!resolution.resolved || !resolution.destination) {
+      commandResponse = resolution.errorMessage || `Facility or safe zone "${targetId}" is not verified in current guidance snapshot.`;
+      commandError = commandResponse;
+      render();
+      return false;
+    }
+    onDestinationSelectionChanged(resolution.destination);
+  }
+
+  switch (panel) {
+    case 'ROUTE_GUIDANCE':
+    case 'ROUTE_STEPS':
+      directionsOpen = true;
+      commandResponse = 'Route guidance opened.';
+      break;
+    case 'ALERT_DETAILS':
+    case 'DEMO_INFORMATION':
+      detailsOpen = true;
+      commandResponse = 'Alert and source details opened.';
+      break;
+    case 'EMERGENCY_CALL_CONFIRMATION':
+      assistanceOpen = true;
+      commandResponse = 'Emergency assistance panel opened. Explicit citizen action required to call 112.';
+      break;
+    case 'ARRIVAL_CONFIRMATION':
+      arrivalOpen = true;
+      commandResponse = 'Arrival confirmation opened. Citizen confirmation required.';
+      break;
+    case 'RESERVATION_CONFIRMATION':
+      if (!selectedDestination || isIllustrativePreview || selectedDestination.is_illustrative) {
+        commandResponse = 'Cannot reserve route for illustrative preview. Waiting for authorized operational guidance.';
+        commandError = commandResponse;
+        render();
+        return false;
+      }
+      reservationConfirmOpen = true;
+      commandResponse = `Reservation confirmation opened for ${selectedDestination.facility_name}.`;
+      break;
+    case 'DESTINATION_PREVIEW':
+    case 'SAFE_ZONE_DETAILS':
+    case 'CAPACITY_DETAILS':
+      if (!selectedDestination) {
+        commandResponse = 'No destination currently selected.';
+        commandError = commandResponse;
+        render();
+        return false;
+      }
+      destinationDetailsOpen = true;
+      commandResponse = `Details opened for ${selectedDestination.facility_name}.`;
+      break;
+    default:
+      commandResponse = `Panel "${panel}" is not supported.`;
+      commandError = commandResponse;
+      render();
+      return false;
+  }
+  render();
+  return true;
 }
 
 function dispatchVoiceProposal(proposal: VoiceProposal) {
@@ -1056,12 +1142,10 @@ function dispatchVoiceProposal(proposal: VoiceProposal) {
       if (action.layer === 'RED_ZONES') redZonesVisible = action.visible;
       if (action.layer === 'SAFE_ZONES') relocationZonesVisible = action.visible;
       if (action.layer === 'ROUTES') routesVisible = action.visible;
+      if (action.layer === 'MY_LOCATION') myLocationVisible = action.visible;
     }
     if (action.type === 'OPEN_PANEL') {
-      if (action.panel === 'ROUTE_GUIDANCE' || action.panel === 'ROUTE_STEPS') directionsOpen = true;
-      if (action.panel === 'ALERT_DETAILS') detailsOpen = true;
-      if (action.panel === 'EMERGENCY_CALL_CONFIRMATION') assistanceOpen = true;
-      if (action.panel === 'ARRIVAL_CONFIRMATION') arrivalOpen = true;
+      handleOpenPanelAction(action.panel, action.target_id);
     }
     if (action.type === 'SET_LANGUAGE') {
       if (action.language === 'ml-IN') language = 'ML';
@@ -1398,6 +1482,8 @@ function render() {
       ${arrivalOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.arrivalCheck}</span><h2>${t.arrivedSafely}</h2></div><button class="icon-button" data-action="arrival-close" aria-label="${t.closeArrival}">${icons.close}</button></div>${arrivalSuccess ? `<div class="success-message"><strong>${t.arrivalRecorded}</strong>${arrivalRecordedAt ? `<p><small>Recorded at: ${arrivalRecordedAt}</small></p>` : ''}</div>` : `<p>${t.confirmParty}</p><div class="stepper"><button type="button" data-action="party-minus" aria-label="${t.decreaseParty}">-</button><strong>${partySize} ${partySize === 1 ? t.person : t.people}</strong><button type="button" data-action="party-plus" aria-label="${t.increaseParty}">+</button></div>${arrivalError ? `<p class="command-error" role="alert" style="margin-block: 0.5rem;">${escapeHtml(arrivalError)}</p>` : ''}<div class="help-actions" style="margin-top: 1rem;"><button class="primary-action is-success" type="button" data-action="arrival-yes" ${arrivalPending ? 'disabled' : ''}>${arrivalPending ? 'Confirming...' : t.confirmArrivalPrompt}</button><button class="secondary-action" type="button" data-action="arrival-no">${t.callHelp}</button></div>`}</dialog>` : ''}
       ${audioOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.listen}</span><h2>${lastApprovedAudio && isAudioValidForReplayCheck(lastApprovedAudio) ? t.listen : t.approvedAudioUnavailable}</h2></div><button class="icon-button" data-action="audio-close" aria-label="${t.close}">${icons.close}</button></div>${lastApprovedAudio && isAudioValidForReplayCheck(lastApprovedAudio) ? `<p>${t.summary}</p><div class="help-actions"><button class="primary-action" type="button" data-action="audio-play-modal">${icons.volume} ${t.tapToPlay}</button></div>` : `<p>${t.approvedAudioUnavailable}</p><p>${t.summary}</p>`}</dialog>` : ''}
       ${islOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.isl}</span><h2>${t.islTitle}</h2></div><button class="icon-button" data-action="isl-close" aria-label="${t.close}">${icons.close}</button></div><p>${t.islPending}</p><p>${t.summary}</p></dialog>` : ''}
+      ${reservationConfirmOpen ? `<dialog class="modal" open aria-labelledby="reservation-confirm-title"><div class="sheet-head"><div><span>${t.startRoute}</span><h2 id="reservation-confirm-title">Confirm Route Reservation</h2></div><button class="icon-button" data-action="reservation-confirm-close" aria-label="${t.close}">${icons.close}</button></div><p>Please confirm route reservation for <strong>${selectedDestination ? escapeHtml(selectedDestination.facility_name) : 'selected facility'}</strong>.</p><dl><div><dt>Facility ID</dt><dd>${selectedDestination ? escapeHtml(selectedDestination.facility_id) : '—'}</dd></div><div><dt>Party Size</dt><dd>${partySize} ${partySize === 1 ? t.person : t.people}</dd></div><div><dt>Route Status</dt><dd>${selectedDestination?.route_verified ? 'Verified Approved Route' : 'Illustrative / Pending'}</dd></div></dl>${reservationError ? `<p class="command-error" role="alert" style="margin-block: 0.5rem;">${escapeHtml(reservationError)}</p>` : ''}<div class="help-actions" style="margin-top: 1rem;"><button class="primary-action is-success" type="button" data-action="reservation-confirm-submit" ${reservationPending ? 'disabled' : ''}>${reservationPending ? 'Reserving...' : t.startRoute}</button><button class="secondary-action" type="button" data-action="reservation-confirm-close">${t.close}</button></div></dialog>` : ''}
+      ${destinationDetailsOpen ? `<dialog class="modal" open aria-labelledby="destination-details-title"><div class="sheet-head"><div><span>${t.destinationLabel}</span><h2 id="destination-details-title">${selectedDestination ? escapeHtml(selectedDestination.facility_name) : 'Safe Zone Details'}</h2></div><button class="icon-button" data-action="destination-details-close" aria-label="${t.close}">${icons.close}</button></div>${selectedDestination ? `<dl><div><dt>Facility ID</dt><dd>${escapeHtml(selectedDestination.facility_id)}</dd></div><div><dt>Safe Zone ID</dt><dd>${escapeHtml(selectedDestination.safe_zone_id)}</dd></div><div><dt>Capacity</dt><dd>${destinationCapacityText()}</dd></div><div><dt>Distance</dt><dd>${destinationDistanceText(selectedDestination).kmText} (${destinationDistanceText(selectedDestination).durationText})</dd></div><div><dt>Coordinates</dt><dd>${selectedDestination.coordinates ? `${selectedDestination.coordinates[0].toFixed(5)}, ${selectedDestination.coordinates[1].toFixed(5)}` : 'Unavailable'}</dd></div><div><dt>Route Status</dt><dd>${selectedDestination.route_verified ? 'Verified' : selectedDestination.is_illustrative ? 'Illustrative' : 'Unverified'}</dd></div></dl>` : `<p>No destination information available.</p>`}<div class="help-actions" style="margin-top: 1rem;"><button class="primary-action" type="button" data-action="destination-details-close">${t.close}</button></div></dialog>` : ''}
       <div class="toast" role="status" aria-live="polite" hidden></div>
     </div>`;
 
@@ -1441,6 +1527,10 @@ function updateMapDynamicProperties() {
   if (map.getLayer('route-motion')) {
     map.setPaintProperty('route-motion', 'line-opacity', (routesVisible && routeStarted) ? 0.9 : 0);
   }
+  const locVis = myLocationVisible ? 'visible' : 'none';
+  ['device-pulse', 'device-point'].forEach((id) => {
+    if (map?.getLayer(id)) map.setLayoutProperty(id, 'visibility', locVis);
+  });
   const t = words[language];
   const hazardSource = map.getSource('hazard') as any;
   if (hazardSource && typeof hazardSource.setData === 'function') {
@@ -1529,8 +1619,9 @@ async function initMap(renderVersion: number) {
         { id: 'route-motion', type: 'line', source: 'route', layout: { visibility: routesVisible ? 'visible' : 'none' }, paint: { 'line-color': mapColor('--map-color-paper'), 'line-width': 2, 'line-opacity': (routesVisible && routeStarted) ? 0.9 : 0, 'line-dasharray': [0.2, 2.4, 1.6] } },
         { id: 'shelter-pulse', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'shelter'], paint: { 'circle-radius': 15, 'circle-color': mapColor('--map-color-success'), 'circle-opacity': 0.24 } },
         { id: 'hospital-pulse', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'hospital'], layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'circle-radius': 16, 'circle-color': mapColor('--map-color-paper'), 'circle-opacity': 0.28 } },
-        { id: 'device-pulse', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'device'], paint: { 'circle-radius': 17, 'circle-color': mapColor('--map-color-accent'), 'circle-opacity': 0 } },
-        { id: 'place-points', type: 'circle', source: 'places', filter: ['!=', ['get', 'kind'], 'hospital'], paint: { 'circle-radius': ['case', ['==', ['get', 'kind'], 'device'], 7, 8], 'circle-color': ['case', ['==', ['get', 'kind'], 'device'], mapColor('--map-color-paper'), mapColor('--map-color-accent')], 'circle-stroke-color': ['case', ['==', ['get', 'kind'], 'device'], mapColor('--map-color-accent'), mapColor('--map-color-paper')], 'circle-stroke-width': 3 } },
+        { id: 'device-pulse', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'device'], layout: { visibility: myLocationVisible ? 'visible' : 'none' }, paint: { 'circle-radius': 17, 'circle-color': mapColor('--map-color-accent'), 'circle-opacity': 0 } },
+        { id: 'device-point', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'device'], layout: { visibility: myLocationVisible ? 'visible' : 'none' }, paint: { 'circle-radius': 7, 'circle-color': mapColor('--map-color-paper'), 'circle-stroke-color': mapColor('--map-color-accent'), 'circle-stroke-width': 3 } },
+        { id: 'place-points', type: 'circle', source: 'places', filter: ['all', ['!=', ['get', 'kind'], 'hospital'], ['!=', ['get', 'kind'], 'device']], paint: { 'circle-radius': 8, 'circle-color': mapColor('--map-color-accent'), 'circle-stroke-color': mapColor('--map-color-paper'), 'circle-stroke-width': 3 } },
         { id: 'hospital-point', type: 'circle', source: 'places', filter: ['==', ['get', 'kind'], 'hospital'], layout: { visibility: relocationZonesVisible ? 'visible' : 'none' }, paint: { 'circle-radius': 8, 'circle-color': mapColor('--map-color-paper'), 'circle-stroke-color': mapColor('--map-color-success'), 'circle-stroke-width': 3 } },
         { id: 'place-labels', type: 'symbol', source: 'places', filter: ['all', ['!=', ['get', 'kind'], 'device'], ['!=', ['get', 'kind'], 'hospital']], layout: { 'text-field': ['get', 'label'], 'text-size': 13, 'text-offset': [0, 1.5], 'text-anchor': 'top' }, paint: { 'text-color': mapColor('--map-color-paper'), 'text-halo-color': mapColor('--map-color-surface'), 'text-halo-width': 2 } },
         { id: 'hospital-label', type: 'symbol', source: 'places', filter: ['==', ['get', 'kind'], 'hospital'], layout: { visibility: relocationZonesVisible ? 'visible' : 'none', 'text-field': ['get', 'label'], 'text-size': 13, 'text-offset': [0, 1.5], 'text-anchor': 'top' }, paint: { 'text-color': mapColor('--map-color-paper'), 'text-halo-color': mapColor('--map-color-surface'), 'text-halo-width': 2 } },
@@ -1653,7 +1744,7 @@ function revealMapLayers() {
   const show = () => {
     if (redZonesVisible) { map?.setPaintProperty('hazard-band', 'line-opacity', 0.22); map?.setPaintProperty('hazard-fill', 'fill-opacity', 0.22); map?.setPaintProperty('hazard-edge', 'line-opacity', 0.96); }
     if (relocationZonesVisible) { map?.setPaintProperty('relocation-band', 'line-opacity', 0.18); map?.setPaintProperty('relocation-fill', 'fill-opacity', 0.15); map?.setPaintProperty('relocation-edge', 'line-opacity', 0.9); }
-    if (deviceLocation) map?.setPaintProperty('device-pulse', 'circle-opacity', 0.2);
+    if (deviceLocation && myLocationVisible) map?.setPaintProperty('device-pulse', 'circle-opacity', 0.2);
   };
   if (motionDuration() === 0) show(); else requestAnimationFrame(show);
 }
@@ -1672,7 +1763,7 @@ function startMapAnimation() {
     if (routeStarted) map.setPaintProperty('route-motion', 'line-dasharray', dashFrames[cycle]);
     if (redZonesVisible) { map.setPaintProperty('hazard-edge', 'line-dasharray', dashFrames[cycle]); map.setPaintProperty('hazard-band', 'line-opacity', 0.13 + pulse * 0.15); }
     if (relocationZonesVisible) { map.setPaintProperty('relocation-edge', 'line-dasharray', dashFrames[(cycle + 2) % dashFrames.length]); map.setPaintProperty('relocation-band', 'line-opacity', 0.1 + pulse * 0.1); }
-    if (deviceLocation) { map.setPaintProperty('device-pulse', 'circle-radius', 14 + pulse * 10); map.setPaintProperty('device-pulse', 'circle-opacity', 0.08 + (1 - pulse) * 0.18); }
+    if (deviceLocation && myLocationVisible) { map.setPaintProperty('device-pulse', 'circle-radius', 14 + pulse * 10); map.setPaintProperty('device-pulse', 'circle-opacity', 0.08 + (1 - pulse) * 0.18); }
     frame += 1;
     mapAnimationFrame = requestAnimationFrame(animate);
   };
@@ -1743,14 +1834,23 @@ function bindInteractions() {
       const facId = b.dataset.selectFacility;
       const found = availableDestinations.find((d) => d.facility_id === facId);
       if (found) {
-        selectedDestination = found;
-        if (found.coordinates) {
-          mapData.shelter = found.coordinates;
-        }
-        render();
+        onDestinationSelectionChanged(found);
       }
     })
   );
+
+  document.querySelector<HTMLButtonElement>('[data-action="reservation-confirm-close"]')?.addEventListener('click', () => {
+    reservationConfirmOpen = false;
+    render();
+  });
+  document.querySelector<HTMLButtonElement>('[data-action="reservation-confirm-submit"]')?.addEventListener('click', () => {
+    reservationConfirmOpen = false;
+    void startRouteReservation();
+  });
+  document.querySelector<HTMLButtonElement>('[data-action="destination-details-close"]')?.addEventListener('click', () => {
+    destinationDetailsOpen = false;
+    render();
+  });
 
   document.querySelectorAll<HTMLButtonElement>('[data-action="route"], [data-action="start-route"]').forEach((b) =>
     b.addEventListener('click', () => {
@@ -1916,6 +2016,12 @@ function exposeWindowHelpers() {
   w.getRelocationZonesVisible = () => relocationZonesVisible;
   w.getRoutesVisible = () => routesVisible;
   w.setRoutesVisible = (vis: boolean) => { routesVisible = vis; render(); };
+  w.getMyLocationVisible = () => myLocationVisible;
+  w.setMyLocationVisible = (vis: boolean) => {
+    myLocationVisible = vis;
+    updateMapDynamicProperties();
+    render();
+  };
   w.getRouteStarted = () => routeStarted;
   w.getCurrentSnapshotVersion = () => currentSnapshotVersion;
   w.setCurrentSnapshotVersion = (v: number | null) => { currentSnapshotVersion = v; };
@@ -1926,6 +2032,18 @@ function exposeWindowHelpers() {
   w.getGuidanceErrorMessage = () => guidanceErrorMessage;
   w.getReservationPending = () => reservationPending;
   w.getReservationError = () => reservationError;
+  w.getReservationConfirmOpen = () => reservationConfirmOpen;
+  w.setReservationConfirmOpen = (open: boolean) => { reservationConfirmOpen = open; render(); };
+  w.getDestinationDetailsOpen = () => destinationDetailsOpen;
+  w.setDestinationDetailsOpen = (open: boolean) => { destinationDetailsOpen = open; render(); };
+  w.getDirectionsOpen = () => directionsOpen;
+  w.getDetailsOpen = () => detailsOpen;
+  w.getAssistanceOpen = () => assistanceOpen;
+  w.getArrivalOpen = () => arrivalOpen;
+  w.handleOpenPanelAction = handleOpenPanelAction;
+  w.onDestinationSelectionChanged = onDestinationSelectionChanged;
+  w.getLastProximityEval = () => lastProximityEval;
+  w.getCurrentPosition = () => currentPosition;
   w.setLanguage = (lang: Language) => {
     language = lang;
     audioGuard.invalidate();

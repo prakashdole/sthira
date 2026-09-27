@@ -572,4 +572,161 @@ test('validateVoiceResponse: rejects obsolete mock alias FAC-PKG-DEST-1', () => 
   assert.equal(validated, null, 'Obsolete mock alias FAC-PKG-DEST-1 must be rejected');
 });
 
+test('executeMapActions: SET_LAYER_VISIBILITY for MY_LOCATION toggles device-pulse and device-point layers', () => {
+  const layerPropsSet: Array<{ id: string; prop: string; val: string }> = [];
+  const filtersSet: Array<{ id: string; filter: any }> = [];
+  const visibilityEvents: Array<{ layer: string; visible: boolean }> = [];
+
+  const mockMap: any = {
+    setLayoutProperty(id: string, prop: string, val: string) {
+      layerPropsSet.push({ id, prop, val });
+    },
+    setFilter(id: string, filter: any) {
+      filtersSet.push({ id, filter });
+    },
+  };
+
+  // 1. Hide MY_LOCATION
+  const hideProposal: VoiceProposal = {
+    schema_version: '3.0',
+    status: 'OK',
+    actions: [{ type: 'SET_LAYER_VISIBILITY', layer: 'MY_LOCATION', visible: false }],
+  };
+
+  const executedHide = executeMapActions(
+    mockMap,
+    hideProposal,
+    false,
+    () => {},
+    () => {},
+    () => {},
+    (layer, visible) => visibilityEvents.push({ layer, visible })
+  );
+
+  assert.equal(executedHide, true);
+  assert.deepEqual(visibilityEvents[0], { layer: 'MY_LOCATION', visible: false });
+
+  const idsSet = layerPropsSet.map((p) => p.id);
+  assert.ok(idsSet.includes('device-pulse'), 'device-pulse must be toggled');
+  assert.ok(idsSet.includes('device-point'), 'device-point must be toggled');
+  for (const item of layerPropsSet) {
+    assert.equal(item.prop, 'visibility');
+    assert.equal(item.val, 'none');
+  }
+
+  // Filter on place-points excluding device when hidden
+  const placeFilterHide = filtersSet.find((f) => f.id === 'place-points');
+  assert.ok(placeFilterHide, 'place-points filter must be updated');
+  assert.deepEqual(placeFilterHide?.filter, [
+    'all',
+    ['!=', ['get', 'kind'], 'hospital'],
+    ['!=', ['get', 'kind'], 'device'],
+  ]);
+
+  // 2. Show MY_LOCATION
+  layerPropsSet.length = 0;
+  filtersSet.length = 0;
+  visibilityEvents.length = 0;
+
+  const showProposal: VoiceProposal = {
+    schema_version: '3.0',
+    status: 'OK',
+    actions: [{ type: 'SET_LAYER_VISIBILITY', layer: 'MY_LOCATION', visible: true }],
+  };
+
+  const executedShow = executeMapActions(
+    mockMap,
+    showProposal,
+    false,
+    () => {},
+    () => {},
+    () => {},
+    (layer, visible) => visibilityEvents.push({ layer, visible })
+  );
+
+  assert.equal(executedShow, true);
+  assert.deepEqual(visibilityEvents[0], { layer: 'MY_LOCATION', visible: true });
+  for (const item of layerPropsSet) {
+    assert.equal(item.prop, 'visibility');
+    assert.equal(item.val, 'visible');
+  }
+});
+
+test('validateVoiceResponse & executeMapActions: accepts all 10 supported panels and honors target_id', () => {
+  const supportedPanels = [
+    'ALERT_DETAILS',
+    'SAFE_ZONE_DETAILS',
+    'ROUTE_GUIDANCE',
+    'CAPACITY_DETAILS',
+    'EMERGENCY_CALL_CONFIRMATION',
+    'DEMO_INFORMATION',
+    'DESTINATION_PREVIEW',
+    'ROUTE_STEPS',
+    'RESERVATION_CONFIRMATION',
+    'ARRIVAL_CONFIRMATION',
+  ] as const;
+
+  for (const panel of supportedPanels) {
+    const proposal: VoiceProposal = {
+      schema_version: '3.0',
+      status: 'OK',
+      actions: [{ type: 'OPEN_PANEL', panel, target_id: 'SZDEMO-1' }],
+    };
+
+    const validated = validateVoiceResponse(proposal);
+    assert.ok(validated !== null, `Panel ${panel} must be accepted by validateVoiceResponse`);
+
+    let panelOpened: string | null = null;
+    let targetReceived: string | null | undefined = null;
+
+    const mockMap: any = {};
+    const executed = executeMapActions(
+      mockMap,
+      validated,
+      false,
+      (p, tId) => {
+        panelOpened = p;
+        targetReceived = tId;
+      }
+    );
+
+    assert.equal(executed, true);
+    assert.equal(panelOpened, panel);
+    assert.equal(targetReceived, 'SZDEMO-1');
+  }
+});
+
+test('executeMapActions: opening confirmation panels does not trigger external actions or mutations', () => {
+  const confirmationPanels = [
+    'ARRIVAL_CONFIRMATION',
+    'EMERGENCY_CALL_CONFIRMATION',
+    'RESERVATION_CONFIRMATION',
+  ] as const;
+
+  for (const panel of confirmationPanels) {
+    const proposal: VoiceProposal = {
+      schema_version: '3.0',
+      status: 'OK',
+      actions: [{ type: 'OPEN_PANEL', panel }],
+    };
+
+    const validated = validateVoiceResponse(proposal);
+    assert.ok(validated !== null);
+
+    let panelOpened: string | null = null;
+    const mockMap: any = {};
+    executeMapActions(
+      mockMap,
+      validated,
+      false,
+      (p) => {
+        panelOpened = p;
+      }
+    );
+
+    assert.equal(panelOpened, panel, `${panel} opened harmlessly without executing mutations`);
+  }
+});
+
+
 
