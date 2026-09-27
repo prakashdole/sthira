@@ -875,11 +875,12 @@ async function submitReservation(payload: Record<string, unknown> & { idempotenc
       }
       routeStarted = true;
       directionsOpen = true;
-      journeyState = 'TRACKING';
       reservationPending = false;
       reservationError = '';
       focusRoute();
-      render();
+      // Start the geolocation watch; setting TRACKING alone showed
+      // "Tracking active" with no position updates ever arriving.
+      startTracking();
       return;
     }
     errJson = await res.json().catch(() => null);
@@ -1403,8 +1404,7 @@ function renderOnboarding() {
     </main>`;
   document.querySelectorAll<HTMLButtonElement>('[data-onboarding-language]').forEach((button) => button.addEventListener('click', () => {
     language = button.dataset.onboardingLanguage as Language;
-    audioGuard.invalidate();
-    lastApprovedAudio = undefined;
+    supersedeInFlight();
     try { localStorage.setItem('sthira-language', language); } catch { /* Continue without storage. */ }
     renderOnboarding();
   }));
