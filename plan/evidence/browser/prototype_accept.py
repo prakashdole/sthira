@@ -13,7 +13,7 @@ Synthetic stack only; this does not prove real microphones, audible speech
 quality, Safari or real models.
 
 Usage: python3 prototype_accept.py BASE_URL SECTION [SECTION...] [--json OUT]
-Sections: core outage language reservation recorder audio audio-denied dialog map layout
+Sections: core outage language reservation recorder audio audio-denied dialog map layout draft
 Exit 0 only if every executed check passes.
 """
 import asyncio, base64, hashlib, json, os, struct, subprocess, sys
@@ -671,7 +671,35 @@ async def section_layout(browser, base):
             await ctx.close()
 
 
+# ---------------------------------------------------------------- draft
+
+async def section_draft(browser, base):
+    """A GPS fix while tracking re-renders the page; the command being typed must survive."""
+    s = "draft"
+    ctx, page = await new_page(browser)
+    await onboard(page, base)
+    await page.locator('[data-action="route"]').first.click()
+    await page.wait_for_function("document.querySelector('[data-action=\"route\"]')?.textContent.includes('Route active')", timeout=10000)
+    if await page.locator('[data-action="directions-close"]').count():
+        await page.locator('[data-action="directions-close"]').first.click()
+    await open_console(page)
+    await page.fill("#command-input", "where is drinking water")
+    await page.evaluate("document.querySelector('#command-input').dataset.probe = 'old'")
+    await ctx.set_geolocation({"longitude": 76.1052, "latitude": 11.5702, "accuracy": 10})
+    try:
+        await page.wait_for_function("!document.querySelector('#command-input')?.dataset.probe", timeout=8000)
+        rerendered = True
+    except PWTimeout:
+        rerendered = False
+    value = await page.input_value("#command-input")
+    rec(s, "GPS update re-rendered the page (input element replaced)", rerendered)
+    rec(s, "typed command survives the re-render", rerendered and value == "where is drinking water", repr(value))
+    rec(s, "no uncaught page errors", not page.errors, "; ".join(page.errors))
+    await ctx.close()
+
+
 SECTIONS = {
+    "draft": (section_draft, []),
     "core": (section_core, []),
     "outage": (section_outage, []),
     "language": (section_language, []),

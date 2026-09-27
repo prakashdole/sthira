@@ -1502,6 +1502,9 @@ function render() {
   }
   const previousFocus = focusKeyOf(document.activeElement);
   const previousOverlays = document.querySelectorAll(OVERLAY_SELECTOR).length;
+  // #app is rebuilt on every render (e.g. each GPS fix while tracking); keep the typed command.
+  const draftInput = document.querySelector<HTMLInputElement>('#command-input');
+  const draft = draftInput ? { value: draftInput.value, start: draftInput.selectionStart, end: draftInput.selectionEnd } : null;
 
   const existingCanvas = document.querySelector<HTMLElement>('#map-canvas');
   const isMapAlive = !!(map && existingCanvas && existingCanvas.hasChildNodes());
@@ -1663,6 +1666,11 @@ function render() {
 
   hasRendered = true;
   bindInteractions();
+  const nextInput = document.querySelector<HTMLInputElement>('#command-input');
+  if (draft && nextInput) {
+    nextInput.value = draft.value;
+    nextInput.setSelectionRange(draft.start, draft.end);
+  }
   restoreFocusAfterRender(previousFocus, previousOverlays);
   void initMap(mapRenderVersion);
 }
