@@ -1,6 +1,19 @@
 # Sthira autonomous execution playbook
 
-## CURRENT EXECUTOR HANDOFF — 2026-09-27 19:15, post-integration review (read first)
+## CURRENT EXECUTOR HANDOFF — 2026-09-27 21:05, lane-1 integrated (read first)
+
+`CLEAN` now contains lane-1 (`b595926` = 1d7b963 minus its duplicate draft code and dead cancel
+listeners; `23f77aa` = 38115f9) plus `2beaaa6`: map writes gated on the `load` event (`mapStyleReady`)
+instead of `isStyleLoaded()`, which turns false after every `setData`/tile fetch. The idle retry still
+flaked ~1/13 and the map animation loop died on the first dip (new harness check fails 3/3 before).
+Verified at `2beaaa6`: tsc 0, `npm test` 92/92, build 0, hooks absent; map section 10/10; full harness
+(12 sections) **82 PASS, 0 FAIL**.
+Not integrated: `lane2-demo` docs (audit: fallback script conflates backend-down with workers-down,
+misquotes ML text, cites the never-rendered `backendUnavailable`, invents timings) and lane-1 doc
+`2caa85a`. `840d8ea` (committed on CLEAN by a worker) only proves a coordinate-less destination is
+selectable; it never exercises proximity/arrival, so TODO B "destination identity" stays open.
+
+## PREVIOUS HANDOFF — 2026-09-27 19:15, post-integration review (historical)
 
 Branch `CLEAN`, local commits only, nothing pushed. Reviewer takeover found the tree clean: every
 assignment in the 19:00 handoff (async supersession, reservation/arrival consistency, test hooks,
