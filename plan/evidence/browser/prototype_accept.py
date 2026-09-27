@@ -1,25 +1,46 @@
 """Round-3 prototype browser acceptance (headless Chromium, visible controls).
 
 Instrumentation is limited to network interception (page.route, including
-rewriting a real backend response into a stated fixture), browser geolocation
-emulation, Chromium's fake microphone, and browser-API wrappers installed via
-init scripts (getUserMedia/MediaRecorder/Audio) that record what the app does.
-No application window setters are used. The map section loads the dev page
-with ?sthira-test-hooks=1 only to READ the MapLibre instance (pitch, terrain,
-layout visibility, rendered features). The reservation section reads the
-disposable database named by STHIRA_ACCEPT_DB (psql) to count stays; without
-it those checks FAIL rather than pass silently.
+rewriting a real backend response into a stated fixture, and observing a real
+response without altering it), browser geolocation emulation, Chromium's fake
+microphone, and browser-API wrappers installed via init scripts
+(getUserMedia/MediaRecorder/Audio, and a read-only recorder wrapped around the
+MapLibre instance's camera methods) that record what the app does. No
+application window setters are used. The map and queued-voice sections load the
+dev page with ?sthira-test-hooks=1 only to READ the MapLibre instance (pitch,
+terrain, layout visibility, rendered features, and how many times a camera
+action was applied). The reservation and destination-identity sections read the
+disposable database named by STHIRA_ACCEPT_DB (psql) to count stays and to
+confirm which facility was actually reserved; without it those checks FAIL
+rather than pass silently.
+
+Harness limits worth knowing when reading a FAIL:
+  * ctx.set_geolocation() while a watchPosition is active makes Chromium deliver
+    a POSITION_UNAVAILABLE (code 2) to the app, which clears the watch; later
+    overrides then deliver nothing at all. So GPS *overrides* are a state-change
+    signal, never a repeatable position-update source. The modal section
+    therefore supplies its re-renders from visible controls inside the dialog
+    and reports the geolocation result in the check detail.
+  * MapLibre's `load` event is what releases a queued voice proposal, so
+    queued-voice holds the basemap tile route with an explicit gate rather than
+    sleeping, and proves the ordering from the recorded camera call timestamps.
+
 Synthetic stack only; this does not prove real microphones, audible speech
 quality, Safari or real models.
 
 Usage: python3 prototype_accept.py BASE_URL SECTION [SECTION...] [--json OUT]
-Sections: core outage language reservation recorder audio audio-denied dialog map layout draft destination-identity
+Sections: core outage language reservation recorder audio audio-denied dialog
+map layout draft destination-identity modal queued-voice
 Exit 0 only if every executed check passes.
 """
 import asyncio, base64, hashlib, json, os, struct, subprocess, sys
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-SHELTER = {"longitude": 76.105, "latitude": 11.570, "accuracy": 10}
+# The emulated GPS position. It is deliberately the exact coordinate the app assigns
+# to FACDEMO-1, so "the citizen is standing on another shelter's doorstep" is a
+# position update the app really has to judge, not an approximation.
+SHELTER_COORDS = (76.105, 11.570)
+SHELTER = {"longitude": SHELTER_COORDS[0], "latitude": SHELTER_COORDS[1], "accuracy": 10}
 EN_ASSISTANT_UNAVAILABLE = "Voice Map Control is unavailable. The displayed route and emergency call option still work."
 RESULTS = []
 
@@ -86,6 +107,9 @@ async def section_core(browser, base):
         "typeof window.setActiveStayId === 'undefined' && typeof window.sendVoiceOrText === 'undefined'"))
     await onboard(page, base)
     rec(s, "guidance destination rendered from backend", await page.locator("text=Demo Safe Facility").count() > 0)
+    await page.wait_for_selector("text=Synthetic demo, system responding", timeout=8000)
+    rec(s, "healthy stack: status line reads 'system responding' (not 'live sources not connected')",
+        await page.locator("text=Demo ready, live sources not connected").count() == 0)
     resp = await submit(page, "where can I go")
     body = await resp.json()
     tmpl = (body.get("data") or {}).get("template", {}).get("text", "")
@@ -172,7 +196,15 @@ async def settle(page, ms=300):
     await page.wait_for_timeout(ms)
 
 
-# ---------------------------------------------------------------- language
+async def reserve_visible(page, timeout=20000):
+    """Start the safe route through the visible control. The accepted stay is what
+    starts tracking, so this is also how the citizen reaches a tracking state."""
+    async with page.expect_response(lambda r: r.url.endswith("/api/v3/reservations"), timeout=timeout) as info:
+        await page.locator('[data-action="route"]').first.click()
+    resp = await info.value
+    await page.wait_for_timeout(1200)  # the accepted stay calls startTracking() internally
+    return resp
+
 
 async def section_language(browser, base):
     """Old-language response delayed past a language switch and a fresh request."""
@@ -770,9 +802,329 @@ async def section_destination_identity(browser, base):
     await ctx.close()
 
 
+# ---------------------------------------------------------------- modal
+
+# Read-only DOM snapshot of the arrival / reservation-confirm modals.
+MODAL_STATE = """() => {
+  const all = [...document.querySelectorAll('#arrival-modal, #reservation-confirm-modal')];
+  const open = all.filter((d) => d.open);
+  const a = document.activeElement;
+  // Hit-test a background control that is always rendered (the one inert_check clicks).
+  const route = document.querySelector('[data-action="toggle-layers"]');
+  let top = null;
+  if (route) {
+    const r = route.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    const d = hit && hit.closest('dialog');
+    top = d ? 'dialog:' + d.id : (hit ? hit.tagName + '.' + hit.className : null);
+  }
+  return {
+    count: open.length,
+    ids: open.map((d) => d.id),
+    inDom: all.length > 0,
+    isModal: open.length > 0 && open.every((d) => d.matches(':modal')),
+    active: a ? (a.getAttribute('data-action') || a.id || a.tagName) : null,
+    activeInside: open.some((d) => d.contains(a)),
+    consoleOpen: document.querySelectorAll('.voice-console:not([hidden])').length,
+    topAtStartRoute: top,
+  };
+}"""
+
+async def open_arrival_dialog(browser, base):
+    """Reach NEAR_DESTINATION and the arrival dialog through visible controls only.
+    The context geolocation is the shelter coordinate, so the first watch fix lands
+    inside the proximity threshold without any geolocation override."""
+    ctx, page = await new_page(browser)
+    await onboard(page, base)
+    await open_console(page)  # left open behind the modal, to count Escape closures
+    resp = await reserve_visible(page)
+    await page.wait_for_selector('[data-action="arrival-open"]', timeout=15000)
+    await page.locator('[data-action="arrival-open"]').first.click()
+    await page.wait_for_selector("#arrival-modal[open]", timeout=5000)
+    return ctx, page, resp
+
+
+async def inert_check(s, page, label):
+    """A background control is unreachable while the modal is open. The state it
+    would change is captured first, so a click that leaked through is a FAIL."""
+    before = await page.locator('[data-action="toggle-layers"]').get_attribute("aria-expanded")
+    st = await page.evaluate(MODAL_STATE)
+    blocked = False
+    try:
+        await page.locator('[data-action="toggle-layers"]').click(timeout=1500)
+    except PWTimeout:
+        blocked = True
+    after = await page.locator('[data-action="toggle-layers"]').get_attribute("aria-expanded")
+    rec(s, f"{label}: page behind is inert (browser top layer, background control unreachable and unchanged)",
+        st["count"] == 1 and st["isModal"] and (st["topAtStartRoute"] or "").startswith("dialog:")
+        and blocked and before == after,
+        f"open={st['count']} isModal={st['isModal']} hitAtStartRoute={st['topAtStartRoute']} clickBlocked={blocked} aria-expanded {before}->{after}")
+
+
+async def section_modal(browser, base):
+    """b595926 made the arrival and reservation-confirm dialogs showModal(). This
+    proves the browser-level modal contract for both, and that Escape is exact.
+
+    'Exactly once' is proven by consequence, not by counting: a voice console is
+    left open behind the dialog, so ONE Escape must close only the dialog (console
+    still open) and a second must close only the console. A handler that fired
+    twice, or zero times, cannot produce that pair.
+    """
+    s = "modal"
+
+    # ---------------- arrival dialog
+    ctx, page, res = await open_arrival_dialog(browser, base)
+    st = await page.evaluate(MODAL_STATE)
+    rec(s, "arrival dialog opens as a real modal (one open, :modal true, focus moved inside)",
+        res.status == 201 and st["count"] == 1 and st["isModal"] and st["active"] == "arrival-close" and st["activeInside"],
+        f"status={res.status} {st}")
+    await inert_check(s, page, "arrival")
+
+    # three re-renders while the dialog is open, from the dialog's own visible controls
+    async def party_of():
+        return int((await page.locator("#arrival-modal .stepper strong").inner_text()).strip().split()[0])
+
+    base_party = await party_of()
+    sizes = []
+    for action in ("party-plus", "party-plus", "party-minus"):
+        await page.click(f'[data-action="{action}"]')
+        await settle(page, 200)
+        m = await page.evaluate(MODAL_STATE)
+        sizes.append((await party_of() - base_party, m["count"], m["isModal"], m["activeInside"]))
+    rec(s, "3 re-renders while the arrival dialog is open: rebuilt, still one modal, focus still inside",
+        [x[0] for x in sizes] == [1, 2, 1] and [x[1] for x in sizes] == [1, 1, 1] and all(x[2] and x[3] for x in sizes),
+        f"(partyDelta, open, isModal, focusInside) per render={sizes} base={base_party}")
+
+    # one Escape: closes the dialog only, and restores focus to its opener
+    await page.keyboard.press("Escape")
+    await settle(page, 400)
+    one = await page.evaluate(MODAL_STATE)
+    rec(s, "one Escape closes the arrival dialog exactly once (dialog gone, console behind untouched, focus back on opener)",
+        one["count"] == 0 and not one["inDom"] and one["consoleOpen"] == 1 and one["active"] == "arrival-open",
+        f"{one}")
+    await page.keyboard.press("Escape")
+    await settle(page, 300)
+    two = await page.evaluate(MODAL_STATE)
+    rec(s, "a second Escape then closes the console, so the first Escape closed exactly one overlay",
+        two["consoleOpen"] == 0 and two["count"] == 0, f"{two}")
+
+    # re-renders after the close must not bring it back
+    for i in range(2):
+        await page.locator('[data-action="toggle-layers"]').click()
+    await page.locator('[data-action="recenter"]').click()
+    await open_console(page)
+    await page.click('[data-language="HI"]')
+    await settle(page, 400)
+    back = await page.evaluate(MODAL_STATE)
+    rec(s, "after the user closed it, later re-renders never reopen the arrival dialog",
+        back["count"] == 0 and not back["inDom"], f"{back}")
+
+    # strongest form: re-enter the state that renders the dialog, and it must stay gone
+    await page.click('[data-language="EN"]')
+    if await page.locator('[data-action="stop-tracking"]').count():
+        await page.locator('[data-action="stop-tracking"]').click()
+        await settle(page, 300)
+    await page.locator('[data-action="start-tracking"]').click()
+    await page.wait_for_selector('[data-action="arrival-open"]', timeout=10000)
+    await settle(page, 400)
+    again = await page.evaluate(MODAL_STATE)
+    rec(s, "re-entering NEAR_DESTINATION (near-destination prompt is back on screen) does not reopen the closed dialog",
+        await page.locator(".near-destination-advisory").count() == 1 and again["count"] == 0 and not again["inDom"],
+        f"advisory={await page.locator('.near-destination-advisory').count()} {again}")
+
+    # three geolocation updates while a freshly opened dialog is up
+    await page.locator('[data-action="arrival-open"]').first.click()
+    await page.wait_for_selector("#arrival-modal[open]", timeout=5000)
+    geo = []
+    for lon, lat in ((76.1052, 11.5701), (76.1048, 11.5699), (76.1051, 11.5698)):
+        await ctx.set_geolocation({"longitude": lon, "latitude": lat, "accuracy": 10})
+        await settle(page, 250)
+        m = await page.evaluate(MODAL_STATE)
+        geo.append((m["count"], m["isModal"], m["active"], m["activeInside"]))
+    rec(s, "3 GPS updates while the arrival dialog is open: dialog survives, focus is not lost",
+        all(g[0] == 1 and g[1] and g[3] for g in geo), f"(open, isModal, active, focusInside) per update={geo}")
+
+    await page.keyboard.press("Escape")
+    await settle(page, 300)
+    for lon, lat in ((76.11, 11.56), (76.12, 11.55)):
+        await ctx.set_geolocation({"longitude": lon, "latitude": lat, "accuracy": 10})
+        await settle(page, 250)
+    after_geo = await page.evaluate(MODAL_STATE)
+    rec(s, "GPS updates after the user closed it do not reopen the arrival dialog",
+        after_geo["count"] == 0 and not after_geo["inDom"], f"{after_geo}")
+    rec(s, "no uncaught page errors (arrival dialog)", not page.errors, "; ".join(page.errors))
+    await ctx.close()
+
+    # ---------------- reservation-confirm dialog (opened by a voice panel action)
+    ctx, page = await new_page(browser)
+    await onboard(page, base)
+    await page.route("**/api/v3/voice/process", rewrite_actions([{"type": "OPEN_PANEL", "panel": "RESERVATION_CONFIRMATION", "target_id": None}]))
+    async with page.expect_response(lambda r: r.url.endswith("/api/v3/voice/process"), timeout=20000) as info:
+        await open_console(page)
+        await page.fill("#command-input", "please reserve my safe stay on this route")
+        await page.click('[data-command-form] button[type="submit"]')
+    resp = await info.value
+    await page.wait_for_function("!document.querySelector('#command-input')?.disabled", timeout=15000)
+    await page.wait_for_selector("#reservation-confirm-modal[open]", timeout=5000)
+    st = await page.evaluate(MODAL_STATE)
+    rec(s, "reservation-confirm dialog opens as a real modal, focus moved to its close control",
+        resp.status == 200 and st["count"] == 1 and st["ids"] == ["reservation-confirm-modal"] and st["isModal"]
+        and st["active"] == "reservation-confirm-close" and st["activeInside"],
+        f"status={resp.status} {st}")
+    await inert_check(s, page, "reservation-confirm")
+
+    await page.keyboard.press("Escape")
+    await settle(page, 400)
+    one = await page.evaluate(MODAL_STATE)
+    rec(s, "one Escape closes the reservation-confirm dialog exactly once (console behind untouched)",
+        one["count"] == 0 and not one["inDom"] and one["consoleOpen"] == 1 and one["active"] == "voice-close",
+        f"{one}")
+    await page.keyboard.press("Escape")
+    await settle(page, 300)
+    two = await page.evaluate(MODAL_STATE)
+    rec(s, "a second Escape closes the console behind it, so the first Escape closed exactly one overlay",
+        two["consoleOpen"] == 0, f"{two}")
+
+    for i in range(2):
+        await page.locator('[data-action="toggle-layers"]').click()
+    await page.locator('[data-language="ML"]').click()
+    await settle(page, 400)
+    back = await page.evaluate(MODAL_STATE)
+    rec(s, "after the user closed it, later re-renders never reopen the reservation-confirm dialog",
+        back["count"] == 0 and not back["inDom"], f"{back}")
+    rec(s, "no uncaught page errors (reservation-confirm dialog)", not page.errors, "; ".join(page.errors))
+    await ctx.close()
+
+
+# ---------------------------------------------------------------- queued voice before map load
+
+# A recorder, not a setter. It wraps the MapLibre camera methods the app calls and
+# records; it never calls one and never touches application state. It is installed
+# through a window.map property setter so it survives the map instance being
+# replaced, and it must exist before the first page script runs.
+CAMERA_RECORDER = """(() => {
+  const slot = { v: undefined };
+  window.__cam = [];
+  window.__mapIds = [];
+  window.__loadAt = undefined;
+  let seq = 0;
+  const snap = (a) => {
+    if (!a || typeof a !== 'object') return {};
+    const c = Array.isArray(a.center) ? a.center : (a.center && typeof a.center.lng === 'function' ? [a.center.lng, a.center.lat] : null);
+    return { center: c, zoom: a.zoom, pitch: a.pitch, bearing: a.bearing, duration: a.duration };
+  };
+  const wrap = (m) => {
+    if (!m || m.__rec) return m;
+    m.__rec = true; m.__id = ++seq; window.__mapIds.push(m.__id);
+    for (const fn of ['flyTo', 'easeTo', 'jumpTo', 'zoomTo', 'fitBounds']) {
+      const orig = m[fn];
+      if (typeof orig !== 'function') continue;
+      m[fn] = function (a) {
+        window.__cam.push({ fn, at: performance.now(), mapId: m.__id, current: m === slot.v, args: snap(a) });
+        return orig.call(m, a);
+      };
+    }
+    m.on('load', () => { if (window.__loadAt === undefined) window.__loadAt = performance.now(); });
+    return m;
+  };
+  Object.defineProperty(window, 'map', {
+    configurable: true,
+    get: () => slot.v,
+    set: (v) => { slot.v = wrap(v); },
+  });
+})()"""
+
+MAP_LOADED = "() => window.__loadAt !== undefined"
+
+
+async def section_queued_voice(browser, base):
+    """A RECENTER response that arrives before the map's `load` event is applied
+    exactly once, and only after load.
+
+    Why the count matters: the app initialises the map at exactly the RECENTER
+    target (main.ts:132-135, 1746-1749), so on a fresh page RECENTER moves
+    nothing. Asserting the camera would therefore pass even if the queued proposal
+    were dropped entirely. The single flyTo call is the only non-vacuous signal,
+    and its recorded timestamp relative to the recorded `load` timestamp is the
+    only proof of ordering. Both the count AND the ordering are asserted, so a
+    proposal never applied (0) and one applied twice (2) both FAIL.
+    """
+    s = "queued-voice"
+    gate = asyncio.Event()
+    held = {"tiles": 0}
+
+    async def hold_tiles(route):
+        held["tiles"] += 1
+        try:
+            await asyncio.wait_for(gate.wait(), timeout=25)
+        except asyncio.TimeoutError:
+            pass
+        try:
+            await route.continue_()
+        except Exception:
+            pass
+
+    ctx, page = await new_page(browser)
+    await ctx.add_init_script(CAMERA_RECORDER)
+    await page.route("**/MapServer/tile/**", hold_tiles)
+    await page.route("**/elevation-tiles-prod/terrarium/**", hold_tiles)
+    await onboard(page, base, query="?sthira-test-hooks=1")
+    await settle(page, 1200)
+
+    loaded_before = await page.evaluate(MAP_LOADED)
+    pre_cam = await page.evaluate("() => window.__cam.map((c) => c.fn)")
+    rec(s, "the basemap tile route holds the map's load event open, and no camera action has run yet",
+        not loaded_before and pre_cam == [] and held["tiles"] > 0,
+        f"loadFired={loaded_before} cameraCalls={pre_cam} tilesHeld={held['tiles']}")
+    rec(s, "recorder sees the live map instance exactly once (a replaced map would break the count)",
+        await page.evaluate("() => window.__mapIds") == [1], await page.evaluate("() => window.__mapIds"))
+
+    await page.route("**/api/v3/voice/process", rewrite_actions([{"type": "RECENTER"}]))
+    resp = await submit(page, "recenter")
+    await settle(page, 600)
+    early = await page.evaluate("() => ({ cam: window.__cam.map((c) => c.fn), load: window.__loadAt })")
+    rec(s, "the RECENTER response arrives 200 while load is still held, and is NOT applied yet (it is queued)",
+        resp.status == 200 and early["load"] is None and early["cam"] == [],
+        f"status={resp.status} loadAt={early['load']} cameraCalls={early['cam']}")
+
+    gate.set()
+    await page.wait_for_function(MAP_LOADED, timeout=40000)
+    await settle(page, 1500)
+    cam = await page.evaluate("() => window.__cam")
+    recenter_calls = [c for c in cam if c["fn"] == "flyTo"
+                      and c["args"].get("center") and abs(c["args"]["center"][0] - 76.112) < 1e-6
+                      and abs(c["args"]["center"][1] - 11.562) < 1e-6]
+    total_flyto = [c for c in cam if c["fn"] == "flyTo"]
+    load_at = await page.evaluate("() => window.__loadAt")
+    after_load = [c for c in cam if c["at"] >= load_at]
+    before_load = [c for c in cam if c["at"] < load_at]
+    rec(s, "the queued RECENTER is applied exactly once after load (not zero times, not twice)",
+        len(recenter_calls) == 1 and len(total_flyto) == 1,
+        f"recenterFlyTo={len(recenter_calls)} totalFlyTo={len(total_flyto)} all={[(c['fn'], round(c['at'] - load_at)) for c in cam]}")
+    rec(s, "every camera call it produced happened after the load event, on the live map instance",
+        before_load == [] and len(after_load) == 1 and recenter_calls and recenter_calls[0]["current"]
+        and recenter_calls[0]["mapId"] == 1 and recenter_calls[0]["args"].get("zoom") == 13.4
+        and recenter_calls[0]["args"].get("pitch") == 0 and recenter_calls[0]["args"].get("bearing") == 0,
+        f"beforeLoad={before_load} afterLoad={[(c['fn'], c['current'], round(c['at'] - load_at), c['args']) for c in after_load]}")
+
+    n = len(cam)
+    for lon, lat in ((76.11, 11.56), (76.12, 11.55)):
+        await ctx.set_geolocation({"longitude": lon, "latitude": lat, "accuracy": 10})
+        await settle(page, 250)
+    await page.locator('[data-action="toggle-layers"]').click()
+    await settle(page, 400)
+    later = await page.evaluate("() => ({ cam: window.__cam.length, ids: window.__mapIds })")
+    rec(s, "later re-renders never re-apply the drained queue",
+        later["cam"] == n and later["ids"] == [1], f"camera calls before={n} after={later['cam']} mapIds={later['ids']}")
+    rec(s, "no uncaught page errors", not page.errors, "; ".join(page.errors))
+    await ctx.close()
+
+
 SECTIONS = {
     "draft": (section_draft, []),
     "destination-identity": (section_destination_identity, []),
+    "modal": (section_modal, []),
+    "queued-voice": (section_queued_voice, []),
     "core": (section_core, []),
     "outage": (section_outage, []),
     "language": (section_language, []),

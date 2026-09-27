@@ -527,7 +527,8 @@ async function checkRuntime(): Promise<void> {
   try {
     const readyRes = await fetch('/health/ready');
     const data = await readyRes.json().catch(() => null);
-    const evalState = evaluateReadinessState(readyRes.status, data);
+    // The backend wraps the report in the standard envelope: { data: { status: 'READY', ... } }.
+    const evalState = evaluateReadinessState(readyRes.status, data?.data ?? null);
     runtime = evalState.runtime;
     runtimeDetail = evalState.runtimeDetail;
   } catch {
