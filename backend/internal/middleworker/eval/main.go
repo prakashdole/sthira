@@ -6,9 +6,17 @@
 //
 // Usage:
 //
+//	middleworker-eval -mode manifest -out eval/results/manifest.json
+//	middleworker-eval -mode harness-check
+//	middleworker-eval -mode corpus-check -corpus eval/corpus/synthetic_v2.jsonl
 //	middleworker-eval -mode benchmark -corpus eval/corpus/synthetic.jsonl -out eval/results/bf16.json
 //	middleworker-eval -mode benchmark -quantization awq-int4 -out eval/results/awq.json
-//	middleworker-eval -mode harness-check
+//
+// corpus-check is the offline verification path: it loads the JSONL
+// cases, asserts unique IDs, asserts every referenced fixture ID is
+// in the established allow-list (no invented IDs), and prints a
+// per-case summary. It is the deterministic check that does NOT
+// require real vLLM and runs before any benchmark.
 //
 // Real vLLM execution is BLOCKED until:
 //
@@ -84,7 +92,7 @@ var Pinned = PinnedModel{
 
 func main() {
 	var (
-		mode         = flag.String("mode", "harness-check", "harness-check | benchmark | manifest")
+		mode         = flag.String("mode", "harness-check", "harness-check | benchmark | manifest | corpus-check")
 		corpus       = flag.String("corpus", "", "path to corpus .jsonl")
 		quantization = flag.String("quantization", "bf16", "bf16 | awq-int4")
 		endpoint     = flag.String("endpoint", "", "private vLLM HTTP endpoint; absent = dry run")
@@ -97,6 +105,8 @@ func main() {
 		writeManifest(*out)
 	case "harness-check":
 		runHarnessCheck()
+	case "corpus-check":
+		runCorpusCheck(*corpus)
 	case "benchmark":
 		if *endpoint == "" {
 			fmt.Fprintln(os.Stderr, "benchmark mode requires -endpoint (or use harness-check)")
@@ -187,6 +197,49 @@ func runBenchmark(corpus, quantization, endpoint, out string) {
 	fmt.Fprintln(os.Stderr, "benchmark mode requires pinned artifacts and a real GPU")
 	fmt.Fprintln(os.Stderr, "see HARDWARE_BLOCKER.md and run -mode harness-check first")
 	os.Exit(2)
+}
+
+// runCorpusCheck loads a JSONL corpus and verifies it offline:
+// unique IDs, no invented fixture references, and a printable
+// per-case summary. Exits 0 on success, 1 on validation error,
+// 2 on a usage error. No network; no model. Re-runnable in CI
+// before any future benchmark run.
+func runCorpusCheck(path string) {
+	if path == "" {
+		fmt.Fprintln(os.Stderr, "corpus-check mode requires -corpus")
+		os.Exit(2)
+	}
+	cases, err := loadCorpusJSONL(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := uniqueCaseIDs(cases); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	allowed := allowedFixtureIDs()
+	if err := validateFixtureRefs(cases, allowed); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Printf("corpus-check: %s — %d cases, ids unique, all fixture refs known\n", path, len(cases))
+	for _, c := range cases {
+		intent := "<none>"
+		if c.ExpectedIntent != nil {
+			intent = *c.ExpectedIntent
+		}
+		speech := "<none>"
+		if c.ExpectedSpeechKey != nil {
+			speech = *c.ExpectedSpeechKey
+		}
+		review := c.ReviewStatus
+		if review == "" {
+			review = "UNSPECIFIED"
+		}
+		fmt.Printf("  %s  lang=%-5s  status=%-15s  intent=%-20s  speech=%-26s  review=%s\n",
+			c.ID, c.Language, c.ExpectedStatus, intent, speech, review)
+	}
 }
 
 // (Placeholder for real-benchmark path; gated on artifacts.)
