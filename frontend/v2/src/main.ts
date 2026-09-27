@@ -1259,6 +1259,11 @@ function dispatchVoiceProposal(proposal: VoiceProposal) {
       if (action.layer === 'ROUTES') routesVisible = action.visible;
       if (action.layer === 'MY_LOCATION') myLocationVisible = action.visible;
     }
+    if (action.type === 'RECENTER' && mapTilted) {
+      // executeMapActions flies to pitch 0; keep 3D state, terrain and aria-pressed in agreement.
+      mapTilted = false;
+      try { map?.setTerrain(null); } catch {}
+    }
     if ((action.type === 'OPEN_PANEL' || action.type === 'SHOW_CHOICES') && !guidanceCurrent) {
       commandError = 'Response was built for different guidance data; please ask again.';
       continue;
