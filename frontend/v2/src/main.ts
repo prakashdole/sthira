@@ -154,7 +154,6 @@ function recordCameraState() {
 let voiceOpen = false;
 let voiceListening = false;
 let voiceTranscript = '';
-let voiceFeedbackKey: Exclude<keyof typeof words.EN, 'suggestions'> = 'micPrivacy';
 let mediaRecorder: MediaRecorder | null = null;
 let mediaStream: MediaStream | null = null;
 let recordingStartedAt = 0;
@@ -1101,7 +1100,6 @@ async function toggleLocalRecording() {
   const fail = () => {
     if (!isCurrent()) return;
     cancelRecording();
-    voiceFeedbackKey = 'micStopped';
     commandError = words[language].micStopped;
     render();
   };
@@ -1152,7 +1150,6 @@ async function toggleLocalRecording() {
     mediaRecorder = recorder;
     recordingStartedAt = Date.now();
     voiceListening = true;
-    voiceFeedbackKey = 'recording';
     commandError = '';
     recordingTimer = window.setTimeout(() => {
       if (recorder.state === 'recording') recorder.stop();
@@ -1309,7 +1306,6 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
   lastApprovedAudio = undefined;
   commandPending = true;
   commandError = '';
-  voiceFeedbackKey = 'checkingBackend';
   if (input.kind === 'transcript') {
     voiceTranscript = input.text;
   } else {
@@ -1350,7 +1346,6 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
     if (outcome.kind === 'ERROR') {
       commandPending = false;
       commandError = words[language].assistantUnavailable;
-      voiceFeedbackKey = 'backendUnavailable';
       render();
       return;
     }
@@ -1362,10 +1357,8 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
       }
       if (outcome.template_text) {
         commandResponse = outcome.template_text;
-        voiceFeedbackKey = 'responseReady';
       } else {
         commandResponse = words[language].responseReady;
-        voiceFeedbackKey = 'micPrivacy';
       }
       render();
       return;
@@ -1378,7 +1371,6 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
 
     if (outcome.template_text) {
       commandResponse = outcome.template_text;
-      voiceFeedbackKey = 'responseReady';
       if (outcome.audio) {
         lastApprovedAudio = outcome.audio;
         const playRes = await verifyAndPlayAudio(outcome.audio);
@@ -1391,10 +1383,8 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
       }
     } else if (outcome.captionUnavailable) {
       commandError = words[language].assistantUnavailable;
-      voiceFeedbackKey = 'backendUnavailable';
     } else {
       commandResponse = words[language].responseReady;
-      voiceFeedbackKey = 'responseReady';
     }
 
     commandPending = false;
@@ -1403,7 +1393,6 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
     if (reqId !== activeRequestId) return;
     commandPending = false;
     commandError = words[language].assistantUnavailable;
-    voiceFeedbackKey = 'backendUnavailable';
     render();
   }
 }
@@ -1644,10 +1633,10 @@ function render() {
       ${directionsOpen ? `<aside class="side-sheet" aria-labelledby="directions-title"><div class="sheet-head"><div><span>${t.routeKicker}</span><h2 id="directions-title">${t.routeTitle}</h2></div><button class="icon-button" data-action="directions-close" aria-label="${t.closeDirections}">${icons.close}</button></div><ol><li><b>1</b><p>${t.routeStep1}<small>${t.routeStep1Note}</small></p></li><li><b>2</b><p>${t.routeStep2}<small>${t.routeStep2Note}</small></p></li><li><b>3</b><p>${t.routeStep3}<small>${t.routeStep3Note}</small></p></li></ol></aside>` : ''}
       ${detailsOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.sourceFreshness}</span><h2>${t.alertDetails}</h2></div><button class="icon-button" data-action="details-close" aria-label="${t.closeDetails}">${icons.close}</button></div><p>${t.demoNotice}</p><dl><div><dt>${t.authorityFormat}</dt><dd>NDMA SACHET / CAP (Source: SRCDEMO-1)</dd></div><div><dt>Package ID</dt><dd>${PACKAGE_ID} (Jurisdiction: ${JURISDICTION})</dd></div><div><dt>Freshness State</dt><dd>${guidanceFreshness}</dd></div><div><dt>Valid Dates</dt><dd>${getTodayYMD()} to ${getTomorrowYMD()}</dd></div><div><dt>${t.backend}</dt><dd>${runtimeCopy()}</dd></div></dl></dialog>` : ''}
       ${assistanceOpen ? `<dialog class="modal modal--critical" open><div class="sheet-head"><div><span>${t.emergencyAssistance}</span><h2>${t.callHelp}</h2></div><button class="icon-button" data-action="assist-close" aria-label="${t.close}">${icons.close}</button></div><p>${t.assistNotice}</p><div class="help-actions"><a class="primary-action" href="tel:112">${t.callRescue}</a><a class="primary-action" href="tel:112">${t.callAmbulance}</a><a class="primary-action" href="tel:112">${t.call112Now}</a></div></dialog>` : ''}
-      ${arrivalOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.arrivalCheck}</span><h2>${t.arrivedSafely}</h2></div><button class="icon-button" data-action="arrival-close" aria-label="${t.closeArrival}">${icons.close}</button></div>${arrivalSuccess ? `<div class="success-message"><strong>${t.arrivalRecorded}</strong>${arrivalRecordedAt ? `<p><small>Recorded at: ${arrivalRecordedAt}</small></p>` : ''}</div>` : `<p>${t.confirmParty}</p><div class="stepper"><button type="button" data-action="party-minus" aria-label="${t.decreaseParty}">-</button><strong>${partySize} ${partySize === 1 ? t.person : t.people}</strong><button type="button" data-action="party-plus" aria-label="${t.increaseParty}">+</button></div>${arrivalError ? `<p class="command-error" role="alert" style="margin-block: 0.5rem;">${escapeHtml(arrivalError)}</p>` : ''}<div class="help-actions" style="margin-top: 1rem;"><button class="primary-action is-success" type="button" data-action="arrival-yes" ${arrivalPending ? 'disabled' : ''}>${arrivalPending ? 'Confirming...' : t.confirmArrivalPrompt}</button><button class="secondary-action" type="button" data-action="arrival-no">${t.callHelp}</button></div>`}</dialog>` : ''}
+      ${arrivalOpen ? `<dialog id="arrival-modal" class="modal"><div class="sheet-head"><div><span>${t.arrivalCheck}</span><h2>${t.arrivedSafely}</h2></div><button class="icon-button" data-action="arrival-close" aria-label="${t.closeArrival}">${icons.close}</button></div>${arrivalSuccess ? `<div class="success-message"><strong>${t.arrivalRecorded}</strong>${arrivalRecordedAt ? `<p><small>Recorded at: ${arrivalRecordedAt}</small></p>` : ''}</div>` : `<p>${t.confirmParty}</p><div class="stepper"><button type="button" data-action="party-minus" aria-label="${t.decreaseParty}">-</button><strong>${partySize} ${partySize === 1 ? t.person : t.people}</strong><button type="button" data-action="party-plus" aria-label="${t.increaseParty}">+</button></div>${arrivalError ? `<p class="command-error" role="alert" style="margin-block: 0.5rem;">${escapeHtml(arrivalError)}</p>` : ''}<div class="help-actions" style="margin-top: 1rem;"><button class="primary-action is-success" type="button" data-action="arrival-yes" ${arrivalPending ? 'disabled' : ''}>${arrivalPending ? 'Confirming...' : t.confirmArrivalPrompt}</button><button class="secondary-action" type="button" data-action="arrival-no">${t.callHelp}</button></div>`}</dialog>` : ''}
       ${audioOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.listen}</span><h2>${lastApprovedAudio && isAudioValidForReplayCheck(lastApprovedAudio) ? t.listen : t.approvedAudioUnavailable}</h2></div><button class="icon-button" data-action="audio-close" aria-label="${t.close}">${icons.close}</button></div>${lastApprovedAudio && isAudioValidForReplayCheck(lastApprovedAudio) ? `<p>${t.summary}</p><div class="help-actions"><button class="primary-action" type="button" data-action="audio-play-modal">${icons.volume} ${t.tapToPlay}</button></div>` : `<p>${t.approvedAudioUnavailable}</p><p>${t.summary}</p>`}</dialog>` : ''}
       ${islOpen ? `<dialog class="modal" open><div class="sheet-head"><div><span>${t.isl}</span><h2>${t.islTitle}</h2></div><button class="icon-button" data-action="isl-close" aria-label="${t.close}">${icons.close}</button></div><p>${t.islPending}</p><p>${t.summary}</p></dialog>` : ''}
-      ${reservationConfirmOpen ? `<dialog class="modal" open aria-labelledby="reservation-confirm-title"><div class="sheet-head"><div><span>${t.startRoute}</span><h2 id="reservation-confirm-title">Confirm Route Reservation</h2></div><button class="icon-button" data-action="reservation-confirm-close" aria-label="${t.close}">${icons.close}</button></div><p>Please confirm route reservation for <strong>${selectedDestination ? escapeHtml(selectedDestination.facility_name) : 'selected facility'}</strong>.</p><dl><div><dt>Facility ID</dt><dd>${selectedDestination ? escapeHtml(selectedDestination.facility_id) : '—'}</dd></div><div><dt>Party Size</dt><dd>${partySize} ${partySize === 1 ? t.person : t.people}</dd></div><div><dt>Route Status</dt><dd>${selectedDestination?.route_verified ? 'Verified Approved Route' : 'Illustrative / Pending'}</dd></div></dl>${reservationError ? `<p class="command-error" role="alert" style="margin-block: 0.5rem;">${escapeHtml(reservationError)}</p>` : ''}<div class="help-actions" style="margin-top: 1rem;"><button class="primary-action is-success" type="button" data-action="reservation-confirm-submit" ${reservationPending ? 'disabled' : ''}>${reservationPending ? 'Reserving...' : t.startRoute}</button><button class="secondary-action" type="button" data-action="reservation-confirm-close">${t.close}</button></div></dialog>` : ''}
+      ${reservationConfirmOpen ? `<dialog id="reservation-confirm-modal" class="modal" aria-labelledby="reservation-confirm-title"><div class="sheet-head"><div><span>${t.startRoute}</span><h2 id="reservation-confirm-title">Confirm Route Reservation</h2></div><button class="icon-button" data-action="reservation-confirm-close" aria-label="${t.close}">${icons.close}</button></div><p>Please confirm route reservation for <strong>${selectedDestination ? escapeHtml(selectedDestination.facility_name) : 'selected facility'}</strong>.</p><dl><div><dt>Facility ID</dt><dd>${selectedDestination ? escapeHtml(selectedDestination.facility_id) : '—'}</dd></div><div><dt>Party Size</dt><dd>${partySize} ${partySize === 1 ? t.person : t.people}</dd></div><div><dt>Route Status</dt><dd>${selectedDestination?.route_verified ? 'Verified Approved Route' : 'Illustrative / Pending'}</dd></div></dl>${reservationError ? `<p class="command-error" role="alert" style="margin-block: 0.5rem;">${escapeHtml(reservationError)}</p>` : ''}<div class="help-actions" style="margin-top: 1rem;"><button class="primary-action is-success" type="button" data-action="reservation-confirm-submit" ${reservationPending ? 'disabled' : ''}>${reservationPending ? 'Reserving...' : t.startRoute}</button><button class="secondary-action" type="button" data-action="reservation-confirm-close">${t.close}</button></div></dialog>` : ''}
       ${destinationDetailsOpen ? `<dialog class="modal" open aria-labelledby="destination-details-title"><div class="sheet-head"><div><span>${t.destinationLabel}</span><h2 id="destination-details-title">${selectedDestination ? escapeHtml(selectedDestination.facility_name) : 'Safe Zone Details'}</h2></div><button class="icon-button" data-action="destination-details-close" aria-label="${t.close}">${icons.close}</button></div>${selectedDestination ? `<dl><div><dt>Facility ID</dt><dd>${escapeHtml(selectedDestination.facility_id)}</dd></div><div><dt>Safe Zone ID</dt><dd>${escapeHtml(selectedDestination.safe_zone_id)}</dd></div><div><dt>Capacity</dt><dd>${destinationCapacityText()}</dd></div><div><dt>Distance</dt><dd>${destinationDistanceText(selectedDestination).kmText} (${destinationDistanceText(selectedDestination).durationText})</dd></div><div><dt>Coordinates</dt><dd>${selectedDestination.coordinates ? `${selectedDestination.coordinates[0].toFixed(5)}, ${selectedDestination.coordinates[1].toFixed(5)}` : 'Unavailable'}</dd></div><div><dt>Route Status</dt><dd>${selectedDestination.route_verified ? 'Verified' : selectedDestination.is_illustrative ? 'Illustrative' : 'Unverified'}</dd></div></dl>` : `<p>No destination information available.</p>`}<div class="help-actions" style="margin-top: 1rem;"><button class="primary-action" type="button" data-action="destination-details-close">${t.close}</button></div></dialog>` : ''}
       <div class="toast" role="status" aria-live="polite" hidden></div>
     </div>`;
@@ -1671,6 +1660,9 @@ function render() {
     nextInput.value = draft.value;
     nextInput.setSelectionRange(draft.start, draft.end);
   }
+  // Modal (inert background); each exists only while open. Escape is handled by the document listener.
+  document.querySelector<HTMLDialogElement>('#arrival-modal')?.showModal();
+  document.querySelector<HTMLDialogElement>('#reservation-confirm-modal')?.showModal();
   restoreFocusAfterRender(previousFocus, previousOverlays);
   void initMap(mapRenderVersion);
 }
@@ -1950,7 +1942,6 @@ function bindInteractions() {
       commandSuggestions = [...words[language].voiceCommands];
       commandResponse = words[language].voiceReady;
       commandError = '';
-      voiceFeedbackKey = 'micPrivacy';
       cancelRecording(); // speech recorded in the old language must not be sent under the new one
       supersedeInFlight();
       render();
@@ -2015,7 +2006,9 @@ function bindInteractions() {
     render();
   });
   document.querySelector<HTMLButtonElement>('[data-action="reservation-confirm-submit"]')?.addEventListener('click', () => {
+    document.querySelector<HTMLDialogElement>('#reservation-confirm-modal')?.close();
     reservationConfirmOpen = false;
+    render();
     void startRouteReservation();
   });
   document.querySelector<HTMLButtonElement>('[data-action="destination-details-close"]')?.addEventListener('click', () => {
@@ -2145,6 +2138,7 @@ function bindInteractions() {
     void confirmArrival();
   });
   document.querySelector<HTMLButtonElement>('[data-action="arrival-no"]')?.addEventListener('click', () => {
+    document.querySelector<HTMLDialogElement>('#arrival-modal')?.close();
     arrivalOpen = false;
     assistanceOpen = true;
     render();
@@ -2225,7 +2219,6 @@ function exposeWindowHelpers() {
     commandSuggestions = [...words[language].voiceCommands];
     commandResponse = words[language].voiceReady;
     commandError = '';
-    voiceFeedbackKey = 'micPrivacy';
     render();
   };
   w.getLanguage = () => language;
