@@ -1,6 +1,6 @@
 # Sthira — where we are and what is left
 
-Updated: 2026-09-27 19:15. Snapshot: `CLEAN` at `329633b` (typed command kept across re-renders) on top of the mac-final integration (`11ddcfc`…`e7e2171`; see `plan/prompt.md` top and `plan/worker-reports/opus.md`). No pending code edits; no worker holds files. This is the owner's overview, not a replacement for the detailed execution plan.
+Updated: 2026-09-27 21:25. Snapshot: `CLEAN` at `fb36fe8` (docs only) on top of `329633b` (typed command kept across re-renders) and the map-write fix `2beaaa6`. No pending code edits; no worker holds files. This is the owner's overview, not a replacement for the detailed execution plan.
 
 ## Where we are now
 
@@ -33,15 +33,15 @@ Legend: `[x]` = completed within the stated scope; `[ ]` = remaining, in progres
 - [x] Opus finishes stale-response/language-switch handling and reservation/selection/arrival consistency (`aa97e69`, `41a0278`, `e066056`).
 - [x] Integrate and review Gemini's map, panel and destination-proximity fixes (`fc0128b`; safe-zone ambiguity corrected in `41a0278`).
 - [x] Remove or explicitly isolate mutable test-only browser hooks (dev server + `?sthira-test-hooks=1` only; absent from `dist`).
-- [x] Responsive CSS and dialog keyboard/focus checks for 375/1024/1440 px in EN/HI/ML (`1fa3fed`, `74dd911`; headless Chromium hit-tests). True 200 % zoom not checked.
+- [x] Responsive CSS and dialog keyboard/focus checks for 375/1024/1440 px in EN/HI/ML (`1fa3fed`, `74dd911`; headless Chromium hit-tests). True 200 % browser zoom remains unprovable headlessly — `device_scale_factor=2` rasterises without reflow; it needs a human at a real browser zoom (see `plan/evidence/prototype-browser-verification.md`).
 - [x] Verify the final integrated revision and record coherent local commits on `CLEAN` (`0d290da`; 73/73 browser checks).
 
 ### B. Prove the actual browser journey
 
 - [x] Real browser (headless Chromium): onboarding, text command, repeated 3D/recenter from UI and voice, layers, panels (`map`, `dialog` sections).
-- [ ] Correct destination identity; missing coordinates never imply proximity to another shelter. (unit-tested; not yet observed in a browser)
+- [ ] Correct destination identity; missing coordinates never imply proximity to another shelter. (unit-tested only. The harness `destination-identity` section injects a coordinate-less `FACDEMO-2` and proves only that it is listed and selectable. Proving "no proximity" needs an accepted stay at a coordinate-less facility, and the exercise seed has none — BLOCKED until a seeded fixture exists; a rewrite that assumed the backend serves one was rejected)
 - [x] Reservation → arrival works through visible controls (headless Chromium, `e066056`); failures never show fabricated success.
-- [ ] Language changes, cancellation, backgrounding and stale responses behave correctly. (late old-language response, recording cancel/restart and language switch while recording observed in Chromium; real tab backgrounding not exercised)
+- [ ] Language changes, cancellation, backgrounding and stale responses behave correctly. (late old-language response, recording cancel/restart and language switch while recording observed in Chromium; **real tab backgrounding is not provable in headless Chromium** — `Page.setWebLifecycleState` accepts only `active`/`frozen` and `frozen` leaves `document.hidden` false, `Page.setDocumentVisibilityState` does not exist, assigning `visibilityState` is non-effective, and a second front page does not hide the first. The `visibilitychange` handler's `cancelRecording`/`stopTracking`/`supersedeInFlight` stay source-and-unit-verified only; needs a human on a real desktop tab switch.)
 - [x] Audio playback/replay, worker failure and recovery in Chromium (`audio`, `audio-denied`, `outage`, real mock-worker stop/restart). Audible quality not reviewed.
 - [ ] Check laptop/phone-sized layouts, keyboard use and long regional-language text. (Chromium viewport checks pass; a real phone and Safari remain)
 - [x] Record actual browser results separately from helper tests and curl/Node checks (`plan/evidence/prototype-browser-verification.md`).
@@ -61,9 +61,9 @@ Selected models: **IndicConformer-600M-Multi → Sarvam-30B FP8 → Indic Parler
 
 ### D. Make the demo understandable
 
-- [ ] Correct and verify the presenter guide against actual frontend/backend responsibilities. (corrected and committed `f4547c1`; code references spot-checked; owner read-through pending)
+- [x] Correct and verify the presenter guide against actual frontend/backend responsibilities. (`f4547c1`; re-corrected at `fb36fe8` — backend-down vs workers-down split, dead i18n keys removed, line references re-verified, one owned browser run behind every failure-state claim. Owner read-through still pending.)
 - [ ] Rehearse the five-minute demo with explicit synthetic versus real-model labels.
-- [ ] Prepare an honest fallback for network/model failure.
+- [x] Prepare an honest fallback for network/model failure. (`plan/evidence/presenter-fallback-script.md`: backend down, workers down, browser offline, mic denied, autoplay blocked, each labelled SOURCE or OBSERVED, with invented timings removed.)
 - [ ] Finish the presentation using verified capabilities, sources, authority dependencies and limitations.
 
 **Demo checkpoint:** A–D have concrete evidence or clearly disclosed limitations. Do not describe mock audio as real inference or a phone-sized browser as a native mobile app.
