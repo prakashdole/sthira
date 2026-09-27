@@ -1443,6 +1443,46 @@ function renderOnboarding() {
   document.querySelectorAll<HTMLButtonElement>('[data-action="onboarding-complete"]').forEach((button) => button.addEventListener('click', completeOnboarding));
 }
 
+// render() replaces #app, so focus is tracked by control identity, not element
+// reference: the first identifying attribute plus position among its matches.
+type FocusKey = { selector: string; index: number };
+const OVERLAY_SELECTOR = 'dialog.modal[open], .voice-console:not([hidden])';
+// One entry per open overlay: where focus returns when that overlay closes.
+const overlayReturnFocus: (FocusKey | null)[] = [];
+
+function focusKeyOf(el: Element | null): FocusKey | null {
+  if (!(el instanceof HTMLElement) || el === document.body) return null;
+  const attr = ['data-action', 'data-language', 'data-command', 'data-select-facility', 'data-candidate-id', 'id'].find((a) => el.hasAttribute(a));
+  if (!attr) return null;
+  const selector = `[${attr}="${CSS.escape(el.getAttribute(attr)!)}"]`;
+  return { selector, index: [...document.querySelectorAll(selector)].indexOf(el) };
+}
+
+function focusByKey(key: FocusKey | null | undefined): boolean {
+  const el = key ? document.querySelectorAll<HTMLElement>(key.selector)[key.index] : undefined;
+  el?.focus({ preventScroll: true });
+  return !!el && document.activeElement === el;
+}
+
+function focusTopOverlay(selector: string) {
+  const overlays = document.querySelectorAll(selector);
+  overlays[overlays.length - 1]?.querySelector<HTMLElement>('[data-action$="-close"]')?.focus();
+}
+
+function restoreFocusAfterRender(previous: FocusKey | null, previousOverlays: number) {
+  const overlays = document.querySelectorAll(OVERLAY_SELECTOR).length;
+  if (overlays > previousOverlays) {
+    for (let i = previousOverlays; i < overlays; i++) overlayReturnFocus.push(previous);
+    focusTopOverlay(OVERLAY_SELECTOR);
+  } else if (overlays < previousOverlays) {
+    let opener: FocusKey | null | undefined;
+    for (let i = overlays; i < previousOverlays; i++) opener = overlayReturnFocus.pop();
+    if (!focusByKey(opener) && overlays > 0) focusTopOverlay(OVERLAY_SELECTOR);
+  } else if (!focusByKey(previous)) {
+    focusTopOverlay('dialog.modal[open]');
+  }
+}
+
 function render() {
   const t = words[language];
   recordCameraState();
@@ -1455,6 +1495,8 @@ function render() {
     renderOnboarding();
     return;
   }
+  const previousFocus = focusKeyOf(document.activeElement);
+  const previousOverlays = document.querySelectorAll(OVERLAY_SELECTOR).length;
 
   const existingCanvas = document.querySelector<HTMLElement>('#map-canvas');
   const isMapAlive = !!(map && existingCanvas && existingCanvas.hasChildNodes());
@@ -1615,6 +1657,7 @@ function render() {
 
   hasRendered = true;
   bindInteractions();
+  restoreFocusAfterRender(previousFocus, previousOverlays);
   void initMap(mapRenderVersion);
 }
 
@@ -2206,6 +2249,17 @@ document.addEventListener('visibilitychange', () => {
     supersedeInFlight();
   }
   render();
+});
+
+// Registered once (not in bindInteractions, which runs on every render):
+// Escape closes the topmost dialog or the voice console via its own close control.
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || onboardingStep) return;
+  const overlays = document.querySelectorAll(OVERLAY_SELECTOR);
+  const close = overlays[overlays.length - 1]?.querySelector<HTMLButtonElement>('[data-action$="-close"]');
+  if (!close) return;
+  event.preventDefault();
+  close.click();
 });
 
 window.addEventListener('online', () => {
