@@ -1282,7 +1282,7 @@ function dispatchVoiceProposal(proposal: VoiceProposal) {
   }
 
   // 2. Dispatch to map if alive and ready, else queue once
-  if (map && map.isStyleLoaded()) {
+  if (map && mapStyleReady) {
     queuedVoiceProposal = null;
     executeMapActions(
       map,
@@ -1668,21 +1668,12 @@ function render() {
 }
 
 function mapColor(token: string) { return getComputedStyle(document.documentElement).getPropertyValue(token).trim(); }
-// Layer and source writes are dropped wholesale while the style is mid-load, which happens
-// transiently well after 'load'. Flag the drop so 'idle' can re-apply once the style settles.
-let mapPropsPending = false;
+// True once the current map fired 'load'. Deliberately not map.isStyleLoaded(): that also
+// requires every source to be loaded, so it turns false after each setData/tile fetch and
+// silently dropped layer writes and queued voice actions.
+let mapStyleReady = false;
 function updateMapDynamicProperties() {
-  if (!map) return;
-  try {
-    if (!map.isStyleLoaded()) {
-      mapPropsPending = true;
-      return;
-    }
-  } catch {
-    mapPropsPending = true;
-    return;
-  }
-  mapPropsPending = false;
+  if (!map || !mapStyleReady) return; // the 'load' handler applies the current state
   const rVis = redZonesVisible ? 'visible' : 'none';
   ['hazard-band', 'hazard-fill', 'hazard-edge'].forEach((id) => {
     if (map?.getLayer(id)) map.setLayoutProperty(id, 'visibility', rVis);
@@ -1749,6 +1740,7 @@ async function initMap(renderVersion: number) {
   if (renderVersion !== mapRenderVersion || !document.body.contains(container)) return;
   const t = words[language];
   const mapZoom = mapTilted ? Math.max(savedCamera.zoom, 15.5) : savedCamera.zoom;
+  mapStyleReady = false;
   map = new Map({
     container,
     center: savedCamera.center,
@@ -1807,30 +1799,8 @@ async function initMap(renderVersion: number) {
   map.on('pitchend', recordCameraState);
   map.on('rotateend', recordCameraState);
 
-  // isStyleLoaded() dips false transiently long after load, so the voice dispatch guard
-  // can park a proposal after the one-shot 'load' flush has already run. idle re-fires
-  // whenever the map settles, which is the earliest moment a parked action is safe to run.
-  const flushQueuedVoiceProposal = () => {
-    if (!map || !queuedVoiceProposal) return;
-    const p = queuedVoiceProposal;
-    queuedVoiceProposal = null;
-    executeMapActions(
-      map,
-      p,
-      motionDuration() === 0,
-      () => {},
-      () => {},
-      (candidates) => {
-        ambiguousPlaces = candidates.map((id) => ({ place_id: id, place_kind: 'candidate' }));
-      }
-    );
-    recordCameraState();
-  };
   map.on('idle', () => {
-    if (renderVersion !== mapRenderVersion) return;
-    document.querySelector<HTMLElement>('.map-loading')?.setAttribute('hidden', '');
-    flushQueuedVoiceProposal();
-    if (mapPropsPending) updateMapDynamicProperties();
+    if (renderVersion === mapRenderVersion) document.querySelector<HTMLElement>('.map-loading')?.setAttribute('hidden', '');
   });
   map.once('load', () => {
     if (renderVersion !== mapRenderVersion) return;
@@ -1838,9 +1808,23 @@ async function initMap(renderVersion: number) {
     map?.resize();
     recordCameraState();
     if (routeStarted) focusRoute();
-    revealMapLayers();
-    flushQueuedVoiceProposal();
-    startMapAnimation();
+    mapStyleReady = true;
+    updateMapDynamicProperties(); // layer state changed before load; also reveals layers and starts the animation
+    if (queuedVoiceProposal) {
+      const p = queuedVoiceProposal;
+      queuedVoiceProposal = null;
+      executeMapActions(
+        map!,
+        p,
+        motionDuration() === 0,
+        () => {},
+        () => {},
+        (candidates) => {
+          ambiguousPlaces = candidates.map((id) => ({ place_id: id, place_kind: 'candidate' }));
+        }
+      );
+      recordCameraState();
+    }
     map?.on('mouseenter', 'place-points', () => { if (map) map.getCanvas().style.cursor = 'pointer'; });
     map?.on('mouseleave', 'place-points', () => { if (map) map.getCanvas().style.cursor = ''; });
     ([['hazard-fill', 0.34, 0.44], ['relocation-fill', 0.26, 0.36]] as const).forEach(([layer, restingOpacity, hoverOpacity]) => {
@@ -1936,7 +1920,7 @@ function startMapAnimation() {
   const dashFrames = [[0.2, 2.4, 1.6], [0.7, 2.4, 1.1], [1.2, 2.4, 0.6], [1.7, 2.4, 0.1]];
   let frame = 0;
   const animate = () => {
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map) return;
     const cycle = Math.floor(frame / 12) % dashFrames.length;
     const pulse = (Math.sin(frame / 10) + 1) / 2;
     if (routeStarted) map.setPaintProperty('route-motion', 'line-dasharray', dashFrames[cycle]);

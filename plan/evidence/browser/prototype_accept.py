@@ -623,6 +623,22 @@ async def section_map(browser, base):
         toggles.append((m["hazard"], pressed, drawn > 0))
     rec(s, "red-zone control shows then hides the hazard layer (default hidden); drawn features and aria-pressed agree",
         toggles == [("visible", "true", True), ("none", "false", False)], toggles)
+    # Pan with the mouse (tile loads make isStyleLoaded() dip) while the hazard pulse runs.
+    await page.locator('[data-action="toggle-red-zones"]').click()
+    await settle(page, 600)
+    box = await page.locator("#map-canvas canvas").bounding_box()
+    cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    for dx in (300, -300, 300):
+        await page.mouse.move(cx, cy); await page.mouse.down()
+        await page.mouse.move(cx + dx, cy + dx / 3, steps=8); await page.mouse.up()
+        await settle(page, 400)
+    await settle(page, 1500)
+    pulse = "() => window.map.getPaintProperty('hazard-band', 'line-opacity')"
+    p1 = await page.evaluate(pulse)
+    await settle(page, 700)
+    p2 = await page.evaluate(pulse)
+    rec(s, "hazard pulse still animating after panning (isStyleLoaded dips do not end the loop)",
+        p1 is not None and p1 != p2, f"{p1} -> {p2}")
     rec(s, "no uncaught page errors", not page.errors, "; ".join(page.errors))
     await ctx.close()
 
