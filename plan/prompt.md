@@ -1,6 +1,107 @@
 # Sthira autonomous execution playbook
 
-## CURRENT EXECUTOR HANDOFF — 2026-09-27, multi-agent frontend/backend integration
+## CURRENT EXECUTOR HANDOFF — 2026-09-27 12:50, Worker 3 identity/language/audio closure
+
+**Read first; supersedes the 11:40 section below where they conflict.** Branch
+`CLEAN`, reviewed base `b79f520`. Evidence classes are kept separate:
+LOCAL ENGINEERING (Go/TS tests), SYNTHETIC PLUMBING (`cmd/mock-workers`,
+labelled PLUMBING_ONLY — fixture bytes, not inference), REAL INFERENCE
+(**NOT_RUN** this session; no AWS/SSH/model/GPU action taken).
+
+### Commits (local, not pushed)
+
+- `350286d` backend: guidance/query `data_version` = `store.SnapshotDataVersion`
+  (`package_id:version`, same helper as voice context), read with destinations
+  in one REPEATABLE READ read-only tx; new `data.snapshot_version` (int) for
+  reservation binding; non-CURRENT → `"none"`. Template stage rejects
+  `proposal.language != request.language` unless the same proposal
+  `SET_LANGUAGE`s to it; TTS request uses the rendered template's language and
+  digest (was `req.Language`); TTS response `language`/`speech_key` must match.
+  OpenAPI guidance description updated (additive).
+- `f907d77` backend: mock-workers CLARIFY → nil intent; integration-tagged
+  `prototype_scenarios_test.go` now builds and runs the real `cmd/mock-workers`
+  executable through real `/api/v3` handlers + disposable migrated DB (the
+  test-local mock reimplementation was removed); WAV fixture fmt size fixed to
+  uint32; playable-audio assertions; `TestProtoSnapshotIdentity`.
+- Frontend (Worker 1): **not committed** — owner had not declared stable.
+
+### Superseded diagnosis
+
+The 11:40 "destination audio never plays" defect was the bare-ID vs
+`PKG:version` mismatch; fixed server-side in `350286d` (browser equality check
+unchanged). Node run of the committed `audioGuidance.ts` on real envelopes from
+an owned stack (fresh DB, `sthira-exercise`, `mock-workers
+-scenario destination-choice`): en-IN and hi-IN audio → integrity PASS, replay
+gate with guidance `PKGDEMO-1:1` **true**; with `PKGDEMO-1:2`, bare
+`PKGDEMO-1`, wrong language or `STALE` → **false**. Not browser acceptance.
+
+### Acceptance results (this revision, macOS arm64, go1.27.1, PostgreSQL 18.6 + PostGIS; test counts include subtests)
+
+- Language regressions `go test ./internal/orchestration -run LanguageBinding`:
+  6/6 PASS; 3 fail on the pre-fix code (mismatch sent to TTS, worker
+  mislabel accepted, switch labelled with old language).
+- `go test -tags integration -run TestProto ./internal/httpserver`: 2 top-level
+  + 8 subtests PASS, 0 skip (scenarios default, silent-zoom,
+  destination-choice en/hi, arrival-confirm, clarify, data-unavailable,
+  worker-failure; snapshot identity). Snapshot test fails pre-fix on
+  `PKG-SNAP-1` vs `PKG-SNAP-1:1`.
+- With owned `STHIRA_TEST_DSN` + `STHIRA_TEST_ADMIN_DSN`: `go test
+  ./internal/{contracts,orchestration,httpserver,store}` 467 PASS / 0 FAIL / 0
+  SKIP; `-tags integration ./internal/httpserver` 237 PASS / 0 SKIP;
+  `-tags integration ./internal/offlinequeue` PASS; `go test ./...`,
+  `go vet ./...` (also `-tags integration`), `go build ./...` PASS; nested
+  asrworker/middleworker/ttsworker `go test ./...` PASS (unchanged).
+- `scripts/run_demo_rehearsal.sh` (owned DB/ports, cleaned up): Journeys 1–7
+  PASS, PLUMBING_ONLY PASS, REAL_INFERENCE NOT_RUN, CONTAINER NOT_RUN. Journey
+  5 ran Node tests on Worker 1's uncommitted tree.
+- Frontend working tree at 12:46 (Worker 1 uncommitted): `npm test` 72/72,
+  `npm run build` PASS.
+- Browser acceptance: **NOT_RUN** — `safaridriver` still returns "You must
+  enable 'Allow remote automation' in the Developer section of Safari
+  Settings" (user setting, not changed).
+
+### Frontend findings for Worker 1 (not edited by Worker 3)
+
+1. `main.ts` `envelope.data_version || 'v1'`: backend now always sends
+   `PKG:version` when CURRENT; treat missing/`"none"` as unavailable.
+2. Reservation `snapshot_version: EXERCISE_CONFIG.snapshot_version` (hardcoded
+   1): use guidance `data.snapshot_version` from the same response as
+   `currentDataVersion`, else any version change makes reservation 409 forever.
+3. SHOW_CHOICES is applied twice (step-1 loop and `executeMapActions`
+   `onChoices`); idempotent today but not exactly-once.
+4. `applyDestinationChoices` invents `safe_zone_id` (`replace('FAC','SZ')`) and
+   `route_id`; guidance mapping also defaults `route_id` to
+   `EXERCISE_CONFIG.route_id` when the server returned none. Use only server
+   identities; absent route stays absent.
+5. `SET_LAYER_VISIBILITY ROUTES` sets `routeStarted` (journey state) — layer
+   visibility should not change journey state.
+6. `mapActions.ts` bounds alias `FAC-PKG-DEST-1` came from the removed
+   test-local mock; no longer needed.
+Confirmed OK by reading: ARRIVAL_REPORTED only after server 2xx or
+reconcile `ARRIVED`; SET_LANGUAGE applied before audio assignment so
+switched-language audio passes the gate; layer IDs in `layerMap` exist in the
+style (non-existent extras are `getLayer`-guarded).
+
+### Remaining
+
+- Worker 1 stable declaration → rerun `npm test`/`npm run build`, review
+  diff, commit frontend as its own stage.
+- Browser journey (needs Safari "Allow remote automation" or another
+  browser): typed destination/zoom/arrival, replay after language/version
+  change, worker failure.
+- Real three-model session (IndicConformer, Sarvam-30B FP8, Indic
+  Parler-TTS): all 7 items in `plan/evidence/real-inference-launch-check.md`
+  NOT_RUN. Smallest next action: owner authorizes a bounded window; start
+  `i-01d17e39266c292c2`, run `tools/preflight`, then one en-IN and one hi-IN
+  destination request and one silent zoom through `/api/v3/voice/process`,
+  checking TTS returns pre-generated hi-IN audio for the approved digest.
+  No claim of automatic ASR language detection, GPU ASR or language quality.
+- Unrelated: many leaked `sthira_proto_*`/`sthira_pubtest_*` DBs from earlier
+  sessions remain on local Postgres (only this session's leaked set was
+  dropped); pre-existing gofmt drift in `cmd/mock-workers/main.go`,
+  `orchestration/registry.go`, `httpserver/readiness_test.go`.
+
+## PREVIOUS HANDOFF — 2026-09-27, multi-agent frontend/backend integration
 
 **Read this first. This checkpoint supersedes the 2026-09-25 handoff below for
 launch/preflight and integration purposes; the 2026-09-25 section remains as
