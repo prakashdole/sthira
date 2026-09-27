@@ -1,0 +1,10 @@
+{
+  "en-IN": {
+    "Thoma": "DRAFT_REQUIRES_OWNER_REVIEW: no description sentence for this speaker in the model card (https://huggingface.co/ai4bharat/indic-parler-tts); the owner must write and approve one. Do not synthesize audio from this file.",
+    "Mary": "DRAFT_REQUIRES_OWNER_REVIEW: no description sentence for this speaker in the model card (https://huggingface.co/ai4bharat/indic-parler-tts); the owner must write and approve one. Do not synthesize audio from this file."
+  },
+  "hi-IN": {
+    "Rohit": "DRAFT_REQUIRES_OWNER_REVIEW: no description sentence for this speaker in the model card (https://huggingface.co/ai4bharat/indic-parler-tts); the owner must write and approve one. Do not synthesize audio from this file.",
+    "Divya": "Divya's voice is monotone yet slightly fast in delivery, with a very close recording that almost has no background noise."
+  }
+}
