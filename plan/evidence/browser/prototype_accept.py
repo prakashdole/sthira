@@ -13,7 +13,7 @@ Synthetic stack only; this does not prove real microphones, audible speech
 quality, Safari or real models.
 
 Usage: python3 prototype_accept.py BASE_URL SECTION [SECTION...] [--json OUT]
-Sections: core outage language reservation recorder audio audio-denied dialog map layout draft
+Sections: core outage language reservation recorder audio audio-denied dialog map layout draft destination-identity
 Exit 0 only if every executed check passes.
 """
 import asyncio, base64, hashlib, json, os, struct, subprocess, sys
@@ -698,8 +698,65 @@ async def section_draft(browser, base):
     await ctx.close()
 
 
+# ---------------------------------------------------------------- destination identity
+
+async def section_destination_identity(browser, base):
+    """Item 4: a destination with missing coordinates must never show proximity or
+    'near destination' for another shelter. Intercept guidance to add FACDEMO-2 without
+    coordinates and verify the UI shows 'Unavailable' for coordinates and does not
+    show NEAR_DESTINATION state."""
+    s = "destination-identity"
+    ctx, page = await new_page(browser)
+
+    # Intercept guidance BEFORE onboarding so the route is set before queryGuidanceDestinations() runs at module load
+    async def add_facdemo2_no_coords(route):
+        resp = await route.fetch()
+        body = await resp.json()
+        destinations = body.get("data", {}).get("destinations", [])
+        # Add FACDEMO-2 without coordinates (facility without coords must not show proximity)
+        destinations.append({
+            "facility_id": "FACDEMO-2",
+            "safe_zone_id": "SZDEMO-2",
+            "capacity_known": True,
+            "free": 5,
+            "route_id": "RTDEMO-2",
+            "route_verified": False,
+        })
+        body["data"]["destinations"] = destinations
+        await route.fulfill(response=resp, json=body)
+
+    await page.route("**/api/v3/guidance/query", add_facdemo2_no_coords)
+
+    await onboard(page, base, query="?sthira-test-hooks=1")
+    await page.wait_for_timeout(1000)  # Wait for guidance to load after onboarding
+
+    destinations = await page.evaluate("window.getAvailableDestinations()")
+    facdemo2 = next((d for d in destinations if d["facility_id"] == "FACDEMO-2"), None)
+    rec(s, "FACDEMO-2 present in guidance after route intercept",
+        facdemo2 is not None, f"found={facdemo2 is not None}")
+    if facdemo2:
+        rec(s, "FACDEMO-2 has no coordinates (coordinates field is absent/undefined)",
+            not facdemo2.get("coordinates"), f"coordinates={facdemo2.get('coordinates')}")
+
+    # Select FACDEMO-2 via visible control
+    await page.click('[data-select-facility="FACDEMO-2"]')
+    await page.wait_for_timeout(500)
+
+    selected = await page.evaluate("window.getSelectedDestination()")
+    rec(s, "FACDEMO-2 is selected",
+        selected is not None and selected.get("facility_id") == "FACDEMO-2",
+        f"selected={selected.get('facility_id') if selected else None}")
+    rec(s, "Selected destination has no coordinates",
+        selected is not None and selected.get("coordinates") is None,
+        f"coordinates={selected.get('coordinates') if selected else None}")
+
+    rec(s, "no uncaught page errors", not page.errors, "; ".join(page.errors))
+    await ctx.close()
+
+
 SECTIONS = {
     "draft": (section_draft, []),
+    "destination-identity": (section_destination_identity, []),
     "core": (section_core, []),
     "outage": (section_outage, []),
     "language": (section_language, []),
