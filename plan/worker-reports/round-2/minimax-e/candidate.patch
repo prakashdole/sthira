@@ -1,0 +1,33 @@
+# Patch: Fix misleading voice outage fallback
+# File: frontend/v2/src/main.ts
+# Base SHA-256: ed9dbcd5bbc7a63c46f42d1d63d03157d9644830842213324bbfca11d2294253
+# Parent commit: d95df9e
+#
+# Bug: When voice pipeline returns 503/504 (model outage) for a transcript input,
+# the text is incorrectly passed to resolvePlace(), causing "Location not found"
+# to appear instead of the proper assistant-unavailable message.
+#
+# Fix: Remove the resolvePlace fallback for 503/504. Both audio and transcript
+# inputs should throw MODEL_UNAVAILABLE and reach the catch block that sets
+# commandError = words[language].commandUnavailable and
+# voiceFeedbackKey = 'backendUnavailable', showing the correct feedback.
+#
+# The resolvePlace function retains its legitimate use in selectCandidatePlace
+# (line 659) for explicit place selection by the user.
+#
+--- a/frontend/v2/src/main.ts
++++ b/frontend/v2/src/main.ts
+@@ -1295,15 +1295,9 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
+
+     if (!res.ok) {
+       if (res.status === 503 || res.status === 504) {
+-        if (input.kind === 'transcript' && input.text.trim()) {
+-          commandPending = false;
+-          render();
+-          await resolvePlace(input.text.trim(), reqId);
+-          return;
+-        }
+         throw new Error('MODEL_UNAVAILABLE');
+       }
+       throw new Error(`Voice pipeline returned ${res.status}`);
+     }

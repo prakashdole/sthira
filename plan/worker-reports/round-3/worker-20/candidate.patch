@@ -1,0 +1,48 @@
+--- a/backend/internal/middleworker/eval/main_test.go	2026-09-27 15:43:14
++++ b/backend/internal/middleworker/eval/main_test.go	2026-09-27 15:43:41
+@@ -377,6 +377,45 @@
+ 	}
+ }
+ 
++// TestOracle_RejectsEvidenceIDOutsideContext covers the case where the
++// observed proposal carries evidence_ids that are globally valid fixtures
++// but NOT in the case's per-case ExpectedContextIDs allow-list.
++// semanticExpectationCheck (lines 633-637) validates EvidenceIDs against the
++// per-case context; this test exercises that path.
++// Case: SYN-019 context is ["SZ-1","RZ-1","ROUTE-1"]; mutate EvidenceIDs
++// to ["PLACE-DEMO-1"] (globally known, not in SYN-019's context).
++func TestOracle_RejectsEvidenceIDOutsideContext(t *testing.T) {
++	c := mustLoadCase(t, "SYN-019")
++	wrong := wrongProposal(t, c, func(p *middleworker.Proposal) {
++		p.EvidenceIDs = []string{"PLACE-DEMO-1"}
++	})
++	if err := semanticExpectationCheck(c, wrong); err == nil {
++		t.Fatalf("semantic oracle accepted evidence_id outside case context; want rejection")
++	}
++}
++
++// TestOracle_RejectsClarificationIDOutsideContext covers the case where the
++// observed proposal carries clarification_ids that are globally valid fixtures
++// but NOT in the case's per-case ExpectedContextIDs allow-list.
++// NOTE: semanticExpectationCheck currently validates EvidenceIDs (lines 633-637)
++// but does NOT validate ClarificationIDs against ExpectedContextIDs.
++// After the oracle is extended to also check ClarificationIDs, update the
++// expected outcome in this test to match.
++func TestOracle_RejectsClarificationIDOutsideContext(t *testing.T) {
++	c := mustLoadCase(t, "SYN-021") // context: ["SZ-1"]
++	wrong := wrongProposal(t, c, func(p *middleworker.Proposal) {
++		p.ClarificationIDs = []string{"FACILITY-DEMO-1"} // globally known, not in context
++	})
++	err := semanticExpectationCheck(c, wrong)
++	// CURRENT BEHAVIOR: err is nil — ClarificationIDs are NOT validated against context.
++	// This test will FAIL once the oracle is extended to check ClarificationIDs (the fix).
++	if err == nil {
++		t.Fatalf("semantic oracle accepted clarification_id outside case context; want rejection (gap: ClarificationIDs not yet validated against per-case context)")
++	}
++}
++
++
++
+ // --- wire-shape rejection tests -------------------------------------------
+ 
+ func TestOracle_RejectsMalformedJSON(t *testing.T) {

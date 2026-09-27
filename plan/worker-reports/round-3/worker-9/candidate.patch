@@ -1,0 +1,153 @@
+# Candidate Patch — Worker 9 Dialog Accessibility Fix
+# Base commit: d95df9e609454877a91b7c82146b3c6368181b17
+# File: frontend/v2/src/main.ts
+# Base hash: 00dae4e67a63641bc62625c6eda95fd1d97846f9ece3202f4ac3c8e2a1291c09
+#
+# Two defects addressed:
+# D-ACC-01: Escape key does not close <dialog class="modal" open> elements
+# D-ACC-02: Focus not returned to triggering element after dialog close
+#
+# Root cause: <dialog> with `open` attribute has NO modal behaviors
+# (no Escape handling, no focus trapping, no backdrop click) — only showModal() activates these
+#
+# Fix strategy:
+# 1. Track lastFocusedElement before opening any dialog
+# 2. Add one global keydown handler for Escape that closes open modals
+# 3. Return focus to lastFocusedElement after any dialog close
+# 4. Apply to all dialog open/close handlers in bindInteractions()
+
+diff --git a/frontend/v2/src/main.ts b/frontend/v2/src/main.ts
+--- a/frontend/v2/src/main.ts
++++ b/frontend/v2/src/main.ts
+@@ -1849,6 +1849,16 @@ function bindInteractions() {
+   });
+ 
+   // ---- Voice console ----
++  // Track the element that triggered the last dialog open
++  let lastFocusedElement: HTMLElement | null = null;
++
++  // Helper: capture focus and open a dialog
++  function openDialog(openFlag: boolean, setter: (v: boolean) => void, triggerEl: HTMLElement) {
++    lastFocusedElement = triggerEl;
++    setter(openFlag);
++    render();
++  }
++
++  // Helper: close a dialog and return focus to trigger
++  function closeDialog(closeFlag: boolean, setter: (v: boolean) => void) {
++    setter(closeFlag);
++    render();
++    // Return focus after render so element is re-attached
++    queueMicrotask(() => lastFocusedElement?.focus());
++  }
++
+   document.querySelectorAll<HTMLButtonElement>('[data-action="voice-open"]').forEach((b) =>
+     b.addEventListener('click', () => {
+       voiceOpen = true;
+@@ -1871,19 +1881,19 @@ function bindInteractions() {
+   document.querySelector<HTMLButtonElement>('[data-action="details-close"]')?.addEventListener('click', () => {
+     detailsOpen = false;
+     render();
++    queueMicrotask(() => lastFocusedElement?.focus());
+   });
+ 
+   // ---- Assistance ----
+   document.querySelectorAll<HTMLButtonElement>('[data-action="assist-open"]').forEach((b) =>
+     b.addEventListener('click', () => {
+-      assistanceOpen = true;
+-      render();
++      openDialog(true, (v) => { assistanceOpen = v; }, b as HTMLElement);
+     })
+   );
+ 
+   document.querySelector<HTMLButtonElement>('[data-action="assist-close"]')?.addEventListener('click', () => {
+     assistanceOpen = false;
+     render();
++    queueMicrotask(() => lastFocusedElement?.focus());
+   });
+ 
+   // ---- Arrival ----
+   document.querySelectorAll<HTMLButtonElement>('[data-action="arrival-open"]').forEach((b) =>
+     b.addEventListener('click', () => {
+-      arrivalOpen = true;
+-      render();
++      openDialog(true, (v) => { arrivalOpen = v; }, b as HTMLElement);
+     })
+   );
+ 
+   document.querySelector<HTMLButtonElement>('[data-action="arrival-close"]')?.addEventListener('click', () => {
+     arrivalOpen = false;
+     render();
++    queueMicrotask(() => lastFocusedElement?.focus());
+   });
+ 
+   // ---- Audio ----
+   document.querySelector<HTMLButtonElement>('[data-action="audio-close"]')?.addEventListener('click', () => {
+     audioOpen = false;
+     render();
++    queueMicrotask(() => lastFocusedElement?.focus());
+   });
+ 
+   // ---- ISL ----
+   document.querySelector<HTMLButtonElement>('[data-action="isl-close"]')?.addEventListener('click', () => {
+     islOpen = false;
+     render();
++    queueMicrotask(() => lastFocusedElement?.focus());
+   });
+ 
+   // ---- Reservation confirm ----
+   document.querySelector<HTMLButtonElement>('[data-action="reservation-confirm-close"]')?.addEventListener('click', () => {
+     reservationConfirmOpen = false;
+     render();
++    queueMicrotask(() => lastFocusedElement?.focus());
+   });
+ 
+   // ---- Destination details ----
+   document.querySelector<HTMLButtonElement>('[data-action="destination-details-close"]')?.addEventListener('click', () => {
+     destinationDetailsOpen = false;
+     render();
++    queueMicrotask(() => lastFocusedElement?.focus());
+   });
+ 
++  // ---- Global Escape key handler for open modal dialogs ----
++  // <dialog> with `open` attribute does NOT respond to Escape — only showModal() does.
++  // This handler closes any open modal dialog when Escape is pressed.
++  document.addEventListener('keydown', (e: KeyboardEvent) => {
++    if (e.key !== 'Escape') return;
++    const openModal = document.querySelector<HTMLDialogElement>('dialog.modal[open]');
++    if (!openModal) return;
++    e.preventDefault();
++    // Find the close button inside this modal and click it
++    const closeBtn = openModal.querySelector<HTMLButtonElement>(
++      '[data-action="details-close"], [data-action="assist-close"], [data-action="arrival-close"], ' +
++      '[data-action="audio-close"], [data-action="isl-close"], [data-action="reservation-confirm-close"], ' +
++      '[data-action="destination-details-close"]'
++    );
++    closeBtn?.click();
++  });
++
++  // ---- Voice console Escape handler (non-modal, uses hidden attribute) ----
++  document.addEventListener('keydown', (e: KeyboardEvent) => {
++    if (e.key !== 'Escape') return;
++    if (!voiceOpen) return;
++    const voiceConsole = document.querySelector('.voice-console:not([hidden])');
++    if (!voiceConsole) return;
++    e.preventDefault();
++    voiceOpen = false;
++    render();
++    queueMicrotask(() => lastFocusedElement?.focus());
++  });
++
++  // ---- Side-sheet Escape handler ----
++  document.addEventListener('keydown', (e: KeyboardEvent) => {
++    if (e.key !== 'Escape') return;
++    if (!directionsOpen) return;
++    const sideSheet = document.querySelector('.side-sheet');
++    if (!sideSheet) return;
++    e.preventDefault();
++    directionsOpen = false;
++    render();
++    queueMicrotask(() => lastFocusedElement?.focus());
++  });
++
+ }

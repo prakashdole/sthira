@@ -1,0 +1,11 @@
+diff --git a/frontend/v2/src/mapActions.ts b/frontend/v2/src/mapActions.ts
+index a28f4f6..XXXXXXX 100644
+--- a/frontend/v2/src/mapActions.ts
++++ b/frontend/v2/src/mapActions.ts
+@@ -181,7 +181,7 @@ export const layerMap: Record<Layer, string[]> = {
+     'safe-zones',
+   ],
+   ROUTES: ['route-casing', 'approved-route', 'route-motion', 'routes'],
+-  MY_LOCATION: ['device-pulse', 'device-point', 'my-location'],
++  MY_LOCATION: ['device-pulse', 'device-point'],
+ };

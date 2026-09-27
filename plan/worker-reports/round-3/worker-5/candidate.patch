@@ -1,0 +1,40 @@
+# Patch: Handle MediaRecorder errors and prevent partial audio on recorder failure
+# File: frontend/v2/src/main.ts
+# Base SHA-256: 00dae4e67a63641bc62625c6eda95fd1d97846f9ece3202f4ac3c8e2a1291c09
+# Parent commit: d95df9e
+#
+# Bug: MediaRecorder.onerror is never assigned (main.ts:1101). If the recorder
+# encounters a hardware/encoding/stream-track error mid-recording, the error is
+# silently ignored. The timeout fires, onstop fires, shouldDropRecordedAudio
+# may or may not be true for the error case (it checks 'cancelled' flag),
+# and a truncated/empty Blob may be sent as audio.
+#
+# Fix:
+# 1. Assign onerror that calls cancelRecording() — cleans up timer, stream tracks,
+#    sets recordingCancelled=true, and calls stop() in a try/catch. The existing
+#    onstop guard (shouldDropRecordedAudio) will then correctly drop the partial
+#    audio because recordingCancelled is true.
+# 2. The onerror handler additionally sets voiceFeedbackKey='micStopped' and
+#    renders so the UI reflects the failure immediately even if the timeout
+#    has not yet fired.
+#
+# This is idempotent: cancelRecording() sets mediaRecorder=null, so a second
+# call (from cancelRecording's own stop() triggering onstop triggering the error
+# handler again, or from visibilitychange) is a no-op on the null recorder.
+#
+--- a/frontend/v2/src/main.ts
++++ b/frontend/v2/src/main.ts
+@@ -1098,6 +1098,11 @@ async function toggleLocalRecording() {
+     const chunks: Blob[] = [];
+     mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
+     mediaRecorder.ondataavailable = (event) => {
+       if (event.data.size) chunks.push(event.data);
+     };
++    mediaRecorder.onerror = () => {
++      cancelRecording();
++      voiceFeedbackKey = 'micStopped';
++      render();
++    };
+     mediaRecorder.onstop = async () => {
+       if (shouldDropRecordedAudio(recordingCancelled, document.hidden)) {
+         return;

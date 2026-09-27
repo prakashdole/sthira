@@ -1,0 +1,71 @@
+diff --git a/backend/internal/httpserver/stay_http_integration_test.go b/backend/internal/httpserver/stay_http_integration_test.go
+index 9698428f9c681197167821b4d8b5487aca8e62c134dbc41b5fcc3281c382e18e
+--- a/backend/internal/httpserver/stay_http_integration_test.go
++++ b/backend/internal/httpserver/stay_http_integration_test.go
+@@ -283,6 +283,56 @@ func TestHTTPCrossSessionDenial(t *testing.T) {
+ 	}
+ }
+ 
++// TestCitizenOwnershipRegression_PostDenialIdempotencyKeySurvives verifies B4:
++// after a foreign session's cross-session event is denied with 403, the owner's
++// idempotency key remains usable and replays correctly from the idempotency
++// store. The foreign session's failed INSERT uses a different session scope and
++// cannot interfere with the owner's composite (scope, operation, key) entry.
++func TestCitizenOwnershipRegression_PostDenialIdempotencyKeySurvives(t *testing.T) {
++	s, st := newStayServer(t)
++	srv := httptest.NewServer(s.Handler())
++	defer srv.Close()
++	pkgID, facID, snap := seedHTTPPackageFacility(t, st, 3, httpDayT(1), httpDayT(4))
++	_, tokenA := createSession(t, srv)
++	_, tokenB := createSession(t, srv)
++
++	// Step 1: A creates a reservation with idempotency key "replay-key".
++	recA1 := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations", tokenA,
++		reservationBody(facID, pkgID, 1, httpDay(1), httpDay(2), "replay-key", snap))
++	if recA1.code != http.StatusCreated {
++		t.Fatalf("A reserve: code=%d body=%s", recA1.code, recA1.body)
++	}
++	envA1 := decodeEnvelope(t, recA1)
++	var createdA struct {
++		StayID string `json:"stay_id"`
++	}
++	bA1, _ := json.Marshal(envA1.Data)
++	_ = json.Unmarshal(bA1, &createdA)
++
++	// Step 2: B attempts ARRIVE on A's stay using the same idempotency key string.
++	// This must fail with 403 — the ownership check is inside InTx at
++	// stay_handlers.go:597-603. B's session scope is different, so this does
++	// not pollute A's idempotency key.
++	evB := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations/"+createdA.StayID+"/events", tokenB,
++		`{"type":"ARRIVE","idempotency_key":"replay-key"}`)
++	if evB.code != http.StatusForbidden {
++		t.Fatalf("B arrive on A's stay: code=%d, want 403; body=%s", evB.code, evB.body)
++	}
++
++	// Step 3: A issues ARRIVE on their own stay with the same idempotency key.
++	// This must succeed via idempotency replay — the composite key
++	// (A_session, "stay.arrive", "replay-key") was never claimed by B because
++	// B's Begin used (B_session, ...), which is a different INSERT row.
++	evA := doAuthed(t, srv, http.MethodPost, "/api/v3/reservations/"+createdA.StayID+"/events", tokenA,
++		`{"type":"ARRIVE","idempotency_key":"replay-key"}`)
++	if evA.code != http.StatusOK {
++		t.Fatalf("A arrive after B denied: code=%d, want 200; body=%s", evA.code, evA.body)
++	}
++
++	// Step 4: Verify capacity: held (reserved) decrements on arrive, occupied
++	// increments. No double-decrement — idempotency replay must not re-trigger
++	// the state machine for capacity.
++	var held, occ int
++	if err := st.DB().QueryRowContext(t.Context(),
++		`SELECT held, occupied FROM facility_inventory WHERE facility_id=$1 AND service_date=$2`,
++		facID, httpDayT(1)).Scan(&held, &occ); err != nil {
++		t.Fatalf("read capacity: %v", err)
++	}
++	if occ != 1 {
++		t.Fatalf("occupied=%d, want 1 after arrive (idempotency replay must not double-decrement held)", occ)
++	}
++}
++
+ // TestHTTPDuplicateConfirmationReplay: same idempotency key + payload replays
+ // the stored result without a duplicate reservation or double capacity.
+ func TestHTTPDuplicateConfirmationReplay(t *testing.T) {

@@ -1,0 +1,18 @@
+# MiniMax Worker 8 — Audio playback active cleanup regression
+# BASE: d95df9e (clean, no dirty changes to audioGuidance.ts)
+# audioGuidance.ts SHA-256: fb664b91634f6a520979a851a27d7d3f71b834fe089dd85a9b9f975fd4b1a844
+
+--- a/frontend/v2/src/audioGuidance.ts
++++ b/frontend/v2/src/audioGuidance.ts
+@@ -280,7 +280,12 @@ export class AudioPlaybackGuard {
+   }
+
+   invalidate(): void {
++    // Pause any active or pending audio before discarding it.
++    // Without this, supersedeInFlight() (triggered by visibilitychange,
++    // language switch, offline, guidance refresh) leaves audio playing
++    // until natural completion — causing stale guidance bleed-through.
++    if (this.pending?.audio) this.pending.audio.pause();
+     this.generation++;
+     this.pending = null;
+   }

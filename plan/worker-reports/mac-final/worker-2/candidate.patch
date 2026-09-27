@@ -1,0 +1,108 @@
+--- a/frontend/v2/src/audioGuidance.ts
++++ b/frontend/v2/src/audioGuidance.ts
+@@ -261,6 +261,11 @@
+  * Lightweight context guard tracking state generation across asynchronous operations.
+  * Prevents an old asynchronous verification or delayed autoplay rejection from restoring
+  * obsolete audio after language/version/freshness changes or manual invalidation.
++ *
++ * Also retains a reference to the currently-playing audio element so that
++ * invalidation (language change, hide, offline, revocation, guidance
++ * invalidation) can actually stop it. Clearing queued autoplay (`pending`)
++ * alone does not stop audio that already started playing.
+  */
+ export class AudioPlaybackGuard {
+   private generation = 0;
+@@ -271,6 +276,7 @@
+     expectedDataVersion: string;
+     generation: number;
+   } | null = null;
++  private active: { audio: HTMLAudioElement; generation: number } | null = null;
+ 
+   get currentGeneration(): number {
+     return this.generation;
+@@ -280,11 +286,34 @@
+     return this.pending;
+   }
+ 
++  get activePlayback(): HTMLAudioElement | null {
++    return this.active ? this.active.audio : null;
++  }
++
++  /**
++   * Bumps the generation (blocking stale async callbacks and pending
++   * autoplay replays) and stops+releases whatever is currently playing.
++   * Safe to call unconditionally: it does not affect audio that has not
++   * yet been registered via `setActive`.
++   */
+   invalidate(): void {
+     this.generation++;
+     this.pending = null;
++    this.stopActive();
+   }
+ 
++  private stopActive(): void {
++    const current = this.active;
++    this.active = null;
++    if (!current) return;
++    try {
++      current.audio.pause();
++      current.audio.currentTime = 0;
++    } catch {
++      // Best-effort stop; element may already be detached/errored.
++    }
++  }
++
+   setPending(params: {
+     audio: HTMLAudioElement;
+     metadata: AudioMetadata;
+@@ -315,6 +344,38 @@
+     this.pending = null;
+     return p ? p.audio : null;
+   }
++
++  /**
++   * Registers `audio` as the actively-playing element for the given
++   * generation. If that generation has already been superseded (a stale
++   * callback racing an invalidation), the audio is stopped immediately
++   * instead of being retained. Any previously active element for an older
++   * generation is stopped and released first.
++   */
++  setActive(audio: HTMLAudioElement, forGeneration: number): void {
++    if (forGeneration !== this.generation) {
++      try {
++        audio.pause();
++        audio.currentTime = 0;
++      } catch {
++        // Best-effort stop of a clip that lost the race.
++      }
++      return;
++    }
++    this.stopActive();
++    this.active = { audio, generation: forGeneration };
++  }
++
++  /**
++   * Releases the active reference without stopping playback, for finished
++   * or failed clips that no longer need to be tracked (e.g. an 'ended' or
++   * 'error' event). No-op if `audio` is not the currently tracked element.
++   */
++  releaseActive(audio: HTMLAudioElement): void {
++    if (this.active && this.active.audio === audio) {
++      this.active = null;
++    }
++  }
+ }
+ 
+ /**
+--- a/frontend/v2/src/main.ts
++++ b/frontend/v2/src/main.ts
+@@ -760,6 +760,9 @@
+             return;
+           }
+           audioGuard.invalidate();
++          audioGuard.setActive(audio, audioGuard.currentGeneration);
++          audio.addEventListener('ended', () => audioGuard.releaseActive(audio));
++          audio.addEventListener('error', () => audioGuard.releaseActive(audio));
+           resolve({ success: true, autoplayBlocked: false });
+         })
+         .catch((err: Error) => {

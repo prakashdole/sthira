@@ -1,0 +1,115 @@
+--- /Users/apple/Documents/Projects/MonitoringZ/frontend/v2/src/audioGuidance.ts	2026-09-27 11:11:34
++++ frontend/v2/src/audioGuidance.ts	2026-09-27 16:49:39
+@@ -480,3 +480,30 @@
+ ): boolean {
+   return isCancelled || isPageHidden;
+ }
++
++/**
++ * MIME types the backend accepts for voice transcription.
++ * Matches backend/internal/contracts/transcription.go:SupportedTranscriptionContentTypes.
++ * Ordered by browser preference (most widely supported first).
++ */
++const BACKEND_SUPPORTED_MIME_TYPES = [
++  'audio/webm;codecs=opus',
++  'audio/webm',
++  'audio/ogg;codecs=opus',
++  'audio/ogg',
++  'audio/wav',
++] as const;
++
++/**
++ * Picks the first MIME type from the backend-allowed list that the browser supports,
++ * or null if none are supported.
++ * Mirrors the backend allow-list so the frontend never selects a type the backend rejects.
++ */
++export function pickSupportedRecorderMimeType(
++  isTypeSupported: (mime: string) => boolean
++): string | null {
++  for (const mime of BACKEND_SUPPORTED_MIME_TYPES) {
++    if (isTypeSupported(mime)) return mime;
++  }
++  return null;
++}
+--- /Users/apple/Documents/Projects/MonitoringZ/frontend/v2/src/main.ts	2026-09-27 16:08:09
++++ frontend/v2/src/main.ts	2026-09-27 16:49:53
+@@ -52,6 +52,7 @@
+   buildVoicePipelineRequest,
+   evaluateReadinessState,
+   shouldDropRecordedAudio,
++  pickSupportedRecorderMimeType,
+ } from './audioGuidance';
+ 
+ type RuntimeState = 'checking' | 'demo' | 'blocked' | 'offline';
+@@ -1094,14 +1095,33 @@
+   }
+ 
+   recordingCancelled = false;
++  const mimeType = pickSupportedRecorderMimeType((mime) => MediaRecorder.isTypeSupported(mime));
++  if (!mimeType) {
++    voiceListening = false;
++    voiceFeedbackKey = 'micStopped';
++    render();
++    return;
++  }
++  let streamRef: MediaStream | null = null;
+   try {
+-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
++    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
++    streamRef = stream;
++    if (recordingCancelled || document.hidden) {
++      stream.getTracks().forEach((track) => track.stop());
++      voiceListening = false;
++      render();
++      return;
++    }
+     const chunks: Blob[] = [];
+-    mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
++    mediaRecorder = new MediaRecorder(stream, { mimeType });
+     mediaRecorder.ondataavailable = (event) => {
+       if (event.data.size) chunks.push(event.data);
+     };
++    mediaRecorder.onerror = () => {
++      cancelRecording();
++      voiceFeedbackKey = 'micStopped';
++      render();
++    };
+     mediaRecorder.onstop = async () => {
+       if (shouldDropRecordedAudio(recordingCancelled, document.hidden)) {
+         return;
+@@ -1117,14 +1137,25 @@
+     recordingStartedAt = Date.now();
+     voiceListening = true;
+     voiceFeedbackKey = 'recording';
++    mediaStream = stream;
+     render();
+-    mediaRecorder.start();
++    try {
++      mediaRecorder.start();
++    } catch {
++      cancelRecording();
++      voiceFeedbackKey = 'micStopped';
++      render();
++      return;
++    }
+     recordingTimer = window.setTimeout(() => {
+       if (mediaRecorder?.state === 'recording') {
+         mediaRecorder.stop();
+       }
+     }, 20_000);
+   } catch {
++    if (streamRef) {
++      streamRef.getTracks().forEach((track) => track.stop());
++    }
+     voiceListening = false;
+     voiceFeedbackKey = 'micStopped';
+     render();
+@@ -1859,6 +1890,7 @@
+       commandResponse = words[language].voiceReady;
+       commandError = '';
+       voiceFeedbackKey = 'micPrivacy';
++      cancelRecording();
+       supersedeInFlight();
+       render();
+     })
