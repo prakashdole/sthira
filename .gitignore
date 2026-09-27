@@ -71,3 +71,7 @@ loadmodel/reports/*/metrics.json
 loadmodel/reports/*/raw_metrics*.json
 loadmodel/reports/*/*.raw.json
 claude.txt
+
+# Local agent tool config and worker scratch copies (not project deliverables)
+.ai/
+*.scratch
