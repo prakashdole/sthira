@@ -596,3 +596,11 @@ test('server error message comes from the v3 errors envelope', () => {
   assert.equal(serverErrorMessage({ error: { message: 'legacy' } }), undefined);
   assert.equal(serverErrorMessage(null), undefined);
 });
+
+test('safe-zone target resolves only when it identifies exactly one facility', () => {
+  const d = (facility_id: string, safe_zone_id: string) =>
+    ({ facility_id, safe_zone_id, facility_name: facility_id, is_illustrative: false }) as unknown as ResolvedDestinationChoice;
+  assert.equal(resolveChoiceAgainstGuidance('SZ-1', [d('F-1', 'SZ-1'), d('F-2', 'SZ-2')]).destination?.facility_id, 'F-1');
+  assert.equal(resolveChoiceAgainstGuidance('SZ-1', [d('F-1', 'SZ-1'), d('F-2', 'SZ-1')]).resolved, false);
+  assert.equal(resolveChoiceAgainstGuidance('F-2', [d('F-1', 'SZ-1'), d('F-2', 'SZ-1')]).destination?.facility_id, 'F-2');
+});

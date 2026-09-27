@@ -480,9 +480,11 @@ export function resolveChoiceAgainstGuidance(
   targetId: string,
   verifiedDestinations: ResolvedDestinationChoice[]
 ): ChoiceResolutionResult {
-  const match = verifiedDestinations.find(
-    (d) => (d.facility_id === targetId || d.safe_zone_id === targetId) && !d.is_illustrative
-  );
+  const verified = verifiedDestinations.filter((d) => !d.is_illustrative);
+  // A safe-zone ID is accepted only when it identifies exactly one facility;
+  // otherwise picking the first would silently substitute a destination.
+  const byZone = verified.filter((d) => d.safe_zone_id === targetId);
+  const match = verified.find((d) => d.facility_id === targetId) || (byZone.length === 1 ? byZone[0] : undefined);
   if (match) {
     return { resolved: true, destination: match };
   }
