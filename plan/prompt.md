@@ -1,6 +1,139 @@
 # Sthira autonomous execution playbook
 
-## CURRENT EXECUTOR HANDOFF — 2026-09-27 12:50, Worker 3 identity/language/audio closure
+## CURRENT EXECUTOR HANDOFF — 2026-09-27 13:40, Worker 3 integrated-checkpoint closure
+
+**Read first; supersedes the 12:50 section below where they conflict.** Branch
+`CLEAN`, reviewed base `66cd6b2`. This session verified the corrected
+snapshot/language/audio/reservation contracts through the real application
+(Vite → Go exercise → real PostgreSQL → labelled `mock-workers`), closed
+Worker 1's six frontend findings, and stopped at a clean local checkpoint.
+
+### Commits (local, not pushed)
+
+- `d561674` backend: `TestProtoSnapshotVersionTwoReservationAndStaleNoMutation`
+  — over the real `mock-workers` executable + a disposable migrated DB: a
+  stale-version reservation is rejected with **zero** held-capacity mutation;
+  a fresh version-2 `snapshot_version` permits a version-2 reservation once
+  the bump itself isn't the blocker; idempotent replay of the same key does
+  not double-mutate capacity.
+- `3c7ed53` frontend (Worker 1, reviewed and committed by Worker 3): new
+  `journey.ts` pure-logic module wired into `main.ts`, closing all six
+  findings from the 12:50 handoff (see "Findings closed" below).
+- No new production backend code this session for Tasks A/B — both were
+  already correctly implemented in `350286d`/`f907d77`; independently
+  re-verified (see below), and the real `ttsworker` package was inspected and
+  confirmed to always echo request `language`/`speech_key`, so it cannot
+  independently trigger the new orchestrator mismatch check.
+
+### Findings closed (frontend, verified by reading `main.ts`/`journey.ts`/`mapActions.ts` and running tests)
+
+1. No invented current `data_version`: guidance failure/non-CURRENT no longer
+   defaults to `'v1'` (`validateGuidanceSnapshot` rejects missing/`"none"`).
+2. Reservation `snapshot_version` now comes from the guidance response
+   (`currentSnapshotVersion`), not the hardcoded exercise constant.
+3. SHOW_CHOICES / SET_LAYER_VISIBILITY are applied exactly once, in
+   `dispatchVoiceProposal`'s own action loop; both `executeMapActions` call
+   sites in `main.ts` no longer pass `onChoices`/`onLayerVisibility` (map
+   visuals and state are updated by two independent single-pass loops, not
+   duplicated).
+4. No synthesized `safe_zone_id`/`route_id`: `mapGuidanceDestinations` and
+   `resolveChoiceAgainstGuidance` only ever return server-supplied identities;
+   confirmed against a real `guidance/query` response (`SZDEMO-1`/`RTDEMO-1`
+   passed through unmodified via Node evaluation of the actual module).
+5. Unresolved/illustrative destinations cannot build an allocatable
+   reservation payload — `buildReservationPayload` fails closed
+   (`canAllocate:false`) confirmed for both a non-offered facility and a
+   missing/non-positive `snapshot_version`.
+6. `SET_LAYER_VISIBILITY ROUTES` no longer mutates `journeyState`
+   (`routeStarted` is set only by actual route-start/stop code paths).
+No-stay arrival rejection preserved: confirmed live over HTTP, `POST
+.../events` on a non-existent stay → **404**, no success state.
+
+### Integrated verification (this session, real stack, not mocks-of-mocks)
+
+Stack: fresh disposable Postgres (migrated), `cmd/sthira-exercise` (seeded),
+`cmd/mock-workers -scenario destination-choice` (labelled PLUMBING_ONLY),
+real Vite dev server proxying `/api` to the Go backend exactly as configured
+in `vite.config.ts`. All requests went through the Vite proxy over real HTTP;
+one Node evaluation additionally ran the actual committed
+`audioGuidance.ts`/`mapActions.ts`/`journey.ts` against the real response
+bytes. **Node + curl through Vite is PLUMBING_ONLY, not browser acceptance.**
+
+| # | Journey | Result |
+|---|---|---|
+| 1 | Repeated zoom via `executeMapActions`, twice | 2 calls for 2 explicit dispatches — no internal double-fire |
+| 2 | `SET_LAYER_VISIBILITY` | confirmed presentation-only (finding 6) |
+| 3 | Destination selection | real `SZDEMO-1`/`RTDEMO-1` from guidance flow through `mapGuidanceDestinations`→`resolveChoiceAgainstGuidance` unmodified |
+| 4 | Version invalidation | `isAudioValidForReplay` true at `PKGDEMO-1:1`, false at `:2`/wrong language; `validateGuidanceSnapshot` accepts both v1 and v2 on their own guidance read |
+| 5 | Reservation → arrival | real `POST /reservations` (201) → real `POST /events ARRIVE` (200, server-acknowledged) over the Vite proxy |
+| 6 | No-stay arrival | real `POST /events` on a nonexistent stay → **404**, no fabricated success |
+| 7 | Audio replay | see journey 4; integrity (`verifyAudioIntegrity`) PASS on real TTS bytes both en-IN and hi-IN |
+| 8 | Worker outage | killed `mock-workers`, retried `voice/process` → **503** (`MODEL_UNAVAILABLE`), no fake readiness |
+
+Backend re-verification at commit `3c7ed53` (fresh disposable DB, then
+dropped): `go build`/`go vet`/`go vet -tags integration` **PASS**; `go test
+./internal/{contracts,orchestration,httpserver,store}` **PASS**; `go test
+-tags integration ./internal/httpserver` **PASS** (238 pass incl. the new
+snapshot-coherence test, 0 fail, 0 skip). Frontend at the same commit: `npm
+test` **79/79 PASS**; `npm run build` (tsc + vite) **PASS**.
+
+### Browser evidence: NOT_RUN
+
+Checked again this session (read-only): only Safari is installed (no Chrome/
+Firefox/Edge, no cached Playwright browsers). `safaridriver -p <port>` +
+`POST /session` still returns: *"You must enable 'Allow remote automation' in
+the Developer section of Safari Settings to control Safari via WebDriver."*
+This is a user-only system setting; not changed, per instructions.
+
+**To unblock (one-time, ~30s):** Safari → Settings (⌘,) → Advanced tab →
+enable "Show features for web developers" → a **Develop** menu appears in the
+menu bar → Develop → **Allow Remote Automation** (checkbox). Then re-run
+whatever WebDriver/automation tool is intended.
+
+**Manual browser checklist** (until automation is enabled), against the
+launch procedure in this file's "Validated Launch Procedures" section:
+1. Open the Vite dev URL in Safari; confirm the map loads and destination
+   chip(s) show `FACDEMO-1`/`SZDEMO-1` (not invented IDs).
+2. Speak/type a destination request; confirm the caption text matches the
+   played audio and both are en-IN (or hi-IN after a language switch).
+3. Trigger a version bump (`UPDATE packages SET version=2`) in the DB
+   directly, refresh guidance in the UI; confirm previously-played audio
+   cannot be replayed and a fresh spoken response is required.
+4. Reserve a destination, walk through "Confirm arrival"; confirm the success
+   panel appears only after the network call completes (throttle network to
+   see the pending state).
+5. Stop `mock-workers`; confirm the UI shows an error state, not a stuck
+   spinner or a false "ready" indicator.
+
+### Real-model acceptance: NOT_RUN (unchanged)
+
+All 7 items in `plan/evidence/real-inference-launch-check.md` remain
+`NOT_RUN`. No AWS start/stop/SSH/model download/paid inference this session.
+Selected models preserved: IndicConformer, Sarvam-30B FP8, Indic Parler-TTS.
+No claim of automatic ASR language detection, GPU ASR verification, or
+reviewed speech quality.
+
+### Next-step checklist (smallest remaining actions)
+
+1. **Browser:** enable Safari "Allow Remote Automation" (see above), or run
+   the 5-step manual checklist by hand once.
+2. **Real inference:** owner authorizes a bounded paid window → start
+   `i-01d17e39266c292c2` → run `tools/preflight` → one en-IN destination
+   request, one hi-IN destination request, one silent zoom through
+   `/api/v3/voice/process`; confirm hi-IN TTS returns the pre-generated audio
+   bound to the approved digest.
+3. No open backend or frontend engineering items from this task remain;
+   do not reopen A/B/C or the six frontend findings without new evidence.
+
+### Housekeeping
+
+Local Postgres still has many pre-existing leaked `sthira_pubtest_*`/
+`sthira_migtest_*`/`sthira_p5acc_*`/`sthira_p7k6_*` databases from earlier
+unrelated sessions (not created by Worker 3; not dropped, out of this task's
+ownership). Every database this session created (`sthira_w3b_*`,
+`sthira_w3c_*`, `sthira_w3final_*`) was dropped after use.
+
+## PREVIOUS HANDOFF — 2026-09-27 12:50, Worker 3 identity/language/audio closure
 
 **Read first; supersedes the 11:40 section below where they conflict.** Branch
 `CLEAN`, reviewed base `b79f520`. Evidence classes are kept separate:
