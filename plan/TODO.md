@@ -1,6 +1,6 @@
 # Sthira — where we are and what is left
 
-Updated: 2026-09-27 15:00. Snapshot: `CLEAN` integrated checkpoint (see `plan/prompt.md` top handoff for commit IDs); some later worker edits remain uncommitted and are listed there. This is the owner's overview, not a replacement for the detailed execution plan.
+Updated: 2026-09-27 18:00. Snapshot: `CLEAN` at the mac-final integration (commits `11ddcfc`…`e7e2171`, see `plan/prompt.md` top and `plan/worker-reports/opus.md`). No pending code edits. This is the owner's overview, not a replacement for the detailed execution plan.
 
 ## Where we are now
 
@@ -33,17 +33,17 @@ Legend: `[x]` = completed within the stated scope; `[ ]` = remaining, in progres
 - [x] Opus finishes stale-response/language-switch handling and reservation/selection/arrival consistency (`aa97e69`, `41a0278`, `e066056`).
 - [x] Integrate and review Gemini's map, panel and destination-proximity fixes (`fc0128b`; safe-zone ambiguity corrected in `41a0278`).
 - [x] Remove or explicitly isolate mutable test-only browser hooks (dev server + `?sthira-test-hooks=1` only; absent from `dist`).
-- [ ] Finish responsive CSS and accessibility checks for laptop and phone-sized viewports.
-- [ ] Verify the final integrated revision, then record coherent local commits on `CLEAN`.
+- [x] Responsive CSS and dialog keyboard/focus checks for 375/1024/1440 px in EN/HI/ML (`1fa3fed`, `74dd911`; headless Chromium hit-tests). True 200 % zoom not checked.
+- [x] Verify the final integrated revision and record coherent local commits on `CLEAN` (`0d290da`; 73/73 browser checks).
 
 ### B. Prove the actual browser journey
 
-- [ ] Real browser: onboarding, text command, repeated camera controls and panel interactions.
+- [x] Real browser (headless Chromium): onboarding, text command, repeated 3D/recenter from UI and voice, layers, panels (`map`, `dialog` sections).
 - [ ] Correct destination identity; missing coordinates never imply proximity to another shelter. (unit-tested; not yet observed in a browser)
 - [x] Reservation → arrival works through visible controls (headless Chromium, `e066056`); failures never show fabricated success.
-- [ ] Language changes, cancellation, backgrounding and stale responses behave correctly. (language switch during a pending request observed in Chromium; backgrounding/cancel only source + unit level)
-- [ ] Audio playback/replay, worker failure and recovery behave correctly.
-- [ ] Check laptop/phone-sized layouts, keyboard use and long regional-language text.
+- [ ] Language changes, cancellation, backgrounding and stale responses behave correctly. (late old-language response, recording cancel/restart and language switch while recording observed in Chromium; real tab backgrounding not exercised)
+- [x] Audio playback/replay, worker failure and recovery in Chromium (`audio`, `audio-denied`, `outage`, real mock-worker stop/restart). Audible quality not reviewed.
+- [ ] Check laptop/phone-sized layouts, keyboard use and long regional-language text. (Chromium viewport checks pass; a real phone and Safari remain)
 - [x] Record actual browser results separately from helper tests and curl/Node checks (`plan/evidence/prototype-browser-verification.md`).
 
 ### C. Prepare and run real models

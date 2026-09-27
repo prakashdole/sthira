@@ -1,5 +1,35 @@
 # Prototype verification by evidence class — 2026-09-27
 
+## Current: mac-final integration at `0d290da` (harness `e7e2171`), 2026-09-27 ~17:55 IST
+
+Headless Chromium (Playwright 1.61 headless shell, installed cache), owned synthetic stack
+(`sthira-exercise` + `mock-workers -scenario destination-choice` built from HEAD, disposable DB with
+migrations 0001–0010), Vite on the checkout. Command:
+`STHIRA_ACCEPT_DB=<disposable db> python3 plan/evidence/browser/prototype_accept.py http://127.0.0.1:18692/ core outage language reservation recorder audio audio-denied dialog map layout`
+→ **73 PASS, 0 FAIL, exit 0**. Real worker outage (process stopped → 503 + assistant-unavailable,
+restarted → 200 + template): 2/2. `npm test` 92/92, tsc/build 0, test hooks absent from `dist`.
+
+| Section | Checks | What is observed |
+|---|---|---|
+| core / outage | 4 / 4 | hooks absent; backend destination; 503/504 honest message; recovery |
+| language | 4 | late en-IN 200 ignored after switch; fresh hi-IN template shown |
+| reservation | 11 | server commits, response dropped → visible "not confirmed"; byte-identical retry → 200 replay; DB +1 stay; repeat Start Route no POST; GPS near → ARRIVE 200, DB `ARRIVED`; reload keeps the stay |
+| recorder | 10 | stop submits one webm/opus request; cancel during getUserMedia, cancel+restart, language switch, `error` event, `start()` failure, no supported MIME, permission denial: mic released, nothing stale sent, message shown |
+| audio / audio-denied | 8 / 3 | autoplay keeps playing; new request, language switch, offline stop it; replay refused after switch; browser-denied autoplay never plays and tap replays |
+| dialog | 5 | 4 open/re-render/Escape cycles return focus; one Escape closes only the top overlay; focus returns to the same opener instance |
+| map | 6 | rendered route features; 2× 3D/recenter agreement of pitch, terrain, aria-pressed; voice RECENTER; red-zone layer shown/hidden with drawn features |
+| layout | 18 | 375/1024/1440 × EN/HI/ML: no overflow; route, quick actions, 112, voice entry hit-testable; map disclaimer passes gestures, link clickable; details dialog fits |
+
+Negative controls (same harness): HEAD `e883692` fails the new recorder, audio, dialog, voice-recenter and
+reservation-message checks; a listener-per-render variant fails the one-Escape check; a reversed
+`claimPlayback` order fails "autoplay keeps playing"; the previous CSS hides the guidance card at 375 px
+and covers the quick actions at 1024–1440 px.
+Limits: fake microphone and API wrappers, a size/checksum-correct replacement WAV, network-rewritten
+RECENTER, read-only map access via `?sthira-test-hooks=1`. Not run: real microphone/speaker, Safari,
+real models, true 200 % zoom, real tab backgrounding.
+
+## Historical sections (below)
+
 Coordinator record at `e066056` (frontend) / `5d57c9b` (HEAD when written). It supersedes two
 earlier drafts from the verification worker. The first draft marked two items PASS that were
 defects at its revision: late results after a language switch, and mutable test hooks in the

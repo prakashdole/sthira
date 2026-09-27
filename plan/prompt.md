@@ -1,6 +1,30 @@
 # Sthira autonomous execution playbook
 
-## CURRENT EXECUTOR HANDOFF — 2026-09-27 15:00, integrated prototype checkpoint
+## CURRENT EXECUTOR HANDOFF — 2026-09-27 18:00, mac-final integration (read first)
+
+Branch `CLEAN`, local commits only, nothing pushed; workstation migration cancelled. Full record,
+evidence and all 34 worker dispositions: `plan/worker-reports/opus.md`.
+
+| Commit | Content |
+|---|---|
+| `a79c461` `7100466` `2444365` `e883692` | ASR/TTS boundary tests; eval context/oracle; ownership regression; honest voice-outage message |
+| `11ddcfc` | Recorder generation and cleanup (late getUserMedia, `onerror`, start failure, MIME allow-list, visible mic error, cancel on language change) |
+| `1fa3fed` | Pending CSS accepted: phone guidance panel visible; quick actions no longer covered by the 112 link |
+| `086db86` | Audio guard owns the playing clip; language/hide/offline/new request stop it; new clips are not self-stopped |
+| `74dd911` | Escape closes the topmost overlay (single listener); focus returns to the opener across re-renders |
+| `102176c` | Unconfirmed-reservation message visible outside the confirm dialog |
+| `0d290da` | Voice `RECENTER` clears 3D/terrain/aria state |
+| `e7e2171` | Browser acceptance harness `plan/evidence/browser/prototype_accept.py` (10 sections) |
+
+Current verification at `0d290da`: `npm test` 92/92, tsc/build 0; headless Chromium 73/73 across all
+sections plus real worker outage/recovery 2/2; `httpserver` integration 211 top-level / 240 incl.
+subtests PASS, 0 FAIL. Each fix has a negative control failing at `e883692` (details in opus.md).
+Still NOT_RUN: real microphone, Safari, human speech review, real models (no paid window), true 200 % zoom.
+
+Next action: owner manual pass (real mic + Safari/phone, ~15 min, `prototype-browser-verification.md`),
+then the bounded paid real-model window only with explicit authorization.
+
+## PREVIOUS HANDOFF — 2026-09-27 15:00, integrated prototype checkpoint (historical)
 
 Read this section first. Every section below it is historical: keep it for evidence, but do not
 follow its "next steps". Branch `CLEAN`; local commits only, nothing pushed.
