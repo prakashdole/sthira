@@ -12,6 +12,10 @@ import {
   mapGuidanceDestinations,
   resolveChoiceAgainstGuidance,
   buildReservationPayload,
+  isGuidanceActionCurrent,
+  canChangeSelection,
+  keepPendingReservation,
+  serverErrorMessage,
   DEFAULT_JOURNEY_OPTIONS,
   type DestinationTarget,
   type PositionReading,
@@ -561,3 +565,34 @@ test('transitionOnPosition: transitions NEAR_DESTINATION back to TRACKING when c
 });
 
 
+
+test('guidance actions require the displayed data_version', () => {
+  assert.equal(isGuidanceActionCurrent('PKGDEMO-1:2', 'PKGDEMO-1:2'), true);
+  assert.equal(isGuidanceActionCurrent('PKGDEMO-1:1', 'PKGDEMO-1:2'), false); // delayed old response
+  assert.equal(isGuidanceActionCurrent(undefined, 'PKGDEMO-1:2'), false);
+  assert.equal(isGuidanceActionCurrent('', ''), false);
+});
+
+test('an accepted stay pins the selection', () => {
+  assert.equal(canChangeSelection(null, 'FAC-B'), true);
+  assert.equal(canChangeSelection('FAC-A', 'FAC-A'), true);
+  assert.equal(canChangeSelection('FAC-A', 'FAC-B'), false); // refresh fallback / user tap
+  assert.equal(canChangeSelection('FAC-A', null), false);
+});
+
+test('uncertain reservation outcomes keep key+payload; definitive ones clear it', () => {
+  const err = (code: string, retryable: boolean) => ({ errors: [{ code, retryable, message: 'm' }] });
+  assert.equal(keepPendingReservation(null, null), true); // network loss
+  assert.equal(keepPendingReservation(500, err('INTERNAL', true)), true);
+  assert.equal(keepPendingReservation(409, err('IDEMPOTENCY_CONFLICT', true)), true); // in progress
+  assert.equal(keepPendingReservation(409, err('IDEMPOTENCY_CONFLICT', false)), false); // payload mismatch
+  assert.equal(keepPendingReservation(409, err('STALE_VERSION', true)), false); // needs new snapshot
+  assert.equal(keepPendingReservation(409, err('CAPACITY_CONFLICT', true)), false);
+  assert.equal(keepPendingReservation(404, err('NOT_FOUND', false)), false);
+});
+
+test('server error message comes from the v3 errors envelope', () => {
+  assert.equal(serverErrorMessage({ errors: [{ message: 'capacity exhausted' }] }), 'capacity exhausted');
+  assert.equal(serverErrorMessage({ error: { message: 'legacy' } }), undefined);
+  assert.equal(serverErrorMessage(null), undefined);
+});

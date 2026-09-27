@@ -29,6 +29,10 @@ import {
   transitionOnArrival,
   transitionOnRevocation,
   shouldDropResponse,
+  isGuidanceActionCurrent,
+  canChangeSelection,
+  keepPendingReservation,
+  serverErrorMessage,
   validateGuidanceSnapshot,
   mapGuidanceDestinations,
   resolveChoiceAgainstGuidance,
@@ -165,6 +169,8 @@ let sessionToken: string | null = sessionStorage.getItem('sthira_session_token')
 let sessionId: string = sessionStorage.getItem('sthira_session_id') || ('SES-' + Math.random().toString(36).slice(2, 10));
 let activeReservationId: string | null = sessionStorage.getItem('sthira_reservation_id');
 let activeStayId: string | null = sessionStorage.getItem('sthira_stay_id');
+// Facility the server accepted for activeStayId; pins the displayed destination.
+let activeStayFacilityId: string | null = sessionStorage.getItem('sthira_stay_facility_id');
 
 let routeStarted = false;
 let routesVisible = true;
@@ -231,6 +237,17 @@ let geolocationWatchId: number | null = null;
 let locationErrorMessage = '';
 
 let activeRequestId = 0;
+let guidanceRequestId = 0;
+
+// Single rule for every event that makes in-flight voice work obsolete
+// (language change, guidance version change, hidden document, cancel).
+function supersedeInFlight() {
+  activeRequestId++;
+  queuedVoiceProposal = null;
+  commandPending = false;
+  audioGuard.invalidate();
+  lastApprovedAudio = undefined;
+}
 const audioGuard = new AudioPlaybackGuard();
 let lastApprovedAudio: AudioMetadata | undefined = undefined;
 
@@ -297,7 +314,27 @@ function getDestinationTarget(): DestinationTarget | null {
   };
 }
 
+function lockedFacilityId(): string | null {
+  if (activeStayFacilityId) return activeStayFacilityId;
+  try {
+    return JSON.parse(sessionStorage.getItem('pending_reservation') || 'null')?.payload?.facility_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function onDestinationSelectionChanged(newDest: DestinationChoice | null) {
+  const locked = lockedFacilityId();
+  if (!canChangeSelection(locked, newDest?.facility_id)) {
+    // Keep the accepted (or unconfirmed pending) stay's destination; refresh its data if still offered.
+    const accepted = availableDestinations.find((d) => d.facility_id === locked);
+    if (accepted) selectedDestination = accepted;
+    if (newDest && newDest.facility_id !== locked) {
+      reservationError = `A stay is reserved or pending for ${locked}. The destination cannot change while it is active.`;
+    }
+    render();
+    return;
+  }
   selectedDestination = newDest;
   lastProximityEval = null;
   const target = getDestinationTarget();
@@ -422,6 +459,10 @@ async function reconcileStayState(): Promise<void> {
       const body = (await res.json()) as { data?: { stay_id?: string; state?: string; facility_id?: string } };
       if (body.data) {
         activeStayId = body.data.stay_id || savedStayId;
+        if (body.data.facility_id) {
+          activeStayFacilityId = body.data.facility_id;
+          sessionStorage.setItem('sthira_stay_facility_id', activeStayFacilityId);
+        }
         if (body.data.state === 'ARRIVED') {
           journeyState = 'ARRIVAL_REPORTED';
           arrivalSuccess = true;
@@ -436,7 +477,9 @@ async function reconcileStayState(): Promise<void> {
     } else if (res.status === 404 || res.status === 401 || res.status === 403) {
       sessionStorage.removeItem('sthira_stay_id');
       sessionStorage.removeItem('sthira_reservation_id');
+      sessionStorage.removeItem('sthira_stay_facility_id');
       activeStayId = null;
+      activeStayFacilityId = null;
       activeReservationId = null;
     }
   } catch {
@@ -495,6 +538,7 @@ async function checkRuntime(): Promise<void> {
 }
 
 async function queryGuidanceDestinations(): Promise<void> {
+  const gen = ++guidanceRequestId;
   guidanceStatus = 'PENDING';
   guidanceErrorMessage = '';
   try {
@@ -509,6 +553,7 @@ async function queryGuidanceDestinations(): Promise<void> {
         end_date: getTomorrowYMD(),
       }),
     });
+    if (gen !== guidanceRequestId) return; // a newer refresh owns the UI
     if (res.ok) {
       const envelope = (await res.json()) as {
         status?: string;
@@ -546,9 +591,9 @@ async function queryGuidanceDestinations(): Promise<void> {
       const nextDataVersion = snapshotVal.dataVersion!;
       const nextSnapshotVersion = snapshotVal.snapshotVersion!;
 
+      if (gen !== guidanceRequestId) return;
       if (nextDataVersion !== currentDataVersion || nextSnapshotVersion !== currentSnapshotVersion) {
-        audioGuard.invalidate();
-        lastApprovedAudio = undefined;
+        supersedeInFlight();
       }
       currentDataVersion = nextDataVersion;
       currentSnapshotVersion = nextSnapshotVersion;
@@ -591,6 +636,7 @@ async function queryGuidanceDestinations(): Promise<void> {
       onDestinationSelectionChanged(null);
     }
   } catch {
+    if (gen !== guidanceRequestId) return;
     isIllustrativePreview = false;
     guidanceStatus = 'ERROR';
     guidanceFreshness = 'UNAVAILABLE';
@@ -613,13 +659,15 @@ async function selectCandidatePlace(candId: string) {
   await resolvePlace(candId);
 }
 
-async function resolvePlace(query: string): Promise<void> {
+async function resolvePlace(query: string, reqId?: number): Promise<void> {
+  const stale = () => reqId !== undefined && reqId !== activeRequestId;
   try {
     const res = await fetch('/api/v3/places/resolve', {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({ jurisdiction: JURISDICTION, query }),
     });
+    if (stale()) return;
     if (res.status === 409) {
       const errData = (await res.json()) as { errors?: Array<{ code: string; message: string; details?: { candidates?: AmbiguousCandidate[] } }> };
       const candidates = errData.errors?.[0]?.details?.candidates;
@@ -633,6 +681,7 @@ async function resolvePlace(query: string): Promise<void> {
     if (res.ok) {
       ambiguousPlaces = [];
       const data = (await res.json()) as { data?: { place_id: string; place_kind: string } };
+      if (stale()) return;
       if (data.data?.place_id) {
         const pId = data.data.place_id;
         commandResponse = `Resolved location: ${pId} (${data.data.place_kind || 'place'})`;
@@ -645,6 +694,7 @@ async function resolvePlace(query: string): Promise<void> {
       render();
     }
   } catch {
+    if (stale()) return;
     commandResponse = `Place lookup failed for "${query}".`;
     render();
   }
@@ -744,6 +794,23 @@ async function verifyAndPlayAudio(audioInfo: AudioMetadata): Promise<{ success: 
 
 async function startRouteReservation() {
   if (reservationPending) return;
+  if (activeStayId) {
+    // One accepted stay per journey; Start Route never allocates a second one.
+    routeStarted = true;
+    directionsOpen = true;
+    focusRoute();
+    render();
+    return;
+  }
+
+  // An earlier attempt with an unknown outcome must be retried byte-identically
+  // under its key so the server replays it instead of allocating again.
+  let pending: { payload: Record<string, unknown> & { idempotency_key: string; facility_id: string } } | null = null;
+  try { pending = JSON.parse(sessionStorage.getItem('pending_reservation') || 'null'); } catch {}
+  if (pending?.payload?.idempotency_key) {
+    await submitReservation(pending.payload);
+    return;
+  }
 
   if (!selectedDestination || isIllustrativePreview || selectedDestination.is_illustrative) {
     reservationError = 'Cannot reserve route for illustrative preview. Waiting for authorized operational guidance.';
@@ -751,7 +818,7 @@ async function startRouteReservation() {
     return;
   }
 
-  const pendingKey = sessionStorage.getItem('pending_reservation_idem') || ('idem-' + Math.random().toString(36).slice(2, 10));
+  const pendingKey = 'idem-' + crypto.randomUUID();
 
   const buildResult = buildReservationPayload({
     facilityId: selectedDestination.facility_id,
@@ -772,22 +839,28 @@ async function startRouteReservation() {
     return;
   }
 
+  await submitReservation(buildResult.payload);
+}
+
+async function submitReservation(payload: Record<string, unknown> & { idempotency_key: string; facility_id: string }) {
   reservationPending = true;
   reservationError = '';
   render();
+  sessionStorage.setItem('pending_reservation', JSON.stringify({ payload }));
 
+  let status: number | null = null;
+  let errJson: unknown = null;
   try {
     await initSession();
-    sessionStorage.setItem('pending_reservation_idem', pendingKey);
-
     const res = await fetch('/api/v3/reservations', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify(buildResult.payload),
+      body: JSON.stringify(payload),
     });
+    status = res.status;
     if (res.ok) {
-      sessionStorage.removeItem('pending_reservation_idem');
-      const data = (await res.json()) as { data?: { reservation_id?: string; stay_id?: string } };
+      sessionStorage.removeItem('pending_reservation');
+      const data = (await res.json()) as { data?: { reservation_id?: string; stay_id?: string; facility_id?: string } };
       if (data.data?.reservation_id) {
         activeReservationId = data.data.reservation_id;
         sessionStorage.setItem('sthira_reservation_id', activeReservationId);
@@ -795,6 +868,10 @@ async function startRouteReservation() {
       if (data.data?.stay_id) {
         activeStayId = data.data.stay_id;
         sessionStorage.setItem('sthira_stay_id', activeStayId);
+        activeStayFacilityId = data.data.facility_id || payload.facility_id;
+        sessionStorage.setItem('sthira_stay_facility_id', activeStayFacilityId);
+        const accepted = availableDestinations.find((d) => d.facility_id === activeStayFacilityId);
+        if (accepted) selectedDestination = accepted;
       }
       routeStarted = true;
       directionsOpen = true;
@@ -803,19 +880,21 @@ async function startRouteReservation() {
       reservationError = '';
       focusRoute();
       render();
-    } else {
-      routeStarted = false;
-      const errJson = await res.json().catch(() => null);
-      reservationError = errJson?.error?.message || errJson?.message || `Reservation failed (${res.status})`;
-      reservationPending = false;
-      render();
+      return;
     }
+    errJson = await res.json().catch(() => null);
   } catch {
-    routeStarted = false;
-    reservationError = 'Network error while requesting reservation.';
-    reservationPending = false;
-    render();
+    // network loss: outcome unknown
   }
+  routeStarted = false;
+  reservationPending = false;
+  if (keepPendingReservation(status, errJson)) {
+    reservationError = `Reservation outcome for ${payload.facility_id} is not confirmed. Retry sends the same request and will not create a second stay.`;
+  } else {
+    sessionStorage.removeItem('pending_reservation');
+    reservationError = serverErrorMessage(errJson) || `Reservation failed (${status})`;
+  }
+  render();
 }
 
 async function confirmArrival() {
@@ -862,7 +941,7 @@ async function confirmArrival() {
       render();
     } else {
       const errJson = await res.json().catch(() => null);
-      arrivalError = errJson?.error?.message || errJson?.message || `Server rejected arrival (${res.status})`;
+      arrivalError = serverErrorMessage(errJson) || `Server rejected arrival (${res.status})`;
       arrivalPending = false;
       arrivalSuccess = false;
       render();
@@ -1135,6 +1214,7 @@ function handleOpenPanelAction(panel: Panel, targetId?: string | null): boolean 
 function dispatchVoiceProposal(proposal: VoiceProposal) {
   const validated = validateVoiceResponse(proposal);
   if (!validated) return;
+  const guidanceCurrent = isGuidanceActionCurrent(validated.data_version, currentDataVersion);
 
   // 1. Process non-map state side effects exactly once (no duplicate intermediate renders)
   for (const action of validated.actions) {
@@ -1143,6 +1223,10 @@ function dispatchVoiceProposal(proposal: VoiceProposal) {
       if (action.layer === 'SAFE_ZONES') relocationZonesVisible = action.visible;
       if (action.layer === 'ROUTES') routesVisible = action.visible;
       if (action.layer === 'MY_LOCATION') myLocationVisible = action.visible;
+    }
+    if ((action.type === 'OPEN_PANEL' || action.type === 'SHOW_CHOICES') && !guidanceCurrent) {
+      commandError = 'Response was built for different guidance data; please ask again.';
+      continue;
     }
     if (action.type === 'OPEN_PANEL') {
       handleOpenPanelAction(action.panel, action.target_id);
@@ -1215,7 +1299,7 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
         if (input.kind === 'transcript' && input.text.trim()) {
           commandPending = false;
           render();
-          await resolvePlace(input.text.trim());
+          await resolvePlace(input.text.trim(), reqId);
           return;
         }
         throw new Error('MODEL_UNAVAILABLE');
@@ -1263,6 +1347,7 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
       if (outcome.audio) {
         lastApprovedAudio = outcome.audio;
         const playRes = await verifyAndPlayAudio(outcome.audio);
+        if (reqId !== activeRequestId) return;
         if (!playRes.success && !playRes.autoplayBlocked) {
           commandError = `Audio verification notice: ${playRes.error}`;
         }
@@ -1780,8 +1865,7 @@ function bindInteractions() {
       commandResponse = words[language].voiceReady;
       commandError = '';
       voiceFeedbackKey = 'micPrivacy';
-      audioGuard.invalidate();
-      lastApprovedAudio = undefined;
+      supersedeInFlight();
       render();
     })
   );
@@ -1987,8 +2071,11 @@ function bindInteractions() {
   });
 }
 
+// Debug/test hooks: dev server only, and only with ?sthira-test-hooks=1.
+// import.meta.env.DEV is statically false in production builds, so none of
+// these setters ship. Acceptance evidence must use the real controls.
 function exposeWindowHelpers() {
-  if (typeof window === 'undefined') return;
+  if (!import.meta.env.DEV || new URLSearchParams(location.search).get('sthira-test-hooks') !== '1') return;
   const w = window as any;
   w.map = map;
   w.savedCamera = savedCamera;
@@ -2086,8 +2173,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     cancelRecording();
     stopTracking();
-    activeRequestId++;
-    commandPending = false;
+    supersedeInFlight();
   }
   render();
 });

@@ -573,3 +573,35 @@ export function buildReservationPayload(req: BuildReservationRequest): Reservati
 }
 
 
+
+/**
+ * Guidance-dependent voice actions (choices, panels) may only apply when the
+ * proposal was built against the snapshot currently displayed. Camera and
+ * layer actions carry no guidance identity and are always allowed.
+ */
+export function isGuidanceActionCurrent(proposalDataVersion: string | undefined, currentDataVersion: string): boolean {
+  return typeof proposalDataVersion === 'string' && proposalDataVersion !== '' && proposalDataVersion === currentDataVersion;
+}
+
+/** An accepted stay pins the selection; nothing may silently rebind it. */
+export function canChangeSelection(acceptedStayFacilityId: string | null, nextFacilityId: string | null | undefined): boolean {
+  return !acceptedStayFacilityId || acceptedStayFacilityId === nextFacilityId;
+}
+
+/**
+ * After a reservation attempt fails, decide whether the stored (key, payload)
+ * pair must be kept for an identical retry. Uncertain outcomes (network loss,
+ * 5xx, an in-progress key) keep it; definitive rejections clear it so the next
+ * attempt is a fresh request rather than a conflicting reuse of the key.
+ */
+export function keepPendingReservation(status: number | null, errorBody: unknown): boolean {
+  if (status === null || status >= 500) return true;
+  const e = (errorBody as { errors?: Array<{ code?: string; retryable?: boolean }> } | null)?.errors?.[0];
+  return status === 409 && e?.code === 'IDEMPOTENCY_CONFLICT' && e?.retryable === true;
+}
+
+/** Extracts the server message from the v3 error envelope. */
+export function serverErrorMessage(errorBody: unknown): string | undefined {
+  const m = (errorBody as { errors?: Array<{ message?: unknown }> } | null)?.errors?.[0]?.message;
+  return typeof m === 'string' && m !== '' ? m : undefined;
+}
