@@ -17,7 +17,7 @@ follow its "next steps". Branch `CLEAN`; local commits only, nothing pushed.
 | `41a0278` | A safe-zone target resolves only when it identifies exactly one facility |
 | `e066056` | Geolocation watch starts after reservation; the onboarding language switch also supersedes in-flight work |
 | `5d57c9b` | Middle worker: strict wire struct decodes `SET_LAYER_VISIBILITY` `layer`/`visible` |
-| docs commit | This handoff, `TODO.md`, the browser evidence, and presenter-guide/slide corrections |
+| `f4547c1` | This handoff, `TODO.md`, the browser evidence, and presenter-guide/slide corrections |
 
 ### Corrections completed
 
