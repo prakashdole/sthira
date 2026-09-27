@@ -4,6 +4,7 @@
 package middleworker
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -208,3 +209,158 @@ func TestDecodeStrictProposal_DoesNotEnforceSemanticLimits(t *testing.T) {
 		t.Fatalf("decoder must not enforce semantic limits; expected nil, got %v", err)
 	}
 }
+
+// SET_LAYER_VISIBILITY round-trip coverage. The wire struct carries
+// Layer + *Visible so a schema-compliant SET_LAYER_VISIBILITY proposal
+// MUST decode without error. The pre-fix wire struct lacked both
+// fields and rejected these proposals as ErrMalformed ("unknown
+// field layer/visible"); these tests pin the new contract and would
+// fail against the old struct.
+
+func TestDecodeStrictProposal_SetLayerVisibility_Show(t *testing.T) {
+	body := `{"schema_version":"3.0","request_id":"r1","data_version":"v1","status":"OK","intent":"FOCUS_PLACE","language":"en-IN","actions":[{"type":"SET_LAYER_VISIBILITY","layer":"RED_ZONES","visible":true}],"speech_key":null,"clarification_ids":[],"evidence_ids":[]}`
+	p, err := decodeStrictProposal([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(p.Actions) != 1 {
+		t.Fatalf("actions=%d", len(p.Actions))
+	}
+	a := p.Actions[0]
+	if a.Type != "SET_LAYER_VISIBILITY" {
+		t.Errorf("type=%q", a.Type)
+	}
+	if a.Layer != "RED_ZONES" {
+		t.Errorf("layer=%q", a.Layer)
+	}
+	if a.Visible == nil {
+		t.Fatalf("visible=nil; want pointer to true")
+	}
+	if *a.Visible != true {
+		t.Errorf("*visible=%v; want true", *a.Visible)
+	}
+}
+
+// TestDecodeStrictProposal_SetLayerVisibility_Hide is the critical
+// tri-state test: the *bool representation must preserve an explicit
+// false distinct from a missing field. A non-pointer bool would
+// silently coerce nil→false and the semantic validator's
+// `if a.Visible == nil` guard would never fire.
+func TestDecodeStrictProposal_SetLayerVisibility_Hide(t *testing.T) {
+	body := `{"schema_version":"3.0","request_id":"r1","data_version":"v1","status":"OK","intent":"FOCUS_PLACE","language":"en-IN","actions":[{"type":"SET_LAYER_VISIBILITY","layer":"SAFE_ZONES","visible":false}],"speech_key":null,"clarification_ids":[],"evidence_ids":[]}`
+	p, err := decodeStrictProposal([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	a := p.Actions[0]
+	if a.Layer != "SAFE_ZONES" {
+		t.Errorf("layer=%q", a.Layer)
+	}
+	if a.Visible == nil {
+		t.Fatalf("visible=nil; want pointer to false (explicit hide)")
+	}
+	if *a.Visible != false {
+		t.Errorf("*visible=%v; want false", *a.Visible)
+	}
+}
+
+// TestDecodeStrictProposal_SetLayerVisibility_MissingVisibleDecodes
+// pins the wire-shape/semantic split: the decoder accepts the missing
+// visible field (nil pointer), but the production validator rejects
+// it. The decoder is shape-only; the validator is the gate.
+func TestDecodeStrictProposal_SetLayerVisibility_MissingVisibleDecodes(t *testing.T) {
+	body := `{"schema_version":"3.0","request_id":"r1","data_version":"v1","status":"OK","intent":"FOCUS_PLACE","language":"en-IN","actions":[{"type":"SET_LAYER_VISIBILITY","layer":"ROUTES"}],"speech_key":null,"clarification_ids":[],"evidence_ids":[]}`
+	p, err := decodeStrictProposal([]byte(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	a := p.Actions[0]
+	if a.Layer != "ROUTES" {
+		t.Errorf("layer=%q", a.Layer)
+	}
+	if a.Visible != nil {
+		t.Errorf("visible=%v; want nil (missing)", a.Visible)
+	}
+}
+
+// Round-trip through Marshal/Unmarshal preserves the explicit false.
+// This is the regression test for the SET_LAYER_VISIBILITY hide path.
+func TestDecodeStrictProposal_SetLayerVisibility_MarshalRoundTripPreservesFalse(t *testing.T) {
+	body := `{"schema_version":"3.0","request_id":"r1","data_version":"v1","status":"OK","intent":"FOCUS_PLACE","language":"en-IN","actions":[{"type":"SET_LAYER_VISIBILITY","layer":"MY_LOCATION","visible":false}],"speech_key":null,"clarification_ids":[],"evidence_ids":[]}`
+	p, err := decodeStrictProposal([]byte(body))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	bs, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	// Must still contain "visible":false — round-trip must not
+	// coerce explicit false into missing.
+	if !strings.Contains(string(bs), `"visible":false`) {
+		t.Errorf("round-trip lost explicit false: %s", bs)
+	}
+	// And the re-decoded proposal must still carry the pointer.
+	p2, err := decodeStrictProposal(bs)
+	if err != nil {
+		t.Fatalf("re-decode: %v", err)
+	}
+	if p2.Actions[0].Visible == nil || *p2.Actions[0].Visible != false {
+		t.Errorf("re-decoded visible=%v; want pointer to false", p2.Actions[0].Visible)
+	}
+}
+
+// TestDecodeStrictProposal_SetLayerVisibility_ExtraFieldRejected
+// ensures the per-variant shape contract is still strict: unknown
+// fields on SET_LAYER_VISIBILITY are rejected at the wire boundary.
+func TestDecodeStrictProposal_SetLayerVisibility_ExtraFieldRejected(t *testing.T) {
+	body := `{"schema_version":"3.0","request_id":"r1","data_version":"v1","status":"OK","intent":"FOCUS_PLACE","language":"en-IN","actions":[{"type":"SET_LAYER_VISIBILITY","layer":"RED_ZONES","visible":true,"color":"red"}],"speech_key":null,"clarification_ids":[],"evidence_ids":[]}`
+	_, err := decodeStrictProposal([]byte(body))
+	if !errors.Is(err, ErrMalformed) {
+		t.Fatalf("expected ErrMalformed for extra field, got %v", err)
+	}
+}
+
+// TestAction_MarshalSetLayerVisibility_EmitsLayerAndVisible proves
+// the wire struct can produce the SET_LAYER_VISIBILITY JSON the
+// schema requires. The pre-fix Action struct lacked Layer and
+// Visible; json.Marshal would have emitted a body missing those
+// fields, breaking round-trip parity with the schema and the
+// orchestrator's contracts.Action. With the fields present this
+// test pins the round-trip both directions.
+func TestAction_MarshalSetLayerVisibility_EmitsLayerAndVisible(t *testing.T) {
+	visible := false
+	p := Proposal{
+		SchemaVersion: "3.0",
+		RequestID:     "REQ-1",
+		DataVersion:   "EXERCISE-7",
+		Status:        "OK",
+		Intent:        strPtrModel("FOCUS_PLACE"),
+		Language:      "en-IN",
+		Actions: []Action{
+			{Type: "SET_LAYER_VISIBILITY", Layer: "RED_ZONES", Visible: &visible},
+		},
+		SpeechKey:   nil,
+		EvidenceIDs: []string{},
+	}
+	bs, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	body := string(bs)
+	if !strings.Contains(body, `"layer":"RED_ZONES"`) {
+		t.Errorf("wire struct dropped layer: %s", body)
+	}
+	if !strings.Contains(body, `"visible":false`) {
+		t.Errorf("wire struct dropped explicit visible=false: %s", body)
+	}
+	// And the body must re-decode cleanly (round-trip).
+	if _, err := decodeStrictProposal(bs); err != nil {
+		t.Errorf("round-trip decode failed: %v\nbody=%s", err, body)
+	}
+}
+
+// strPtrModel is a small helper for Intent/pointer fields in tests.
+// It is intentionally local to this test file to keep the test
+// surface self-contained.
+func strPtrModel(s string) *string { return &s }

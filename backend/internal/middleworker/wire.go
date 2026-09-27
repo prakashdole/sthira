@@ -9,6 +9,16 @@
 // pinned schema fixture in schema/model_output.schema.json must match
 // the embedded Proposal shape. A drift between this struct and the
 // schema is a contract bug; tests assert it.
+//
+// Wire↔schema audit (2026-09-27): SET_LAYER_VISIBILITY now carries
+// Layer + *Visible in the wire struct, matching the schema and the
+// orchestrator's contracts.Action. Previously these were missing
+// from the wire struct, so a schema-compliant SET_LAYER_VISIBILITY
+// proposal failed strict JSON decode with ErrMalformed (unknown
+// field "layer"). All other variants (FOCUS_FEATURE, HIGHLIGHT_FEATURE,
+// SHOW_CHOICES, FIT_FEATURES, SHOW_ROUTE, OPEN_PANEL, ZOOM, PAN,
+// RECENTER, SET_LANGUAGE) round-trip through the wire struct
+// without drift.
 
 package middleworker
 
@@ -126,6 +136,12 @@ type Proposal struct {
 
 // Action is one strict tagged action variant. Mirrors
 // contracts.Action. Unknown variants fail the decode.
+//
+// SET_LAYER_VISIBILITY requires Layer (strict enum) and Visible
+// (explicit true/false). Visible is a *bool so the decoder can
+// preserve the distinction between "missing" (nil, rejected by the
+// semantic validator) and "explicitly false" (*false, accepted and
+// rounds-tripped through Marshal/Unmarshal).
 type Action struct {
 	Type      string   `json:"type"`
 	TargetID  string   `json:"target_id,omitempty"`
@@ -135,6 +151,8 @@ type Action struct {
 	Direction string   `json:"direction,omitempty"`
 	Steps     int      `json:"steps,omitempty"`
 	Language  string   `json:"language,omitempty"`
+	Layer     string   `json:"layer,omitempty"`
+	Visible   *bool    `json:"visible,omitempty"`
 }
 
 // ResponseEnvelope is the body the worker returns. Mirrors
