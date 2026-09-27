@@ -14,16 +14,26 @@
 //
 // corpus-check is the offline verification path: it loads the JSONL
 // cases, asserts unique IDs, asserts every referenced fixture ID is
-// in the established allow-list (no invented IDs), and prints a
-// per-case summary. It is the deterministic check that does NOT
-// require real vLLM and runs before any benchmark.
+// in the established allow-list (no invented IDs), asserts each
+// case's proposal only references IDs in the case's per-case
+// context, and prints a per-case summary. It is the deterministic
+// check that does NOT require real vLLM and runs before any
+// benchmark.
+//
+// IMPORTANT: `-mode benchmark` is UNIMPLEMENTED. runBenchmark
+// unconditionally exits 2 regardless of -endpoint, -corpus, or
+// -quantization. The artifact/GPU prerequisites are documented in
+// HARDWARE_BLOCKER.md. Until the runner is implemented AND the
+// artifacts are pinned, no benchmark invocation will reach vLLM.
 //
 // Real vLLM execution is BLOCKED until:
 //
-//   - the Qwen3-4B-Instruct-2507 weights are inventoried and
-//     pinned (model card + SHA-256 of the snapshot);
+//   - the selected middle-model weights are inventoried and pinned
+//     (model card + SHA-256 of the snapshot);
 //   - the vLLM Docker image tag is pinned and recorded here;
-//   - a private GPU (24 GB class) is available for benchmarking.
+//   - a private GPU sized for the pinned artifact is available
+//     for benchmarking;
+//   - the benchmark runner (currently a stub) is implemented.
 //
 // The eval driver is exercised against the offline harness with a
 // stub runtime; production runs require real artifacts. See
@@ -189,21 +199,30 @@ func runHarnessCheck() {
 	fmt.Println("verifiable evaluation today.")
 }
 
-// runBenchmark drives the real vLLM endpoint through the
-// bounded Client. Used only after the artifact pins are filled
-// in. Records per-case outcomes and resource data; does NOT
-// extrapolate concurrency.
+// runBenchmark drives the real vLLM endpoint through the bounded
+// Client. Used only after the artifact pins are filled in AND the
+// runner is implemented.
+// Records per-case outcomes and resource data; does NOT extrapolate
+// concurrency.
+//
+// CURRENT STATE (2026-09-27): unimplemented stub. Always exits 2.
+// The runner does NOT contact vLLM, does NOT load the corpus, and
+// does NOT write a results file. Passing -endpoint / -corpus /
+// -quantization has no effect. Artifact/GPU prerequisites are in
+// HARDWARE_BLOCKER.md.
 func runBenchmark(corpus, quantization, endpoint, out string) {
-	fmt.Fprintln(os.Stderr, "benchmark mode requires pinned artifacts and a real GPU")
-	fmt.Fprintln(os.Stderr, "see HARDWARE_BLOCKER.md and run -mode harness-check first")
+	fmt.Fprintln(os.Stderr, "middleworker-eval: -mode benchmark is UNIMPLEMENTED in this binary")
+	fmt.Fprintln(os.Stderr, "  the runner does not drive inference today; -endpoint is ignored")
+	fmt.Fprintln(os.Stderr, "  see HARDWARE_BLOCKER.md for artifact gates")
 	os.Exit(2)
 }
 
 // runCorpusCheck loads a JSONL corpus and verifies it offline:
-// unique IDs, no invented fixture references, and a printable
-// per-case summary. Exits 0 on success, 1 on validation error,
-// 2 on a usage error. No network; no model. Re-runnable in CI
-// before any future benchmark run.
+// unique IDs, no invented fixture references (global), no
+// out-of-context references (per-case), and a printable per-case
+// summary. Exits 0 on success, 1 on validation error, 2 on a
+// usage error. No network; no model. Re-runnable in CI before any
+// future benchmark run.
 func runCorpusCheck(path string) {
 	if path == "" {
 		fmt.Fprintln(os.Stderr, "corpus-check mode requires -corpus")
@@ -218,12 +237,15 @@ func runCorpusCheck(path string) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	allowed := allowedFixtureIDs()
-	if err := validateFixtureRefs(cases, allowed); err != nil {
+	if err := validateFixtureRefs(cases, allowedFixtureIDs()); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Printf("corpus-check: %s — %d cases, ids unique, all fixture refs known\n", path, len(cases))
+	if err := validatePerCaseContext(cases); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Printf("corpus-check: %s — %d cases, ids unique, fixture refs known, case-contexts valid\n", path, len(cases))
 	for _, c := range cases {
 		intent := "<none>"
 		if c.ExpectedIntent != nil {

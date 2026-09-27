@@ -20,6 +20,14 @@ import (
 // CaseV2 is the JSONL schema for the new corpus. It is a superset
 // of the v1 fields; missing v2 fields default to empty so the
 // loader can also re-read older cases without rewriting them.
+//
+// ExpectedContextIDs is the per-case allow-list: every fixture ID
+// the case's expected proposal references (action target_ids,
+// evidence_ids, clarify_ids) must be a member of this set. This
+// distinguishes "no invented IDs" (global allow-list) from "the
+// proposal only touches IDs appropriate to this scenario" (per-case
+// allow-list). A model proposal that references a globally-known ID
+// from an unrelated scenario is still wrong; this field catches it.
 type CaseV2 struct {
 	ID                  string       `json:"id"`
 	Language            string       `json:"language"`
@@ -32,6 +40,7 @@ type CaseV2 struct {
 	ExpectedSpeechKey   *string      `json:"expected_speech_key"`
 	ExpectedClarifyIDs  []string     `json:"expected_clarification_ids"`
 	ExpectedEvidenceIDs []string     `json:"expected_evidence_ids"`
+	ExpectedContextIDs  []string     `json:"expected_context_ids"`
 	ExpectedRequestID   string       `json:"expected_request_id"`
 	ExpectedDataVersion string       `json:"expected_data_version"`
 	Reason              string       `json:"reason"`
@@ -175,6 +184,56 @@ func validateFixtureRefs(cases []CaseV2, allowed map[string]struct{}) error {
 	if len(bad) > 0 {
 		sort.Strings(bad)
 		return fmt.Errorf("invented or unknown fixture IDs: %s", strings.Join(bad, ", "))
+	}
+	return nil
+}
+
+// validatePerCaseContext returns an error listing every case whose
+// proposal references an ID that is NOT in the case's own
+// ExpectedContextIDs allow-list. The per-case allow-list is what
+// makes the corpus check semantic, not just structural: a model
+// could output an ID from the global allow-list that is wrong for
+// this scenario (e.g. focusing on FACILITY-DEMO-1 when the user
+// asked for PLACE-DEMO-1). The per-case set narrows the rule to
+// "matches this case's scenario".
+//
+// Cases with an empty ExpectedContextIDs (camera-only, abstentions,
+// ambient-context cases) are not subject to this check.
+func validatePerCaseContext(cases []CaseV2) error {
+	var bad []string
+	for _, c := range cases {
+		if len(c.ExpectedContextIDs) == 0 {
+			continue
+		}
+		allowed := map[string]struct{}{}
+		for _, id := range c.ExpectedContextIDs {
+			allowed[id] = struct{}{}
+		}
+		check := func(id string) {
+			if id == "" {
+				return
+			}
+			if _, ok := allowed[id]; !ok {
+				bad = append(bad, fmt.Sprintf("%s/%s (not in case context)", c.ID, id))
+			}
+		}
+		for _, a := range c.ExpectedActions {
+			check(a.TargetID)
+			for _, id := range a.TargetIDs {
+				check(id)
+			}
+			check(a.RouteID)
+		}
+		for _, id := range c.ExpectedClarifyIDs {
+			check(id)
+		}
+		for _, id := range c.ExpectedEvidenceIDs {
+			check(id)
+		}
+	}
+	if len(bad) > 0 {
+		sort.Strings(bad)
+		return fmt.Errorf("case-context mismatches: %s", strings.Join(bad, ", "))
 	}
 	return nil
 }

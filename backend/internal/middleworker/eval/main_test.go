@@ -1,6 +1,7 @@
 // Eval-driver smoke tests. No real vLLM. The harness-check and
 // manifest modes are the only ones verifiable today; benchmark
-// mode is gated on real artifacts.
+// mode is gated on real artifacts AND on the unimplemented runner
+// (see TestEval_BenchmarkModeIsUnimplemented below).
 
 package main
 
@@ -8,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,26 +59,42 @@ func TestEval_ManifestModeWritesFile(t *testing.T) {
 	}
 }
 
-func TestEval_BenchmarkModeRejectsWithoutEndpoint(t *testing.T) {
-	// benchmark mode without an endpoint is a documented
-	// NOT_EVALUATED path; this test asserts the manifest stays
-	// free of fake SHA-256 values.
-	for _, a := range []ArtifactInfo{Pinned.BF16Artifact, Pinned.AWQInt4Artifact} {
+// TestEval_BenchmarkModeIsUnimplemented pins the documented
+// capability gap: runBenchmark unconditionally exits 2 regardless
+// of endpoint/corpus/quantization flags. It does NOT mean "waiting
+// for a GPU" — the runner code itself has no inference path today.
+// See HARDWARE_BLOCKER.md for the artifact/gpu prerequisites AND
+// the runner's missing capability (which Opus must implement
+// before any real benchmark can run).
+func TestEval_BenchmarkModeIsUnimplemented(t *testing.T) {
+	for _, a := range []ArtifactInfo{Pinned.BF16Artifact, Pinned.AWQInt4Artifact, Pinned.FP8Artifact} {
 		if a.SHA256 != "" {
 			t.Errorf("artifact SHA-256 must be empty until real-inference is recorded")
+		}
+		if a.Status != "BLOCKED_HARDWARE" && a.Status != "PENDING_DOWNLOAD" {
+			t.Errorf("artifact status = %q; expected BLOCKED_HARDWARE or PENDING_DOWNLOAD", a.Status)
 		}
 	}
 }
 
 // --- offline corpus tests --------------------------------------------------
 //
-// These tests verify the corpus offline: JSON syntax, unique IDs, no
-// invented fixture references, and the round-trip from the corpus's
-// expected outputs through the wire-shape decoder (StubRuntime +
-// decodeStrictProposal). They do NOT call a real model. The semantic
-// oracle (contracts.ValidateModelOutput + EnforceScopedContext) is
-// exercised in backend/internal/contracts/*_test.go and is
-// intentionally out of lane here.
+// The corpus-check oracle has TWO layers:
+//
+//  1. WIRE-SHAPE: decodeStrictProposal accepts the synthesized
+//     proposal as a valid JSON document matching the v3.0 wire
+//     contract. A round-trip via StubRuntime is the proof.
+//
+//  2. SEMANTIC: the decoded proposal's status/intent/actions/IDs
+//     match the case's expected outcome, NOT just that the JSON
+//     decodes. This is what proves the oracle can detect a wrong
+//     model decision rather than only a malformed one.
+//
+// The semantic oracle lives in this package (not the production
+// validator) so it can be exercised offline without the contracts
+// module. It implements only the per-case checks the corpus
+// exercises; the production contracts.ValidateModelOutput +
+// EnforceScopedContext remain the authoritative gates.
 
 const v2CorpusPath = "corpus/synthetic_v2.jsonl"
 const v1CorpusPath = "corpus/synthetic.jsonl"
@@ -142,6 +160,22 @@ func TestCorpusV2_NoInventedFixtureIDs(t *testing.T) {
 	}
 }
 
+// TestCorpusV2_PerCaseContext exercises the per-case allow-list:
+// every fixture ID the case's expected proposal references must
+// appear in the case's own ExpectedContextIDs set, not just in the
+// global allow-list. This catches "wrong scenario" matches that
+// the global check cannot — for example, a model that focuses
+// FACILITY-DEMO-1 in a case whose scenario is about PLACE-DEMO-1.
+func TestCorpusV2_PerCaseContext(t *testing.T) {
+	cases, err := loadCorpusJSONL(v2CorpusPath)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := validatePerCaseContext(cases); err != nil {
+		t.Errorf("per-case context: %v", err)
+	}
+}
+
 func TestCorpusV2_SyntheticProposalMatchesShapeContract(t *testing.T) {
 	// For every case, the synthesized proposal must be valid JSON
 	// with the exact top-level keys the wire schema requires. This
@@ -183,31 +217,19 @@ func TestCorpusV2_SyntheticProposalMatchesShapeContract(t *testing.T) {
 	}
 }
 
-func TestOracle_AcceptsAllowedProposalForEachCase(t *testing.T) {
-	// For every OK case, the expected proposal must decode cleanly
-	// through the wire-shape decoder (StubRuntime + decodeStrictProposal).
-	// This is the offline oracle proof: a proposal the contract
-	// says is allowed round-trips through the wire boundary.
+// TestOracle_WireShapeAcceptsEveryCase covers BOTH OK and non-OK
+// cases. Non-OK proposals must also decode cleanly — they carry
+// empty actions and a null intent, but the JSON itself must be
+// wire-shape valid. Skipping non-OK cases would leave abstention
+// and error paths untested, exactly the paths a misbehaving model
+// is most likely to emit.
+func TestOracle_WireShapeAcceptsEveryCase(t *testing.T) {
 	cases, err := loadCorpusJSONL(v2CorpusPath)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	for _, c := range cases {
 		t.Run(c.ID, func(t *testing.T) {
-			if c.ExpectedStatus != "OK" {
-				t.Skipf("non-OK case; expected empty actions, skip decoder round-trip")
-			}
-			if actionTypeMissingFromWire(c) {
-				// Documented drift: the JSON schema carries
-				// SET_LAYER_VISIBILITY with layer/visible fields,
-				// but the middleworker.Action struct omits them.
-				// The contracts.Action in the orchestrator module
-				// (out of lane) has them. The corpus still encodes
-				// the contract-correct expectation; the offline
-				// oracle cannot round-trip it until the drift is
-				// closed.
-				t.Skipf("action variant %q has schema fields absent from the offline wire struct; offline oracle cannot exercise it (drift documented in corpus notes)", primaryActionType(c))
-			}
 			fixture := writeSynthFixture(t, c)
 			rt, err := middleworker.NewStubRuntime(fixture)
 			if err != nil {
@@ -229,13 +251,24 @@ func TestOracle_AcceptsAllowedProposalForEachCase(t *testing.T) {
 			}
 			resp, err := rt.Propose(context.Background(), req)
 			if err != nil {
-				t.Fatalf("oracle rejected allowed proposal: %v\nfixture=%s", err, fixture)
+				t.Fatalf("wire-shape oracle rejected allowed proposal: %v\nfixture=%s", err, fixture)
 			}
-			if resp.Proposal.Status != "OK" {
-				t.Errorf("decoded status = %s, want OK", resp.Proposal.Status)
+			if resp.Proposal.Status != c.ExpectedStatus {
+				t.Errorf("decoded status = %s, want %s", resp.Proposal.Status, c.ExpectedStatus)
 			}
-			if resp.Proposal.Intent == nil || *resp.Proposal.Intent != *c.ExpectedIntent {
-				t.Errorf("decoded intent = %v, want %v", resp.Proposal.Intent, c.ExpectedIntent)
+			if c.ExpectedStatus == "OK" {
+				if resp.Proposal.Intent == nil {
+					t.Errorf("OK case has nil intent: %s", c.ID)
+				} else if *resp.Proposal.Intent != *c.ExpectedIntent {
+					t.Errorf("decoded intent = %v, want %v", resp.Proposal.Intent, c.ExpectedIntent)
+				}
+			} else {
+				if resp.Proposal.Intent != nil {
+					t.Errorf("non-OK case %s has non-nil intent: %v", c.ID, resp.Proposal.Intent)
+				}
+				if len(resp.Proposal.Actions) != 0 {
+					t.Errorf("non-OK case %s has actions: %+v", c.ID, resp.Proposal.Actions)
+				}
 			}
 			if len(resp.Proposal.Actions) != len(c.ExpectedActions) {
 				t.Errorf("decoded actions = %d, want %d", len(resp.Proposal.Actions), len(c.ExpectedActions))
@@ -243,6 +276,108 @@ func TestOracle_AcceptsAllowedProposalForEachCase(t *testing.T) {
 		})
 	}
 }
+
+// TestOracle_SemanticExpectationsAcceptCorrectProposal is the
+// positive side of the semantic oracle: when a proposal matches
+// the case's expected outcome, the oracle returns nil. Together
+// with the negative-side tests below, this proves the oracle can
+// distinguish right from wrong proposals — not merely "JSON
+// decodes" from "JSON does not decode".
+func TestOracle_SemanticExpectationsAcceptCorrectProposal(t *testing.T) {
+	cases, err := loadCorpusJSONL(v2CorpusPath)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	for _, c := range cases {
+		t.Run(c.ID+"/correct", func(t *testing.T) {
+			body := synthesizeProposal(c)
+			var p middleworker.Proposal
+			if err := json.Unmarshal([]byte(body), &p); err != nil {
+				t.Fatalf("synthesized proposal not valid JSON: %v", err)
+			}
+			if err := semanticExpectationCheck(c, p); err != nil {
+				t.Errorf("semantic oracle rejected the case's own expected proposal: %v", err)
+			}
+		})
+	}
+}
+
+// --- negative examples ----------------------------------------------------
+//
+// Each negative example constructs a deliberately-wrong proposal
+// (wire-shape valid, semantically wrong) and asserts the semantic
+// oracle rejects it. The wire-shape decoder accepts these — that
+// is the point. The semantic oracle is what catches them.
+
+func TestOracle_RejectsWrongStatus(t *testing.T) {
+	// SYN-016 (ZOOM OK) with status flipped to CLARIFY.
+	c := mustLoadCase(t, "SYN-016")
+	wrong := wrongProposal(t, c, func(p *middleworker.Proposal) {
+		p.Status = "CLARIFY"
+	})
+	if err := semanticExpectationCheck(c, wrong); err == nil {
+		t.Fatalf("semantic oracle accepted wrong status; want rejection")
+	}
+}
+
+func TestOracle_RejectsForbiddenTarget(t *testing.T) {
+	// SYN-019 (FIT_FEATURES with SZ-1,RZ-1,ROUTE-1) rewritten to
+	// reference PLACE-DEMO-1 — globally known but not in the case
+	// context. Per-case context check rejects.
+	c := mustLoadCase(t, "SYN-019")
+	wrong := wrongProposal(t, c, func(p *middleworker.Proposal) {
+		if len(p.Actions) == 0 {
+			t.Fatalf("expected an action to mutate")
+		}
+		p.Actions[0].TargetIDs = []string{"PLACE-DEMO-1"}
+	})
+	if err := semanticExpectationCheck(c, wrong); err == nil {
+		t.Fatalf("semantic oracle accepted forbidden target; want rejection")
+	}
+}
+
+func TestOracle_RejectsWrongVisibility(t *testing.T) {
+	// SYN-020 (SET_LAYER_VISIBILITY visible=false) flipped to true.
+	c := mustLoadCase(t, "SYN-020")
+	wrong := wrongProposal(t, c, func(p *middleworker.Proposal) {
+		if len(p.Actions) == 0 {
+			t.Fatalf("expected an action to mutate")
+		}
+		tr := true
+		p.Actions[0].Visible = &tr
+	})
+	if err := semanticExpectationCheck(c, wrong); err == nil {
+		t.Fatalf("semantic oracle accepted wrong visibility; want rejection")
+	}
+}
+
+func TestOracle_RejectsUnauthorizedExtraAction(t *testing.T) {
+	// SYN-021 (HIGHLIGHT_FEATURE on SZ-1) with an extra action
+	// appended — the case explicitly expects one action.
+	c := mustLoadCase(t, "SYN-021")
+	wrong := wrongProposal(t, c, func(p *middleworker.Proposal) {
+		p.Actions = append(p.Actions, middleworker.Action{Type: "RECENTER"})
+	})
+	if err := semanticExpectationCheck(c, wrong); err == nil {
+		t.Fatalf("semantic oracle accepted extra action; want rejection")
+	}
+}
+
+// TestOracle_RejectsNonOKWithActions covers the schema-level rule
+// that a non-OK status must carry no actions; the semantic oracle
+// must catch a model that emits "DATA_UNAVAILABLE" with a stray
+// action attached.
+func TestOracle_RejectsNonOKWithActions(t *testing.T) {
+	c := mustLoadCase(t, "SYN-023") // DATA_UNAVAILABLE
+	wrong := wrongProposal(t, c, func(p *middleworker.Proposal) {
+		p.Actions = []middleworker.Action{{Type: "RECENTER"}}
+	})
+	if err := semanticExpectationCheck(c, wrong); err == nil {
+		t.Fatalf("semantic oracle accepted non-OK with actions; want rejection")
+	}
+}
+
+// --- wire-shape rejection tests -------------------------------------------
 
 func TestOracle_RejectsMalformedJSON(t *testing.T) {
 	fixture := writeRawFixture(t, `{not json`)
@@ -312,8 +447,6 @@ func TestOracle_RejectsUnknownField(t *testing.T) {
 }
 
 func TestOracle_RejectsRequestIDMismatch(t *testing.T) {
-	// The fixture's request_id differs from the request's; the
-	// wire contract requires a strict echo.
 	body := synthesizeProposal(CaseV2{
 		ID: "X", Language: "en-IN",
 		ExpectedStatus:    "OK",
@@ -339,6 +472,194 @@ func TestOracle_RejectsRequestIDMismatch(t *testing.T) {
 
 // --- helpers ---------------------------------------------------------------
 
+// mustLoadCase loads the v2 corpus and returns the case with the
+// given id, failing the test if it is missing.
+func mustLoadCase(t *testing.T, id string) CaseV2 {
+	t.Helper()
+	cases, err := loadCorpusJSONL(v2CorpusPath)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	for _, c := range cases {
+		if c.ID == id {
+			return c
+		}
+	}
+	t.Fatalf("case %s not found in %s", id, v2CorpusPath)
+	return CaseV2{}
+}
+
+// wrongProposal synthesizes the case's expected proposal, decodes
+// it into a Proposal, applies a mutation, and returns the mutated
+// proposal. The mutation produces a wire-shape-valid but
+// semantically-wrong proposal for the negative-example tests.
+func wrongProposal(t *testing.T, c CaseV2, mutate func(*middleworker.Proposal)) middleworker.Proposal {
+	t.Helper()
+	body := synthesizeProposal(c)
+	var p middleworker.Proposal
+	if err := json.Unmarshal([]byte(body), &p); err != nil {
+		t.Fatalf("synthesize: %v", err)
+	}
+	mutate(&p)
+	return p
+}
+
+// semanticExpectationCheck compares an observed Proposal against a
+// case's locked expected outcome. It implements only the checks
+// the corpus exercises; the production validator in
+// backend/internal/contracts remains the authoritative gate.
+//
+// Returns nil iff the observed proposal matches the case's
+// expected status, intent, actions, evidence_ids, clarification_ids
+// and speech_key (where applicable). The check distinguishes:
+//
+//   - wrong status (OK claimed for a non-OK case, or vice versa)
+//   - wrong intent (intent string mismatch)
+//   - wrong actions (count or content mismatch, including extras)
+//   - wrong visibility on SET_LAYER_VISIBILITY (explicit-false vs
+//     missing vs true)
+//   - forbidden targets (an ID outside the case's per-case context)
+//   - non-OK carrying actions (status rule violation)
+//
+// All comparisons ignore request_id/data_version/language because
+// those reflect the request envelope, not the model's decision.
+func semanticExpectationCheck(c CaseV2, observed middleworker.Proposal) error {
+	if observed.Status != c.ExpectedStatus {
+		return errSemantic("status=%q want %q", observed.Status, c.ExpectedStatus)
+	}
+	if c.ExpectedStatus == "OK" {
+		if observed.Intent == nil {
+			return errSemantic("OK status requires non-nil intent")
+		}
+		if *observed.Intent != *c.ExpectedIntent {
+			return errSemantic("intent=%q want %q", *observed.Intent, *c.ExpectedIntent)
+		}
+	} else {
+		if observed.Intent != nil {
+			return errSemantic("non-OK status must have nil intent; got %q", *observed.Intent)
+		}
+		if len(observed.Actions) != 0 {
+			return errSemantic("non-OK status must carry no actions; got %d", len(observed.Actions))
+		}
+	}
+	if len(observed.Actions) != len(c.ExpectedActions) {
+		return errSemantic("actions count=%d want %d", len(observed.Actions), len(c.ExpectedActions))
+	}
+	for i, want := range c.ExpectedActions {
+		got := observed.Actions[i]
+		if got.Type != want.Type {
+			return errSemantic("action %d type=%q want %q", i, got.Type, want.Type)
+		}
+		if want.Type == "SET_LAYER_VISIBILITY" {
+			if got.Layer != want.Layer {
+				return errSemantic("action %d layer=%q want %q", i, got.Layer, want.Layer)
+			}
+			// explicit-false vs missing vs true must round-trip
+			// distinctly. The *bool shape preserves all three.
+			switch {
+			case want.Visible == nil && got.Visible != nil:
+				return errSemantic("action %d visible=%v want nil (missing)", i, *got.Visible)
+			case want.Visible != nil && got.Visible == nil:
+				return errSemantic("action %d visible=nil want %v", i, *want.Visible)
+			case want.Visible != nil && got.Visible != nil && *want.Visible != *got.Visible:
+				return errSemantic("action %d visible=%v want %v", i, *got.Visible, *want.Visible)
+			}
+		}
+		if got.TargetID != want.TargetID {
+			return errSemantic("action %d target_id=%q want %q", i, got.TargetID, want.TargetID)
+		}
+		if !stringSlicesEqual(got.TargetIDs, want.TargetIDs) {
+			return errSemantic("action %d target_ids=%v want %v", i, got.TargetIDs, want.TargetIDs)
+		}
+		if got.RouteID != want.RouteID {
+			return errSemantic("action %d route_id=%q want %q", i, got.RouteID, want.RouteID)
+		}
+		if got.Panel != want.Panel {
+			return errSemantic("action %d panel=%q want %q", i, got.Panel, want.Panel)
+		}
+		if got.Direction != want.Direction {
+			return errSemantic("action %d direction=%q want %q", i, got.Direction, want.Direction)
+		}
+		if got.Steps != want.Steps {
+			return errSemantic("action %d steps=%d want %d", i, got.Steps, want.Steps)
+		}
+		if got.Language != want.Language {
+			return errSemantic("action %d language=%q want %q", i, got.Language, want.Language)
+		}
+		if got.Layer != want.Layer {
+			return errSemantic("action %d layer=%q want %q", i, got.Layer, want.Layer)
+		}
+	}
+	if !stringSlicesEqual(observed.EvidenceIDs, c.ExpectedEvidenceIDs) {
+		return errSemantic("evidence_ids=%v want %v", observed.EvidenceIDs, c.ExpectedEvidenceIDs)
+	}
+	if !stringSlicesEqual(observed.ClarificationIDs, c.ExpectedClarifyIDs) {
+		return errSemantic("clarification_ids=%v want %v", observed.ClarificationIDs, c.ExpectedClarifyIDs)
+	}
+	// speech_key: nil-vs-non-nil matters; the string value must match.
+	switch {
+	case observed.SpeechKey == nil && c.ExpectedSpeechKey != nil:
+		return errSemantic("speech_key=nil want %q", *c.ExpectedSpeechKey)
+	case observed.SpeechKey != nil && c.ExpectedSpeechKey == nil:
+		return errSemantic("speech_key=%q want nil", *observed.SpeechKey)
+	case observed.SpeechKey != nil && c.ExpectedSpeechKey != nil && *observed.SpeechKey != *c.ExpectedSpeechKey:
+		return errSemantic("speech_key=%q want %q", *observed.SpeechKey, *c.ExpectedSpeechKey)
+	}
+	// Per-case context check: every action target/route and every
+	// evidence/clarify id must be in ExpectedContextIDs, when the
+	// case declares a non-empty per-case context.
+	if len(c.ExpectedContextIDs) > 0 {
+		allowed := map[string]struct{}{}
+		for _, id := range c.ExpectedContextIDs {
+			allowed[id] = struct{}{}
+		}
+		contains := func(id string) bool {
+			_, ok := allowed[id]
+			return ok
+		}
+		for _, a := range observed.Actions {
+			if a.TargetID != "" && !contains(a.TargetID) {
+				return errSemantic("target_id %q not in case context", a.TargetID)
+			}
+			for _, id := range a.TargetIDs {
+				if id != "" && !contains(id) {
+					return errSemantic("target_id %q not in case context", id)
+				}
+			}
+			if a.RouteID != "" && !contains(a.RouteID) {
+				return errSemantic("route_id %q not in case context", a.RouteID)
+			}
+		}
+		for _, id := range observed.EvidenceIDs {
+			if !contains(id) {
+				return errSemantic("evidence_id %q not in case context", id)
+			}
+		}
+	}
+	return nil
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// errSemantic is a small typed error so tests can recognize the
+// oracle's own output vs. production validator errors.
+type semanticMismatch struct{ msg string }
+
+func (e *semanticMismatch) Error() string { return "semantic oracle: " + e.msg }
+func errSemantic(format string, args ...any) error {
+	return &semanticMismatch{msg: fmt.Sprintf(format, args...)}
+}
+
 // writeSynthFixture writes the synthesized proposal of c to a
 // temporary file and returns its path. The StubRuntime reads the
 // file on each Propose call.
@@ -359,28 +680,46 @@ func writeRawFixture(t *testing.T, body string) string {
 
 func strPtr(s string) *string { return &s }
 
-// primaryActionType returns the case's first action's type, or
-// the empty string if the case has no actions.
-func primaryActionType(c CaseV2) string {
-	if len(c.ExpectedActions) == 0 {
-		return ""
+// TestOracle_RejectsOmittedVisibility: the model omits "visible" on the
+// wire (absent key decodes to nil) while SYN-020 expects explicit false.
+// Omission must not be scored as hide.
+func TestOracle_RejectsOmittedVisibility(t *testing.T) {
+	c := mustLoadCase(t, "SYN-020")
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(synthesizeProposal(c)), &raw); err != nil {
+		t.Fatalf("synthesize: %v", err)
 	}
-	return c.ExpectedActions[0].Type
+	actions, _ := raw["actions"].([]any)
+	if len(actions) == 0 {
+		t.Fatalf("SYN-020 has no actions")
+	}
+	delete(actions[0].(map[string]any), "visible")
+	body, _ := json.Marshal(raw)
+	var got middleworker.Proposal
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Actions[0].Visible != nil {
+		t.Fatalf("absent visible decoded as %v, want nil", *got.Actions[0].Visible)
+	}
+	if err := semanticExpectationCheck(c, got); err == nil || !strings.Contains(err.Error(), "visible") {
+		t.Fatalf("oracle accepted omitted visible against visible=false (err=%v)", err)
+	}
 }
 
-// actionTypeMissingFromWire reports whether the case's primary
-// action variant carries schema-level fields that the offline
-// middleworker.Action wire struct does not include. Today only
-// SET_LAYER_VISIBILITY (layer + visible) trips this; the schema
-// and the orchestrator's contracts.Action carry both fields, so
-// the offline gap is structural drift, not a corpus bug.
-func actionTypeMissingFromWire(c CaseV2) bool {
-	if len(c.ExpectedActions) == 0 {
-		return false
+// TestCorpusContext_RejectsGloballyKnownIDOutsideCase: a fixture ID that
+// is in the global allow-list but not in this case's context must fail
+// the per-case check (SYN-021 context is SZ-1 only).
+func TestCorpusContext_RejectsGloballyKnownIDOutsideCase(t *testing.T) {
+	c := mustLoadCase(t, "SYN-021")
+	if _, ok := allowedFixtureIDs()["FACILITY-DEMO-1"]; !ok {
+		t.Fatalf("FACILITY-DEMO-1 must be globally known for this test")
 	}
-	switch c.ExpectedActions[0].Type {
-	case "SET_LAYER_VISIBILITY":
-		return true
+	c.ExpectedEvidenceIDs = append(append([]string{}, c.ExpectedEvidenceIDs...), "FACILITY-DEMO-1")
+	if err := validateFixtureRefs([]CaseV2{c}, allowedFixtureIDs()); err != nil {
+		t.Fatalf("global check should pass: %v", err)
 	}
-	return false
+	if err := validatePerCaseContext([]CaseV2{c}); err == nil {
+		t.Fatalf("per-case check accepted FACILITY-DEMO-1 outside SYN-021 context")
+	}
 }
