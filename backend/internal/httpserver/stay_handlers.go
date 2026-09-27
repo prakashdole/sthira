@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -185,7 +186,16 @@ func (s *Server) handleGuidanceQuery(w http.ResponseWriter, r *http.Request) {
 		EndDate:       end,
 		RouteGateOpen: s.allowSynthetic(),
 	}
-	dests, freshness, err := store.ChoiceQuerier{}.EligibleWithStatus(r.Context(), s.store.DB(), q, time.Now().UTC())
+	// One REPEATABLE READ, read-only transaction so the package version and
+	// every destination/capacity read observe the same snapshot; the emitted
+	// data_version then identifies exactly the content returned.
+	tx, err := s.store.DB().BeginTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		s.writeError(w, r, http.StatusServiceUnavailable, contracts.ErrDataUnavailable, "store unavailable", "", true)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	dests, freshness, pkgVersion, err := store.ChoiceQuerier{}.EligibleWithStatus(r.Context(), tx, q, time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, store.ErrDateRangeExceeded) {
 			s.writeError(w, r, http.StatusBadRequest, contracts.ErrInvalidValue, err.Error(), "end_date", false)
@@ -216,10 +226,20 @@ func (s *Server) handleGuidanceQuery(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, item)
 	}
-	s.writeData(w, r, http.StatusOK, req.PackageID, freshness, map[string]any{
+	// data_version is the same package_id:version identity voice/process
+	// emits for this snapshot (store.SnapshotDataVersion). A non-current
+	// package has no operational snapshot to bind to.
+	dataVersion := "none"
+	data := map[string]any{
 		"destinations": items,
 		"route_gate":   s.allowSynthetic(),
-	})
+	}
+	if freshness == contracts.FreshnessCurrent {
+		dataVersion = store.SnapshotDataVersion(req.PackageID, pkgVersion)
+		// Integer form for reservations' snapshot_version binding.
+		data["snapshot_version"] = pkgVersion
+	}
+	s.writeData(w, r, http.StatusOK, dataVersion, freshness, data)
 }
 
 // --- reservations (create + read) ---

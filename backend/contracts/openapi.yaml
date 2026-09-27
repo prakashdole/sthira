@@ -110,7 +110,11 @@ paths:
         date range. Unknown capacity is reported as unknown and never promised.
         The operational route gate is closed while route authority (O05) is
         open; no destination is route-verified for operational use. Performs no
-        write. Public.
+        write. Public. When source_status is CURRENT, data_version is the
+        package snapshot identity (package_id:version, identical to
+        voice/process for the same snapshot) and data.snapshot_version is its
+        integer version for reservation binding; otherwise data_version is
+        "none".
       requestBody:
         required: true
         content:

@@ -114,8 +114,9 @@ func routeVerified(ctx context.Context, db DBTX, packageID, safeZoneID string, n
 // and has an operational source with live authorization for that scope.
 // Quarantined, suspended, retired, or revoked source data cannot become
 // current eligible destinations.
-func readPolicyOrderAndFacilityMap(ctx context.Context, db DBTX, q ChoiceQuery, now time.Time) ([]string, map[string]string, contracts.FreshnessState, error) {
+func readPolicyOrderAndFacilityMap(ctx context.Context, db DBTX, q ChoiceQuery, now time.Time) ([]string, map[string]string, int, contracts.FreshnessState, error) {
 	var (
+		pkgVersion      int
 		pkgJurisdiction string
 		body            []byte
 		effectiveAt     time.Time
@@ -127,7 +128,7 @@ func readPolicyOrderAndFacilityMap(ctx context.Context, db DBTX, q ChoiceQuery, 
 		authorized      bool
 	)
 	err := db.QueryRowContext(ctx, `
-		SELECT p.jurisdiction, p.body, p.effective_at, p.expires_at, p.superseded_by,
+		SELECT p.version, p.jurisdiction, p.body, p.effective_at, p.expires_at, p.superseded_by,
 		       p.source_id, p.evidence_class, s.state,
 		       EXISTS (
 		           SELECT 1 FROM source_authorizations sauth
@@ -137,43 +138,43 @@ func readPolicyOrderAndFacilityMap(ctx context.Context, db DBTX, q ChoiceQuery, 
 		FROM packages p
 		LEFT JOIN sources s ON s.source_id = p.source_id
 		WHERE p.package_id = $1`, q.PackageID, now).Scan(
-		&pkgJurisdiction, &body, &effectiveAt, &expiresAt, &supersededBy,
+		&pkgVersion, &pkgJurisdiction, &body, &effectiveAt, &expiresAt, &supersededBy,
 		&sourceID, &pkgEvidence, &sourceState, &authorized,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil, contracts.FreshnessUnknown, fmt.Errorf("store: read package body: %w", ErrNoScopedContext)
+			return nil, nil, pkgVersion, contracts.FreshnessUnknown, fmt.Errorf("store: read package body: %w", ErrNoScopedContext)
 		}
-		return nil, nil, contracts.FreshnessUnknown, fmt.Errorf("store: read package body: %w", err)
+		return nil, nil, pkgVersion, contracts.FreshnessUnknown, fmt.Errorf("store: read package body: %w", err)
 	}
 
 	// 1. Jurisdiction check: package must belong to requested jurisdiction.
 	if q.Jurisdiction != "" && pkgJurisdiction != q.Jurisdiction {
-		return nil, nil, contracts.FreshnessUnavailable, nil
+		return nil, nil, pkgVersion, contracts.FreshnessUnavailable, nil
 	}
 
 	// 2. Evidence class check: ordinary production requires AUTHORIZED_OPERATIONAL;
 	// synthetic demo is permitted only when route gate / synthetic mode is open.
 	if !q.RouteGateOpen && (pkgEvidence == "SYNTHETIC_DEMO" || pkgEvidence == "SYNTHETIC" || pkgEvidence != "AUTHORIZED_OPERATIONAL") {
-		return nil, nil, contracts.FreshnessUnavailable, nil
+		return nil, nil, pkgVersion, contracts.FreshnessUnavailable, nil
 	}
 
 	// 3. Package currency & supersession check.
 	if supersededBy.Valid && supersededBy.String != "" {
-		return nil, nil, contracts.FreshnessStale, nil
+		return nil, nil, pkgVersion, contracts.FreshnessStale, nil
 	}
 	if now.Before(effectiveAt) || !now.Before(expiresAt) {
-		return nil, nil, contracts.FreshnessExpired, nil
+		return nil, nil, pkgVersion, contracts.FreshnessExpired, nil
 	}
 
 	// 4. Source operational state: source must be OPERATIONAL (not QUARANTINED, SUSPENDED, RETIRED, etc.).
 	if !sourceState.Valid || sourceact.State(sourceState.String) != sourceact.Operational {
-		return nil, nil, contracts.FreshnessUnavailable, nil
+		return nil, nil, pkgVersion, contracts.FreshnessUnavailable, nil
 	}
 
 	// 5. Source authorization check: active unexpired authorization in this jurisdiction.
 	if !authorized {
-		return nil, nil, contracts.FreshnessExpired, nil
+		return nil, nil, pkgVersion, contracts.FreshnessExpired, nil
 	}
 
 	var pb struct {
@@ -186,7 +187,7 @@ func readPolicyOrderAndFacilityMap(ctx context.Context, db DBTX, q ChoiceQuery, 
 		} `json:"allocation_policy"`
 	}
 	if err := json.Unmarshal(body, &pb); err != nil {
-		return nil, nil, contracts.FreshnessUnknown, fmt.Errorf("store: parse package body: %w", err)
+		return nil, nil, pkgVersion, contracts.FreshnessUnknown, fmt.Errorf("store: parse package body: %w", err)
 	}
 	facZone := make(map[string]string, len(pb.Facilities))
 	for _, f := range pb.Facilities {
@@ -195,7 +196,7 @@ func readPolicyOrderAndFacilityMap(ctx context.Context, db DBTX, q ChoiceQuery, 
 		}
 		facZone[f.ID] = f.SafeZoneID
 	}
-	return pb.AllocationPolicy.Order, facZone, contracts.FreshnessCurrent, nil
+	return pb.AllocationPolicy.Order, facZone, pkgVersion, contracts.FreshnessCurrent, nil
 }
 
 // ChoiceQuerier computes eligible destinations.
@@ -209,32 +210,35 @@ type ChoiceQuerier struct{}
 // (informational) but cannot be reserved. No destination is invented, ranked
 // by guessed safety, or substituted.
 func (q ChoiceQuerier) Eligible(ctx context.Context, db DBTX, query ChoiceQuery, now time.Time) ([]Destination, error) {
-	dests, _, err := q.EligibleWithStatus(ctx, db, query, now)
+	dests, _, _, err := q.EligibleWithStatus(ctx, db, query, now)
 	return dests, err
 }
 
 // EligibleWithStatus returns the eligible destinations along with the authoritative
-// freshness state of the package context.
-func (ChoiceQuerier) EligibleWithStatus(ctx context.Context, db DBTX, q ChoiceQuery, now time.Time) ([]Destination, contracts.FreshnessState, error) {
+// freshness state of the package context and the package version read in the
+// same row as the policy body (the snapshot the destinations were derived
+// from; see SnapshotDataVersion). Callers wanting every read to observe one
+// snapshot should pass a REPEATABLE READ transaction as db.
+func (ChoiceQuerier) EligibleWithStatus(ctx context.Context, db DBTX, q ChoiceQuery, now time.Time) ([]Destination, contracts.FreshnessState, int, error) {
 	dates, err := choiceDateRange(q.StartDate, q.EndDate)
 	if err != nil {
-		return nil, contracts.FreshnessUnknown, err
+		return nil, contracts.FreshnessUnknown, 0, err
 	}
-	policyOrder, facZone, freshness, err := readPolicyOrderAndFacilityMap(ctx, db, q, now)
+	policyOrder, facZone, version, freshness, err := readPolicyOrderAndFacilityMap(ctx, db, q, now)
 	if err != nil {
-		return nil, freshness, err
+		return nil, freshness, version, err
 	}
 	if len(policyOrder) == 0 || len(facZone) == 0 {
 		// No server-permitted order or no facilities: no destinations.
 		// Never fabricate an alphabetical or guessed rank.
-		return nil, freshness, nil
+		return nil, freshness, version, nil
 	}
 	if len(dates) == 0 {
 		// Browsing with no date range: every facility is reported with
 		// unknown capacity (informational); the calling handler decides
 		// whether the response should set `free = null`.
 		dests, err := browseEligibleByPolicyOrder(ctx, db, q.PackageID, policyOrder, facZone, now, q)
-		return dests, freshness, err
+		return dests, freshness, version, err
 	}
 
 	// Iterate in policy order. Each safe-zone ID contributes its facilities
@@ -255,7 +259,7 @@ func (ChoiceQuerier) EligibleWithStatus(ctx context.Context, db DBTX, q ChoiceQu
 		for _, facID := range facs {
 			d, ok, err := facilityDestination(ctx, db, q, facID, szID, dates, now)
 			if err != nil {
-				return nil, freshness, err
+				return nil, freshness, version, err
 			}
 			if !ok {
 				continue
@@ -263,7 +267,7 @@ func (ChoiceQuerier) EligibleWithStatus(ctx context.Context, db DBTX, q ChoiceQu
 			out = append(out, d)
 		}
 	}
-	return out, freshness, nil
+	return out, freshness, version, nil
 }
 
 // browseEligibleByPolicyOrder returns every facility in the package that

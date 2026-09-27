@@ -239,7 +239,7 @@ func (o *Orchestrator) Process(ctx context.Context, req contracts.PipelineReques
 	// we skip TTS entirely.
 	var tplOut TemplateOutput
 	if middleResp.Proposal.SpeechKey != nil && *middleResp.Proposal.SpeechKey != "" {
-		out, err := o.stageTemplate(runCtx, scoped, middleResp.Proposal)
+		out, err := o.stageTemplate(runCtx, scoped, middleResp.Proposal, req.Language)
 		if err != nil {
 			var perr *PipelineError
 			if errors.As(err, &perr) {
@@ -260,7 +260,7 @@ func (o *Orchestrator) Process(ctx context.Context, req contracts.PipelineReques
 	// (RECENTER, FOCUS_PLACE without speech_key) NEVER call TTS.
 	var audio *contracts.PipelineAudio
 	if req.Render.Kind == contracts.PipelineRenderTTS && tplOut.Text != "" {
-		audioOut, err := o.stageTTS(runCtx, id, scoped, tplOut, req.Language, middleResp.ModelRevision)
+		audioOut, err := o.stageTTS(runCtx, id, scoped, tplOut, middleResp.ModelRevision)
 		if err != nil {
 			var perr *PipelineError
 			if errors.As(err, &perr) {
@@ -591,7 +591,7 @@ func (o *Orchestrator) stageMiddle(ctx context.Context, id CorrelationID, sc con
 // stageTemplate looks up the approved template and renders the text.
 // When the proposal has no speech_key (silent action) the template is
 // empty and TTS is skipped entirely.
-func (o *Orchestrator) stageTemplate(ctx context.Context, sc contracts.ScopedContext, proposal contracts.ModelOutput) (TemplateOutput, error) {
+func (o *Orchestrator) stageTemplate(ctx context.Context, sc contracts.ScopedContext, proposal contracts.ModelOutput, requestLanguage string) (TemplateOutput, error) {
 	// Silent path: no speech_key, no TTS.
 	if proposal.SpeechKey == nil || *proposal.SpeechKey == "" {
 		// Validate that any closed-loop policy is enforced even
@@ -604,6 +604,17 @@ func (o *Orchestrator) stageTemplate(ctx context.Context, sc contracts.ScopedCon
 		return TemplateOutput{}, nil
 	}
 	speechKey := *proposal.SpeechKey
+	// Response language binding: the spoken/captioned text is in
+	// proposal.Language. It may differ from the citizen's request language
+	// only when the same proposal switches the session to that language
+	// (SET_LANGUAGE). Any other mismatch would produce speech the citizen
+	// did not select; fail the template stage (no text, no TTS) rather
+	// than relabel it.
+	if !responseLanguageBound(proposal, requestLanguage) {
+		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
+			Stage: StageTemplate, Code: contracts.ErrLanguageUnsupported, Reason: fmt.Sprintf("proposal language %q does not match request language %q without SET_LANGUAGE", proposal.Language, requestLanguage), Retryable: false,
+		})
+	}
 	if !sc.IsSpeechKeyApprovedForLanguage(speechKey, proposal.Language) {
 		return TemplateOutput{}, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{
 			Stage: StageTemplate, Code: contracts.ErrTemplateUnknown, Reason: "template key not approved for language", Retryable: false,
@@ -668,6 +679,7 @@ func (o *Orchestrator) stageTemplate(ctx context.Context, sc contracts.ScopedCon
 	}
 	return TemplateOutput{
 		SpeechKey:       speechKey,
+		Language:        proposal.Language,
 		TemplateVersion: tpl.TemplateVersion,
 		SourceVersion:   tpl.SourceVersion,
 		Text:            rendered,
@@ -677,7 +689,11 @@ func (o *Orchestrator) stageTemplate(ctx context.Context, sc contracts.ScopedCon
 
 // stageTTS synthesizes the rendered template. Never called for silent
 // actions (the caller checks speech_key first).
-func (o *Orchestrator) stageTTS(ctx context.Context, id CorrelationID, sc contracts.ScopedContext, tpl TemplateOutput, language, modelRevision string) (*contracts.PipelineAudio, error) {
+func (o *Orchestrator) stageTTS(ctx context.Context, id CorrelationID, sc contracts.ScopedContext, tpl TemplateOutput, modelRevision string) (*contracts.PipelineAudio, error) {
+	language := tpl.Language
+	if language == "" {
+		return nil, pipelineError(contracts.PipelineDataUnavailable, 422, StageFailure{Stage: StageTemplate, Code: contracts.ErrValidation, Reason: "rendered template has no language binding"})
+	}
 	release, err := o.ttsQueue.Acquire(ctx)
 	if err != nil {
 		if errors.Is(err, ErrQueueSaturated) {
@@ -735,6 +751,13 @@ func (o *Orchestrator) stageTTS(ctx context.Context, id CorrelationID, sc contra
 	if resp.State != contracts.TTSOK {
 		return nil, pipelineError(contracts.PipelineModelUnavailable, 503, StageFailure{
 			Stage: StageTTS, Code: mapTTSStateToCode(resp.State), Reason: string(resp.State), Retryable: true,
+		})
+	}
+	// The worker must attest the same speech identity it was asked for;
+	// audio claiming another language/key is not the approved utterance.
+	if resp.Language != language || resp.SpeechKey != tpl.SpeechKey {
+		return nil, pipelineError(contracts.PipelineModelUnavailable, 500, StageFailure{
+			Stage: StageTTS, Code: contracts.ErrInternal, Reason: "tts response language/speech_key does not match request", Retryable: false,
 		})
 	}
 	bytes, err := base64.StdEncoding.DecodeString(resp.AudioB64)
@@ -1000,6 +1023,21 @@ func renderTemplate(tpl contracts.ApprovedTemplate, args []contracts.PipelineTem
 		return "", errors.New("template text contains unreplaced placeholder or forbidden delimiter")
 	}
 	return out, nil
+}
+
+// responseLanguageBound reports whether proposal speech may be rendered in
+// proposal.Language for a request made in requestLanguage: either they are
+// equal, or the proposal itself switches the session to proposal.Language.
+func responseLanguageBound(p contracts.ModelOutput, requestLanguage string) bool {
+	if p.Language == requestLanguage {
+		return true
+	}
+	for _, a := range p.Actions {
+		if a.Type == contracts.ActionSetLanguage && a.Language == p.Language {
+			return true
+		}
+	}
+	return false
 }
 
 func (o *Orchestrator) validateProposal(out contracts.ModelOutput, sc contracts.ScopedContext, requestID string) error {

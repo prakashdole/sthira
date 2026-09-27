@@ -62,6 +62,14 @@ type packageBody struct {
 	} `json:"instruction_assets"`
 }
 
+// SnapshotDataVersion is the single wire identity of one package snapshot
+// (package_id:version). Every response derived from that snapshot (guidance,
+// voice context) must emit this same value so clients can bind audio/replay
+// to it with a plain equality check.
+func SnapshotDataVersion(packageID string, version int) string {
+	return fmt.Sprintf("%s:%d", packageID, version)
+}
+
 // ResolveContext resolves the authoritative snapshot for a jurisdiction from the
 // persisted store. It selects the single current package (effective now, not
 // expired, not superseded) in that jurisdiction whose source is OPERATIONAL,
@@ -143,7 +151,7 @@ func ResolveContext(ctx context.Context, db DBTX, jurisdiction string, now time.
 	}
 
 	return ContextSnapshot{
-		DataVersion:      fmt.Sprintf("%s:%d", pkgID, version),
+		DataVersion:      SnapshotDataVersion(pkgID, version),
 		Jurisdiction:     jurisdiction,
 		KnownIDs:         known,
 		EnabledLanguages: langs,

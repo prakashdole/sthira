@@ -104,7 +104,11 @@ type PipelineOutput struct {
 // looks up the ApprovedTemplate, validates args, and renders the
 // approved text. Only the rendered text reaches TTS.
 type TemplateOutput struct {
-	SpeechKey       string
+	SpeechKey string
+	// Language is the language the approved text was looked up, digest-
+	// checked and rendered in. TTS must use exactly this language and its
+	// digest; it is never relabelled to another language.
+	Language        string
 	TemplateVersion int
 	SourceVersion   int
 	Text            string
