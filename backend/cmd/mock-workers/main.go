@@ -283,7 +283,6 @@ func buildMiddleResponse(sc scenario, requestID, dataVer, lang string) contracts
 		}
 
 	case scenarioClarify:
-		intent := contracts.IntentFocusPlace
 		sk := "clarify_place"
 		return contracts.MiddleWorkerResponse{
 			RequestID:   requestID,
@@ -293,7 +292,7 @@ func buildMiddleResponse(sc scenario, requestID, dataVer, lang string) contracts
 				RequestID:        requestID,
 				DataVersion:      dataVer,
 				Status:           contracts.StatusClarify,
-				Intent:           &intent,
+				Intent:           nil,
 				Language:         lang,
 				Actions:          []contracts.Action{},
 				SpeechKey:        &sk,
