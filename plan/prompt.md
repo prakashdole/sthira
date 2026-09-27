@@ -1,5 +1,97 @@
 # Sthira autonomous execution playbook
 
+## CURRENT EXECUTOR HANDOFF — 2026-09-27, multi-agent frontend/backend integration
+
+**Read this first. This checkpoint supersedes the 2026-09-25 handoff below for
+launch/preflight and integration purposes; the 2026-09-25 section remains as
+history and its unresolved items (silence handling, browser contract, L1–L4
+scope) are still open unless explicitly closed here.**
+
+### What changed this session
+
+- Three agents shared one `CLEAN` checkout (baseline `93fc752`): Agent 1
+  owned `frontend/v2/src/**`, Agent 2 owned `backend/cmd/mock-workers/**` +
+  `scripts/run_demo_rehearsal.sh` + new `prototype_scenarios_*` HTTP tests,
+  this executor owned launch/preflight tooling (`tools/preflight/`) and this
+  file plus compact evidence Markdown.
+- New: `tools/preflight/` — standalone, stdlib-only Go module that runs
+  offline checks (module-aware builds, env-var-in-source presence, Sarvam
+  model_id/port config, host artifact/interpreter/PYTHONPATH presence,
+  loopback port availability) before any real-model launch attempt. Never
+  loads weights or contacts the network. See
+  `plan/evidence/real-inference-launch-check.md` for the corrected vs.
+  repo-recorded host paths, the 7-item real-inference checklist (all
+  `NOT_RUN`), and the required non-claims (no auto language detection,
+  CPU-only prior ASR, no new e2e inference claim this session). Committed as
+  `589760d`.
+- Agent 1 restored/rewired `frontend/v2/src/{main.ts, audioGuidance.ts,
+  audioGuidance.test.ts, i18n.ts, mapActions.test.ts, styles.css}`: real
+  `/api/v3/voice/process` wiring, fail-closed readiness probe
+  (`evaluateReadinessState`), recording cancellation on backgrounding,
+  session/reservation/arrival-event integration, GPS journey tracking with
+  explicit touch confirmation, and audio provenance/replay-invalidation
+  guards. Independently reran: `npm test` → **65/65 pass**; `npm run build`
+  → **PASS** (tsc + vite build, zero errors); `go build ./...` /
+  `go vet ./...` in `backend` → **PASS** (previously-flagged `httpserver`
+  vet failure is now resolved). Confirmed **zero** `/api/v2` references
+  anywhere in `frontend/v2/src`.
+- Agent 2 added a `-scenario` flag to `backend/cmd/mock-workers/main.go`
+  (`default|silent-zoom|destination-choice|arrival-confirm|clarify|
+  data-unavailable|worker-failure`) and a new
+  `backend/internal/httpserver/prototype_scenarios_test.go`
+  (`//go:build integration`, six `TestProtoScenario_*` cases against a real
+  Postgres DB). This file is **excluded from default `go test ./...`** by
+  its build tag; running it explicitly
+  (`go test -tags integration -run TestProtoScenario ./internal/httpserver/...`)
+  surfaced two real defects, reported back to Agent 2 rather than silently
+  fixed (out of this executor's ownership):
+  1. `TestProtoScenario_Clarify` **FAILS**: the `clarify` scenario's mock
+     `MiddleWorkerResponse` sets both `Status: StatusClarify` and a non-nil
+     `Intent`, which `orchestration/model_strict.go`'s strict validator
+     correctly rejects (`"non-OK status carries a non-null intent"`, HTTP
+     503). The mock response is wrong, not the validator; the test then
+     asserts the wrong expected status code (200).
+  2. `TestProtoScenario_DestinationChoice` **FAILS**: the test decodes the
+     response audio into a local anonymous struct field `AudioB64`, but the
+     real wire type `contracts.PipelineAudio`
+     (`backend/internal/contracts/pipeline.go`) has no such field — it uses
+     `content_type` / `byte_size` / `checksum_sha256`. The assertion can
+     never pass regardless of pipeline correctness; the test needs to check
+     `byte_size`/`checksum_sha256` (see `voice_integration_test.go` for the
+     correct pattern already in the codebase).
+  The other four scenarios (`silent-zoom`, `arrival-confirm`,
+  `data-unavailable`, `worker-failure`) **PASS** as written.
+- Backend integrated checks (this executor, once independently, at the
+  state left by both agents): `go build ./...` **PASS**; `go vet ./...`
+  **PASS** (zero errors, including `internal/httpserver`); `go test
+  ./internal/contracts ./internal/orchestration ./internal/httpserver
+  ./internal/store -count=1` **PASS** (does not include the
+  integration-tagged prototype scenario file, which is reported separately
+  above).
+- Browser/live-microphone acceptance: **NOT_RUN**. No Playwright/Puppeteer/
+  Cypress or other browser-automation tool exists in
+  `frontend/v2/package.json`, and none was added (per the project's
+  dependency ladder — do not add a framework for one check). No real
+  browser journey against Agent 2's labelled scenarios was executed this
+  session.
+- No helper-only test is being substituted for application acceptance:
+  Agent 1's own report and this file both label the 65 unit tests as
+  exactly that (pure-function/unit level), separately from the still-`NOT_RUN`
+  browser and real-model microphone acceptance.
+- AWS `i-01d17e39266c292c2` (us-east-2): confirmed `stopped`, no public IP,
+  via a read-only `describe-instances` call only. No start/stop/SSH/
+  security-group change was made. Real-model inference (all 7 checklist
+  items in `plan/evidence/real-inference-launch-check.md`) remains
+  `NOT_RUN`; P8 (native mobile) and P9 (regional whole-system) remain
+  gated and are **not** marked accepted here or anywhere by this handoff.
+
+### Commit ledger this session
+
+- `589760d` — launch/preflight tooling + evidence Markdown (this executor).
+- Frontend restoration (Agent 1) and backend scenario tooling (Agent 2):
+  commit IDs recorded in the next update to this section once staged (see
+  the commit-coordination note directly above the still-open items below).
+
 ## CURRENT EXECUTOR HANDOFF — 2026-09-25, after interrupted live inference
 
 **Read this first. This checkpoint overrides older cloud permissions, DONE labels and launch instructions below.** Goal: finish the minimum local corrections needed for an honest Hindi prototype, then prepare a bounded real-model/browser test. Do not restart the architecture, production program, mobile work or later phases.
