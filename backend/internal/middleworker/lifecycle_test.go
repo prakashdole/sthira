@@ -15,7 +15,9 @@
 // Tests named TestDefect_* assert behaviour the module's OWN
 // documentation promises. They failed before the fixes in worker.go,
 // server.go and client.go and now always run as regression checks;
-// each maps to a file:line in the report.
+// each maps to a file:line in the report. A defect that has been
+// fixed is renamed TestRegression_* and its comment rewritten to state
+// what it now guarantees; no test here is gated on an env var.
 
 package middleworker
 
@@ -719,17 +721,15 @@ func TestDefect_EmptyLanguageAllowListEntryAdmitsEmptyLanguage(t *testing.T) {
 	}
 }
 
-// TestDefect_HealthAdvertisesArtifactWithoutChecksum: a readiness
-// document must never name an artifact or a model whose integrity
-// digest is empty. Worker.Snapshot gates the models list on the
-// revision and the artifacts list on the digest *name* only, so a
-// runtime with no checksum still publishes an artifact entry with an
-// empty checkshum_sha256 for an incident responder to trust. Breaks
-// once Snapshot requires a non-empty digest before advertising either.
-func TestDefect_HealthAdvertisesArtifactWithoutChecksum(t *testing.T) {
-	if os.Getenv("LC_DEFECT_REPRO") != "1" {
-		t.Skip("not a defect: contracts.ModelInfo.checksum_sha256 is omitempty, and LoadAndVerify already keeps a checksum-less worker NOT-READY")
-	}
+// TestRegression_HealthAdvertisesArtifactWithoutChecksum: /health
+// never names a model or artifact whose SHA-256 digest is empty. The
+// digest is the only integrity claim on the advertised bytes, so a
+// checksum-less entry must be omitted from both lists, not published
+// with an empty checksum_sha256 for an incident responder to trust.
+// The control half of this test proves the opposite direction still
+// advertises: the same worker with a real digest lists one model and
+// one artifact, so an always-empty /health cannot pass it.
+func TestRegression_HealthAdvertisesArtifactWithoutChecksum(t *testing.T) {
 	rt := lcNewRuntime("en-IN")
 	rt.set(func(r *lcRuntime) { r.digest[1] = "" })
 	w, err := NewWorker(Config{Runtime: rt, QueueDepth: 2, MaxInFlight: 1})
@@ -753,6 +753,33 @@ func TestDefect_HealthAdvertisesArtifactWithoutChecksum(t *testing.T) {
 		if m.ChecksumSHA256 == "" {
 			t.Errorf("/health advertises model %q with no checksum: %s", m.ModelID, body)
 		}
+	}
+	if n := len(h.Artifacts); n != 0 {
+		t.Errorf("/health advertises %d artifacts for a checksum-less runtime, want 0: %s", n, body)
+	}
+	if n := len(h.Models); n != 0 {
+		t.Errorf("/health advertises %d models for a checksum-less runtime, want 0: %s", n, body)
+	}
+
+	ok := lcNewRuntime("en-IN")
+	okW, err := NewWorker(Config{Runtime: ok, QueueDepth: 2, MaxInFlight: 1})
+	if err != nil {
+		t.Fatalf("NewWorker (control): %v", err)
+	}
+	if err := okW.LoadAndVerify(context.Background()); err != nil {
+		t.Fatalf("LoadAndVerify (control): %v", err)
+	}
+	_, okBody := lcGet(t, lcServe(t, okW), "/health")
+	var okHealth HealthEnvelope
+	if err := json.Unmarshal(okBody, &okHealth); err != nil {
+		t.Fatalf("control /health body is not valid JSON: %v body=%s", err, okBody)
+	}
+	if len(okHealth.Artifacts) != 1 || len(okHealth.Models) != 1 {
+		t.Fatalf("control /health advertised %d artifacts and %d models, want 1 and 1: %s",
+			len(okHealth.Artifacts), len(okHealth.Models), okBody)
+	}
+	if okHealth.Artifacts[0].ChecksumSHA256 == "" || okHealth.Models[0].ChecksumSHA256 == "" {
+		t.Errorf("control /health advertised an entry with no checksum: %s", okBody)
 	}
 }
 
