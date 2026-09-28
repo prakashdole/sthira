@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -57,10 +58,22 @@ type Worker struct {
 	// wg tracks the worker pool goroutines.
 	wg sync.WaitGroup
 
-	// readyMu guards the ready/warm transition.
+	// loadMu serialises LoadAndVerify so concurrent calls cannot
+	// start two pools.
+	loadMu sync.Mutex
+	// readyMu guards the ready/warm/closed transition. Dispatch holds
+	// it (read) across its enqueue so Shutdown cannot close jobs
+	// between the readiness check and the send.
 	readyMu sync.RWMutex
 	ready   bool
 	warm    bool
+	closed  bool
+}
+
+// prober is implemented by runtimes that can check their inference
+// backend is actually reachable. LoadAndVerify requires it to pass.
+type prober interface {
+	Probe(ctx context.Context) error
 }
 
 // Config bundles Worker construction parameters. Zero values are
@@ -152,11 +165,24 @@ func NewWorker(cfg Config) (*Worker, error) {
 //   - runtime.Revision() != ""
 //   - runtime.Digest() returns a non-empty name and SHA-256
 //   - runtime.Languages() reports at least one language
+//   - a runtime that can probe its inference backend (HTTPClientRuntime)
+//     reaches it
 //
 // If any of these fail, the worker stays NOT-READY and Dispatch
 // returns ErrWorkerNotReady. The /health response carries ready=false
-// and warm=false.
-func (w *Worker) LoadAndVerify(_ context.Context) error {
+// and warm=false. After Shutdown it returns ErrWorkerShutdown.
+func (w *Worker) LoadAndVerify(ctx context.Context) error {
+	w.loadMu.Lock()
+	defer w.loadMu.Unlock()
+	w.readyMu.RLock()
+	ready, closed := w.ready, w.closed
+	w.readyMu.RUnlock()
+	if closed {
+		return ErrWorkerShutdown
+	}
+	if ready {
+		return nil
+	}
 	if w.runtime.Revision() == "" {
 		return errors.New("worker: runtime revision is empty")
 	}
@@ -168,10 +194,18 @@ func (w *Worker) LoadAndVerify(_ context.Context) error {
 	if len(langs) == 0 {
 		return errors.New("worker: runtime reported zero languages")
 	}
+	if p, ok := w.runtime.(prober); ok {
+		if err := p.Probe(ctx); err != nil {
+			return fmt.Errorf("worker: inference backend not reachable: %w", err)
+		}
+	}
 	w.readyMu.Lock()
+	defer w.readyMu.Unlock()
+	if w.closed {
+		return ErrWorkerShutdown
+	}
 	w.warm = true
 	w.ready = true
-	w.readyMu.Unlock()
 	// Start the worker pool. Each goroutine pulls from the
 	// bounded queue. We never spawn per-request.
 	for i := 0; i < w.maxInflight; i++ {
@@ -215,10 +249,12 @@ func (w *Worker) Dispatch(ctx context.Context, req RequestEnvelope) (*ResponseEn
 	}
 	// Language allow-list: a request whose language is not in the
 	// runtime's reported allow-list is rejected without contacting
-	// the runtime. This is defense-in-depth on top of the
-	// orchestrator's validator; neither is a substitute.
+	// the runtime. A request with no language is never admitted, even
+	// if the runtime's list carries an empty entry. This is
+	// defense-in-depth on top of the orchestrator's validator; neither
+	// is a substitute.
 	allowed := w.runtime.Languages()
-	if !containsString(allowed, req.Transcript.Language) {
+	if strings.TrimSpace(req.Transcript.Language) == "" || !containsString(allowed, req.Transcript.Language) {
 		return nil, fmt.Errorf("worker: language %q not in runtime allow-list %v", req.Transcript.Language, allowed)
 	}
 
@@ -241,14 +277,8 @@ func (w *Worker) Dispatch(ctx context.Context, req RequestEnvelope) (*ResponseEn
 	})
 	defer stop()
 
-	select {
-	case w.jobs <- job:
-		w.inflight.Add(1)
-	case <-ctx.Done():
-		return nil, ErrCanceled
-	default:
-		w.saturated.Add(1)
-		return nil, ErrQueueSaturated
+	if err := w.enqueue(ctx, job); err != nil {
+		return nil, err
 	}
 
 	select {
@@ -260,6 +290,7 @@ func (w *Worker) Dispatch(ctx context.Context, req RequestEnvelope) (*ResponseEn
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil, ErrCanceled
 		}
+		w.timedOut.Add(1)
 		return nil, ErrTimeout
 	case r := <-job.resultCh:
 		w.completed.Add(1)
@@ -267,6 +298,30 @@ func (w *Worker) Dispatch(ctx context.Context, req RequestEnvelope) (*ResponseEn
 			w.classify(r.err)
 		}
 		return r.resp, r.err
+	}
+}
+
+// enqueue admits job under readyMu so it can never send on the queue
+// after Shutdown has closed it. The send is non-blocking, so holding
+// the read lock cannot stall Shutdown.
+func (w *Worker) enqueue(ctx context.Context, job *Job) error {
+	w.readyMu.RLock()
+	defer w.readyMu.RUnlock()
+	if w.closed {
+		return ErrWorkerShutdown
+	}
+	if !w.ready {
+		return ErrWorkerNotReady
+	}
+	select {
+	case w.jobs <- job:
+		w.inflight.Add(1)
+		return nil
+	case <-ctx.Done():
+		return ErrCanceled
+	default:
+		w.saturated.Add(1)
+		return ErrQueueSaturated
 	}
 }
 
@@ -293,7 +348,7 @@ func (w *Worker) handle(j *Job) {
 		}
 	}()
 
-	out, err := w.runtime.Propose(ctx, j.req)
+	out, err := w.propose(ctx, j.req)
 	if err != nil {
 		j.resultCh <- jobResult{err: err}
 		return
@@ -306,6 +361,18 @@ func (w *Worker) handle(j *Job) {
 		FinishReason:  out.FinishReason,
 		ModelRevision: out.ModelRevision,
 	}}
+}
+
+// propose calls the runtime and turns a panic into a typed
+// ErrRuntimeUnavailable, so one bad inference call cannot kill the
+// pool slot or the process.
+func (w *Worker) propose(ctx context.Context, req RequestEnvelope) (out *ProposeOutput, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			out, err = nil, fmt.Errorf("%w: runtime panic: %v", ErrRuntimeUnavailable, r)
+		}
+	}()
+	return w.runtime.Propose(ctx, req)
 }
 
 func (w *Worker) classify(err error) {
@@ -383,14 +450,15 @@ func (w *Worker) Stats() (saturated, completed, timedOut, malformed uint64, infl
 // Dispatch returns ErrWorkerShutdown.
 func (w *Worker) Shutdown(deadline time.Duration) error {
 	w.shutdownOnce.Do(func() {
+		// Close the queue under the same lock Dispatch holds for
+		// its send, so run() returns once the queued jobs drain
+		// and no Dispatch can send after the close.
 		w.readyMu.Lock()
 		w.ready = false
 		w.warm = false
-		w.readyMu.Unlock()
-		// Close the queue so run() returns when the channel
-		// drains. Pending jobs will see the channel closed and
-		// return ErrWorkerShutdown via the result channel.
+		w.closed = true
 		close(w.jobs)
+		w.readyMu.Unlock()
 	})
 	done := make(chan struct{})
 	go func() {

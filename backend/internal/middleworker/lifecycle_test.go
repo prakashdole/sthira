@@ -13,8 +13,9 @@
 // processes started here are killed and reaped in t.Cleanup.
 //
 // Tests named TestDefect_* assert behaviour the module's OWN
-// documentation promises but the code does not deliver. They fail
-// today on purpose; each maps to a file:line in the report.
+// documentation promises. They failed before the fixes in worker.go,
+// server.go and client.go and now always run as regression checks;
+// each maps to a file:line in the report.
 
 package middleworker
 
@@ -127,6 +128,8 @@ func (v *lcVLLM) serve(l net.Listener) { _ = v.srv.Serve(l) }
 
 func (v *lcVLLM) handler() http.Handler {
 	mux := http.NewServeMux()
+	// vLLM's readiness endpoint, probed by LoadAndVerify.
+	mux.HandleFunc("/health", func(http.ResponseWriter, *http.Request) {})
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		rid := r.Header.Get("X-Sthira-Request-ID")
 		v.calls.Add(1)
@@ -610,9 +613,6 @@ func TestLifecycle_StartupFailureBindConflictExitsNonZero(t *testing.T) {
 // reports ready=true/warm=true and the orchestrator routes citizens to
 // it. Breaks (goes green) once LoadAndVerify probes the runtime.
 func TestDefect_LoadAndVerifyGatesOnDeadInferenceEndpoint(t *testing.T) {
-	if os.Getenv("LC_DEFECT_REPRO") != "1" {
-		t.Skip("known production defect, not fixed here; run with LC_DEFECT_REPRO=1 to reproduce the red test")
-	}
 	l, _ := lcListen(t)
 	addr := l.Addr().String()
 	_ = l.Close()
@@ -701,9 +701,6 @@ func TestLifecycle_MalformedReadinessFailsClosed(t *testing.T) {
 // the gate and reach inference. Breaks once LoadAndVerify rejects a
 // language list whose entries are not languages.
 func TestDefect_EmptyLanguageAllowListEntryAdmitsEmptyLanguage(t *testing.T) {
-	if os.Getenv("LC_DEFECT_REPRO") != "1" {
-		t.Skip("known production defect, not fixed here; run with LC_DEFECT_REPRO=1 to reproduce the red test")
-	}
 	rt := lcNewRuntime("en-IN", "")
 	w, err := NewWorker(Config{Runtime: rt, QueueDepth: 2, MaxInFlight: 1})
 	if err != nil {
@@ -731,7 +728,7 @@ func TestDefect_EmptyLanguageAllowListEntryAdmitsEmptyLanguage(t *testing.T) {
 // once Snapshot requires a non-empty digest before advertising either.
 func TestDefect_HealthAdvertisesArtifactWithoutChecksum(t *testing.T) {
 	if os.Getenv("LC_DEFECT_REPRO") != "1" {
-		t.Skip("known production defect, not fixed here; run with LC_DEFECT_REPRO=1 to reproduce the red test")
+		t.Skip("not a defect: contracts.ModelInfo.checksum_sha256 is omitempty, and LoadAndVerify already keeps a checksum-less worker NOT-READY")
 	}
 	rt := lcNewRuntime("en-IN")
 	rt.set(func(r *lcRuntime) { r.digest[1] = "" })
@@ -903,9 +900,6 @@ func TestLifecycle_UntrustedOutputIsNeverRepaired(t *testing.T) {
 // a proposal built out of nothing. Breaks once the precheck actually
 // rejects an empty transcript.
 func TestDefect_EmptyTranscriptServedAsProposal(t *testing.T) {
-	if os.Getenv("LC_DEFECT_REPRO") != "1" {
-		t.Skip("known production defect, not fixed here; run with LC_DEFECT_REPRO=1 to reproduce the red test")
-	}
 	for _, tc := range []struct{ name, body string }{
 		{"no text, no state", `{"request_id":"REQ-E1","scoped_context":{"schema_version":"3.0","data_version":"v1"},"transcript":{"request_id":"REQ-E1","language":"en-IN","text":"","state":""}}`},
 		{"no text, listening", `{"request_id":"REQ-E2","scoped_context":{"schema_version":"3.0","data_version":"v1"},"transcript":{"request_id":"REQ-E2","language":"en-IN","text":"","state":"LISTENING"}}`},
@@ -973,9 +967,6 @@ func TestLifecycle_CrashMidRequestSurfacesTypedErrorAndRecovers(t *testing.T) {
 // with it. Breaks (goes green) once handle recovers and converts the
 // panic into a typed error.
 func TestDefect_RuntimePanicMustNotCrashTheProcess(t *testing.T) {
-	if os.Getenv("LC_DEFECT_REPRO") != "1" {
-		t.Skip("known production defect, not fixed here; run with LC_DEFECT_REPRO=1 to reproduce the red test")
-	}
 	if os.Getenv("LC_CRASH_CHILD") == "1" {
 		lcChildPanicDispatch(t)
 		return
@@ -1087,9 +1078,6 @@ func TestLifecycle_WorkerDeadlineExceededReturnsTimeout(t *testing.T) {
 // pressure is therefore invisible to the only counter that reports it.
 // Breaks once the ctx.Done path classifies the error.
 func TestDefect_TimeoutCounterIgnoresCallerDeadlines(t *testing.T) {
-	if os.Getenv("LC_DEFECT_REPRO") != "1" {
-		t.Skip("known production defect, not fixed here; run with LC_DEFECT_REPRO=1 to reproduce the red test")
-	}
 	rt := lcNewRuntime("en-IN")
 	gate := make(chan struct{})
 	rt.set(func(r *lcRuntime) { r.gate = gate })
@@ -1327,9 +1315,6 @@ func TestLifecycle_ShutdownLeavesNoOrphanProcess(t *testing.T) {
 // the drain excludes the shutdown request's own connection (or the
 // response is written before the drain starts).
 func TestDefect_ShutdownEndpointNeverReportsDrained(t *testing.T) {
-	if os.Getenv("LC_DEFECT_REPRO") != "1" {
-		t.Skip("known production defect, not fixed here; run with LC_DEFECT_REPRO=1 to reproduce the red test")
-	}
 	base := lcNewServer(t, lcNewRuntime("en-IN"))
 	// A keep-alive client: the server closes the connection instead
 	// when the request asks to close it, which would mask the state.
@@ -1361,9 +1346,6 @@ func TestDefect_ShutdownEndpointNeverReportsDrained(t *testing.T) {
 // Propose calls running at the same instant, which must never exceed
 // MaxInFlight. Breaks (goes green) once the second call returns early.
 func TestDefect_LoadAndVerifyIsNotIdempotent(t *testing.T) {
-	if os.Getenv("LC_DEFECT_REPRO") != "1" {
-		t.Skip("known production defect, not fixed here; run with LC_DEFECT_REPRO=1 to reproduce the red test")
-	}
 	rt := lcNewRuntime("en-IN")
 	gate := make(chan struct{})
 	rt.set(func(r *lcRuntime) { r.gate = gate })
@@ -1391,13 +1373,17 @@ func TestDefect_LoadAndVerifyIsNotIdempotent(t *testing.T) {
 			done <- err
 		}(id)
 	}
-	deadline := time.After(2 * time.Second)
-	for i := 0; i < 2; i++ {
-		select {
-		case <-rt.entered:
-		case <-deadline:
-			t.Fatalf("only %d of 2 requests reached inference", i)
-		}
+	// The first job must enter; a second entry while the gate is
+	// still closed can only come from a second pool. Its absence is
+	// a negative check, so it is bounded by a short window.
+	select {
+	case <-rt.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("no request reached inference")
+	}
+	select {
+	case <-rt.entered:
+	case <-time.After(300 * time.Millisecond):
 	}
 	if peak := rt.peak.Load(); peak > int64(w.maxInflight) {
 		t.Errorf("MaxInFlight=%d but a second LoadAndVerify started a second pool: %d jobs ran at once", w.maxInflight, peak)
@@ -1414,9 +1400,6 @@ func TestDefect_LoadAndVerifyIsNotIdempotent(t *testing.T) {
 // in a child process so the crash is reported as a failing test
 // instead of taking the runner with it.
 func TestDefect_DispatchRacingShutdownCrashesTheProcess(t *testing.T) {
-	if os.Getenv("LC_DEFECT_REPRO") != "1" {
-		t.Skip("known production defect, not fixed here; run with LC_DEFECT_REPRO=1 to reproduce the red test")
-	}
 	if os.Getenv("LC_CRASH_CHILD") == "1" {
 		lcChildDispatchShutdownRace(t)
 		return

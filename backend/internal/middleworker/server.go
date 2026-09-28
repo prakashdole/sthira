@@ -23,7 +23,6 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -232,10 +231,13 @@ func (s *Server) handlePropose(w http.ResponseWriter, r *http.Request) {
 			"scoped_context.data_version required", http.StatusBadRequest)
 		return
 	}
-	if req.Transcript.Text == "" && req.Transcript.State != "OK" {
-		// Non-OK transcript state is allowed (the model may be
-		// told "the user said nothing"), but a totally empty
-		// transcript is rejected at the worker seam.
+	if strings.TrimSpace(req.Transcript.Text) == "" {
+		// The orchestrator answers an empty transcript with CLARIFY
+		// itself and never forwards it (orchestration/orchestrator.go),
+		// so one arriving here is a malformed request, not model input.
+		s.writeTypedError(w, req.RequestID, MiddleStateMalformed,
+			"transcript.text required", http.StatusBadRequest)
+		return
 	}
 
 	// Per-call deadline: client supplies deadline_ms in the wire
@@ -268,24 +270,17 @@ func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	// Shutdown is async; the response is sent first, then the
-	// server drains. We bound the wait to ShutdownWait.
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		_ = s.Shutdown()
-	}()
-	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
-	select {
-	case <-done:
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"state":"DRAINED"}`))
-	case <-time.After(s.shutdownWait):
+	// Drain the worker (bounded by ShutdownWait), answer, then stop
+	// the HTTP server asynchronously: httpSrv.Shutdown waits for this
+	// very connection to go idle, so it cannot run before we reply.
+	if err := s.worker.Shutdown(s.shutdownWait); err != nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`{"state":"DEADLINE_EXCEEDED"}`))
+	} else {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"state":"DRAINED"}`))
 	}
+	go func() { _ = s.Shutdown() }()
 }
 
 // mapWorkerErrorToState maps a worker-side typed error to the

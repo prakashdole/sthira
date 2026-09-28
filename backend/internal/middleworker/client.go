@@ -238,6 +238,25 @@ type ProposeOutput struct {
 	CompletionTokens int
 }
 
+// Probe checks the pinned vLLM endpoint is up: vLLM answers GET
+// /health with 200 only once its engine is serving. It runs no
+// inference. Any failure is ErrUnavailable.
+func (c *Client) Probe(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/health", nil)
+	if err != nil {
+		return fmt.Errorf("%w: probe: %v", ErrUnavailable, err)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: probe: %v", ErrUnavailable, err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%w: probe status %d", ErrUnavailable, resp.StatusCode)
+	}
+	return nil
+}
+
 // Propose calls /v1/chat/completions on the pinned vLLM endpoint,
 // once, with no retries. The context ctx provides cancellation; the
 // per-call deadline is enforced by the http.Client.Timeout AND by an

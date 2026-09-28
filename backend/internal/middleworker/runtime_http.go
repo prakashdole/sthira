@@ -100,6 +100,10 @@ func (h *HTTPClientRuntime) Propose(ctx context.Context, req RequestEnvelope) (*
 	})
 }
 
+// Probe reports whether the inference endpoint is reachable; the
+// worker's readiness gate requires it.
+func (h *HTTPClientRuntime) Probe(ctx context.Context) error { return h.client.Probe(ctx) }
+
 // Revision returns the configured revision.
 func (h *HTTPClientRuntime) Revision() string { return h.revision }
 
