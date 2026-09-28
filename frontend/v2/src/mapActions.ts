@@ -169,6 +169,15 @@ export function validateVoiceResponse(value: unknown): VoiceProposal | null {
   return response as unknown as VoiceProposal;
 }
 
+// Pitch used when the route camera is fitted. Tilted view always uses the 3D pitch;
+// otherwise the user's manually set pitch is kept, clamped to a range that keeps the
+// route readable in 2D mode. Non-finite input falls back to a flat map.
+export function routeCameraPitch(mapTilted: boolean, savedPitch: number): number {
+  if (mapTilted) return 65;
+  if (!Number.isFinite(savedPitch)) return 0;
+  return Math.min(60, Math.max(0, savedPitch));
+}
+
 export const layerMap: Record<Layer, string[]> = {
   RED_ZONES: ['hazard-band', 'hazard-fill', 'hazard-edge', 'red-zones-fill'],
   SAFE_ZONES: [
