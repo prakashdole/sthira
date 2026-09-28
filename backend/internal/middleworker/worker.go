@@ -389,6 +389,9 @@ func (w *Worker) classify(err error) {
 
 // Snapshot returns the worker's current health snapshot. The
 // returned value is a copy; mutating it does not affect the worker.
+// A model or artifact is advertised only when its SHA-256 digest is
+// non-empty: a checksum-less entry must not be published for an
+// incident responder to trust.
 func (w *Worker) Snapshot() HealthEnvelope {
 	w.readyMu.RLock()
 	ready := w.ready
@@ -400,7 +403,7 @@ func (w *Worker) Snapshot() HealthEnvelope {
 	_ = w.inflight.Load()
 	queueDepth := len(w.jobs)
 	models := []ModelInfo(nil)
-	if rev != "" {
+	if rev != "" && dsha != "" {
 		models = []ModelInfo{{
 			ModelID:        runtimeModelID(w.runtime),
 			Revision:       rev,
@@ -412,7 +415,7 @@ func (w *Worker) Snapshot() HealthEnvelope {
 		}}
 	}
 	artifacts := []ArtifactDigest(nil)
-	if dname != "" {
+	if dname != "" && dsha != "" {
 		artifacts = []ArtifactDigest{{
 			Name:           dname,
 			Path:           dname,
