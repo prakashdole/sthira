@@ -378,7 +378,7 @@ function destinationCapacityText(): string {
     return t.capacityUnknown;
   }
   if (selectedDestination.free === null || selectedDestination.free > 0) {
-    return selectedDestination.free !== null ? `${selectedDestination.free} spaces free (${t.capacityAvailable})` : t.capacityAvailable;
+    return selectedDestination.free !== null ? `${selectedDestination.free} ${t.spacesFree} (${t.capacityAvailable})` : t.capacityAvailable;
   }
   return t.capacityFull;
 }
@@ -1333,11 +1333,16 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
     }
 
     if (!res.ok) {
+      if (res.status >= 500) {
+        void checkRuntime();
+      }
       if (res.status === 503 || res.status === 504) {
         throw new Error('MODEL_UNAVAILABLE');
       }
       throw new Error(`Voice pipeline returned ${res.status}`);
     }
+
+    void checkRuntime();
 
     const envelope = (await res.json()) as VoiceResponseEnvelope;
     if (shouldDropResponse(activeRequestId, reqId, document.hidden)) return;
@@ -1394,6 +1399,7 @@ async function sendVoiceOrText(input: { kind: 'audio'; body_b64: string; content
     if (reqId !== activeRequestId) return;
     commandPending = false;
     commandError = words[language].assistantUnavailable;
+    void checkRuntime();
     render();
   }
 }

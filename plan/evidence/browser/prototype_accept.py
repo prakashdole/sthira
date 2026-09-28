@@ -1449,6 +1449,358 @@ async def section_queued_voice(browser, base):
     await ctx.close()
 
 
+# ---------------------------------------------------------------- status line vs the real processes
+
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+I18N_TS = os.path.join(REPO, "frontend", "v2", "src", "i18n.ts")
+DEMO_DIR = "/tmp/sthira-demo"
+DEMO_STATE = os.path.join(DEMO_DIR, "run", "state.env")
+WORKER_LOG = os.path.join(DEMO_DIR, "run", "mock-workers.log")
+SHOTS = "/tmp/sthira-accept"  # evidence is disposable; nothing here is written into the repo
+
+# Class and text together, so a class swapped while the text went stale cannot pass.
+STATUS_LINE = """({text, cls}) => {
+  const el = document.querySelector('.system-state');
+  const span = el?.querySelector('span');
+  return !!span && el.className.includes(cls) && span.textContent.trim() === text;
+}"""
+
+
+def i18n_status(lang, key):
+    """One status string read out of the app's own i18n table, so these checks can
+    never pass against a stale copy of it. None when the block or key is gone."""
+    import re
+    try:
+        src = open(I18N_TS, encoding="utf-8").read()
+    except OSError:
+        return None
+    block = re.search(rf"^  {lang}: \{{(.*?)^  \}}", src, re.S | re.M)
+    found = re.search(rf"\b{key}: '((?:[^'\\]|\\.)*)'", block.group(1) if block else "")
+    return found.group(1) if found else None
+
+
+def demo_env():
+    """The demo stack's own state.env, written by tools/demo/demo.sh."""
+    env = {}
+    try:
+        lines = open(DEMO_STATE, encoding="utf-8").read().splitlines()
+    except OSError:
+        return env
+    for line in lines:
+        key, _, value = line.partition("=")
+        if key and value:
+            env[key] = value
+    return env
+
+
+def alive(pid):
+    """True while the process still exists and is not a zombie awaiting reaping."""
+    if not pid:
+        return False
+    out = subprocess.run(["ps", "-o", "state=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
+    state = out.stdout.strip()
+    return bool(state) and not state.startswith("Z")
+
+
+def http_get(url):
+    """Real HTTP from the harness: the same bytes the app would receive. The cap is
+    generous on purpose: a 200 readiness report is longer than 700 bytes, and a
+    truncated body would not parse."""
+    import urllib.error, urllib.request
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            return r.status, r.read(65536).decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(65536).decode("utf-8", "replace")
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
+
+
+async def wait_ready(url, want, timeout=30):
+    """Poll readiness until it answers `want`; never sleep a fixed amount, because the
+    backend refreshes worker health on its own ~10 s timer. Returns status, body, waited."""
+    import time
+    start = time.monotonic()
+    while True:
+        status, body = http_get(url)
+        waited = round(time.monotonic() - start, 1)
+        if status == want or waited >= timeout:
+            return status, body, waited
+        await asyncio.sleep(0.25)
+
+
+def body_json(body):
+    try:
+        return json.loads(body)
+    except ValueError:
+        return {}
+
+
+async def section_status_live(browser, base):
+    """The status line must follow the REAL readiness of the running processes.
+
+    Nothing is intercepted and no response is rewritten: the mock worker process named
+    by the stack's own state.env is SIGKILLed, and the backend's readiness prober is the
+    only clock. A 5xx from /api/v3/voice/process is what makes the app re-read
+    /health/ready (main.ts:1335-1337), so the blocked state is the app's own conclusion.
+
+    The workers are restarted in `finally`, with the same binary, port and scenario the
+    stack was started with, so a failed check cannot leave the shared demo stack without
+    workers and break every later section.
+    """
+    s = "status-live"
+    os.makedirs(SHOTS, exist_ok=True)
+    responding, blocked = i18n_status("EN", "responding"), i18n_status("EN", "blocked")
+    rec(s, "the app's own i18n table supplies both EN status strings (responding, blocked)",
+        bool(responding) and bool(blocked), f"responding={responding!r} blocked={blocked!r}")
+
+    env = demo_env()
+    worker_pid, worker_port = env.get("WORKER_PID"), env.get("WORKER_PORT")
+    scenario, backend_port = env.get("SCENARIO"), env.get("BACKEND_PORT")
+    ready = f"http://127.0.0.1:{backend_port}/health/ready"
+    workers_bin = os.path.join(DEMO_DIR, "bin", "mock-workers")
+    rec(s, "the demo state.env names the worker pid, port, scenario, backend port and worker binary",
+        all((worker_pid, worker_port, scenario, backend_port)) and os.path.exists(workers_bin),
+        f"pid={worker_pid} workerPort={worker_port} scenario={scenario} backendPort={backend_port} "
+        f"bin={workers_bin} exists={os.path.exists(workers_bin)}")
+
+    async def await_status(page, text, cls, timeout=15000):
+        try:
+            await page.wait_for_function(STATUS_LINE, arg={"text": text, "cls": cls}, timeout=timeout)
+        except PWTimeout:
+            pass
+        line = page.locator(".system-state span")
+        return (await line.inner_text()).strip() if await line.count() == 1 else None
+
+    async def shot(page, phase):
+        path = os.path.join(SHOTS, f"status-live-{phase}-1280.png")
+        await settle(page, 1500)  # let the basemap paint; a shot of bare HTML is no evidence
+        await page.screenshot(path=path)
+        return path
+
+    ctx, page = await new_page(browser)
+    await onboard(page, base)
+    now = await await_status(page, responding, "system-state--demo")
+    rec(s, "workers up: the status line shows the i18n 'responding' text with class system-state--demo",
+        now == responding, f"text={now!r} shot={await shot(page, 'responding')}")
+
+    try:
+        signalled, kill_error = True, ""
+        try:
+            os.kill(int(worker_pid), 9)
+        except (OSError, TypeError, ValueError) as e:
+            signalled, kill_error = False, f"{type(e).__name__}: {e}"
+        for _ in range(40):  # a SIGKILLed process lingers as a zombie until it is reaped
+            if not alive(worker_pid):
+                break
+            await asyncio.sleep(0.1)
+        rec(s, "SIGKILL took down the mock workers and nothing else (backend and UI still serving)",
+            signalled and not alive(worker_pid) and alive(env.get("EXERCISE_PID")) and alive(env.get("UI_PID")),
+            f"signalled={signalled} workerAlive={alive(worker_pid)} "
+            f"exerciseAlive={alive(env.get('EXERCISE_PID'))} uiAlive={alive(env.get('UI_PID'))} {kill_error}")
+
+        status, body, waited = await wait_ready(ready, 503, timeout=30)
+        env_body = body_json(body)
+        codes = [e.get("code") for e in (env_body.get("errors") or [])]
+        rec(s, "with the workers dead the backend's own readiness turns 503 with the failure envelope",
+            status == 503 and codes == ["DATA_UNAVAILABLE"] and env_body.get("schema_version") == "3.0",
+            f"status={status} after={waited}s codes={codes} schema={env_body.get('schema_version')} body={body[:100]}")
+
+        resp = await submit(page, "where can I go")
+        rec(s, "a command submitted against the dead workers fails closed (5xx, no answer invented)",
+            resp.status >= 500 and http_get(ready)[0] == 503, f"status={resp.status}")
+
+        now = await await_status(page, blocked, "system-state--blocked", timeout=15000)
+        rec(s, "the 5xx makes the app re-read /health/ready: status line becomes the i18n 'blocked' text",
+            now == blocked, f"text={now!r} shot={await shot(page, 'blocked')}")
+    finally:
+        log = open(WORKER_LOG, "ab")
+        proc = subprocess.Popen([workers_bin, "-port", worker_port, "-scenario", scenario],
+                                stdout=log, stderr=log, start_new_session=True)
+        log.close()
+        # The restarted workers are a different process: hand the new pid back to the
+        # stack's own state file, or demo.sh stop would leave them orphaned.
+        lines = open(DEMO_STATE, encoding="utf-8").read().splitlines()
+        open(DEMO_STATE, "w", encoding="utf-8").write(
+            "".join(f"WORKER_PID={proc.pid}\n" if l.startswith("WORKER_PID=") else l + "\n" for l in lines))
+
+    status, body, waited = await wait_ready(ready, 200, timeout=30)
+    ready_data = body_json(body).get("data") or {}
+    worker_health = body_json(http_get(f"http://127.0.0.1:{worker_port}/health")[1])  # after the backend probed it
+    live_pid = demo_env().get("WORKER_PID")
+    rec(s, "the restarted workers serve on the same port and backend readiness is 200 READY again",
+        worker_health.get("ready") is True and status == 200 and ready_data.get("status") == "READY"
+        and alive(live_pid),
+        f"workerReady={worker_health.get('ready')} readyStatus={status} after={waited}s "
+        f"reportStatus={ready_data.get('status')} stateEnvPid={live_pid} alive={alive(live_pid)}")
+
+    resp = await submit(page, "where can I go")
+    rec(s, "the same command succeeds again with the workers back (200)", resp.status == 200, f"status={resp.status}")
+    now = await await_status(page, responding, "system-state--demo", timeout=15000)
+    rec(s, "the status line returns to the i18n 'responding' text with class system-state--demo",
+        now == responding, f"text={now!r} shot={await shot(page, 'recovered')}")
+    rec(s, "no uncaught page errors", not page.errors, "; ".join(page.errors))
+    await ctx.close()
+
+
+# ---------------------------------------------------------------- dialogs in Hindi and Malayalam
+
+# Latin words an Indic reader can still read: units, the emergency number and
+# app-wide abbreviations, not untranslated UI copy.
+LATIN_ALLOW = {"ISL", "GPS", "NDMA", "SACHET", "CAP", "IndicConformer", "600M", "HTTP", "km", "min", "112", "3D"}
+
+# (name, dialog, its close control, dev-hook opener or None, how it was opened)
+DIALOGS = (
+    ("reservation-confirm", "#reservation-confirm-modal", '[data-action="reservation-confirm-close"]',
+     "() => window.setReservationConfirmOpen(true)", "dev hook: no visible control opens it"),
+    ("destination-details", 'dialog[aria-labelledby="destination-details-title"]', '[data-action="destination-details-close"]',
+     "() => window.setDestinationDetailsOpen(true)", "dev hook: no visible control opens it"),
+    ("arrival", "#arrival-modal", '[data-action="arrival-close"]',
+     None, "visible control: arrival-open after a real reservation"),
+)
+
+# The facility name and id chips the page renders outside the dialogs: the real
+# authority values a Hindi or Malayalam screen is entitled to leave untranslated.
+RENDERED_NAMES = """() => ['.destination h2', '[data-select-facility]']
+  .map((sel) => [...document.querySelectorAll(sel)].map((e) => e.innerText).join(' ')).join(' ')"""
+
+# The HIT_TEST idiom, one control: scroll it into view, then ask the engine what is
+# at its centre. 'self' means the hit landed on the control or a descendant.
+CLOSE_HIT = """(sel) => {
+  const el = document.querySelector(sel);
+  if (!el) return 'missing';
+  el.scrollIntoView({ block: 'nearest' });
+  const r = el.getBoundingClientRect();
+  if (!r.width || !r.height) return 'zero-size';
+  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return el.contains(hit) ? 'self' : (hit ? (hit.className || hit.tagName) : 'nothing');
+}"""
+
+DIALOG_SCROLLS = """(s) => { const e = document.querySelector(s); return e.scrollHeight > e.clientHeight + 1; }"""
+
+
+def latin_tokens(text):
+    """Words made of Latin letters, plus the hyphen fragments of ids like FACDEMO-1.
+    Pure numbers are not words."""
+    import re
+    out = set()
+    for tok in re.findall(r"[A-Za-z0-9][A-Za-z0-9._-]*", text or ""):
+        tok = tok.rstrip(".")
+        if any(c.isalpha() for c in tok):
+            out.add(tok)
+            out.update(p for p in tok.split("-") if any(c.isalpha() for c in p))
+    return out
+
+
+def authority_words(*blobs):
+    """Latin tokens in the VALUES (never the keys) of the real authority request and
+    response plus the names the page rendered: ids and proper nouns the page is entitled
+    to show untranslated, subtracted before the leftover check runs."""
+    out = set()
+
+    def values(o):
+        if isinstance(o, dict):
+            for v in o.values():
+                values(v)
+        elif isinstance(o, list):
+            for v in o:
+                values(v)
+        elif isinstance(o, str):
+            out.update(latin_tokens(o))
+
+    for blob in blobs:
+        values(blob)
+    return out
+
+
+async def section_layout_dialogs(browser, base):
+    """All three dialogs, in Hindi and Malayalam, at a phone and a desktop width.
+
+    Two of them have no visible opener in the running app: the reservation-confirm
+    dialog is reachable only from a RESERVATION_CONFIRMATION voice panel, which no
+    mock-worker scenario emits, and the destination-details dialog has no opener at all.
+    They are therefore opened with the dev-only test hooks, and their check names say so;
+    the arrival dialog is opened through its real control after a real reservation. All
+    three are measured on real authority data and real i18n strings, and any Latin word
+    left over after the ids and the allowlist are subtracted is a FAIL that names it.
+    """
+    s = "layout-dialogs"
+    os.makedirs(SHOTS, exist_ok=True)
+    for lang in ("HI", "ML"):
+        for w, h in ((375, 812), (1280, 860)):
+            ctx, page = await new_page(browser, viewport={"width": w, "height": h})
+            seen = await guidance_destinations(page)
+            asked = []
+            page.on("request", lambda r: asked.append(json.loads(r.post_data or "{}"))
+                    if r.method == "POST" and r.url.endswith("/api/v3/guidance/query") else None)
+            await onboard(page, base, lang=lang, query="?sthira-test-hooks=1")
+            await page.wait_for_selector("[data-select-facility]", timeout=15000)
+            resp = await submit(page, "where can I go")
+            for _ in range(3):  # one Escape per overlay the command opened, as section_modal does
+                if await page.locator("#command-input").is_visible() or await page.evaluate(OPEN_DIALOGS):
+                    await page.keyboard.press("Escape")
+                    await settle(page, 300)
+            hooks = await page.evaluate(
+                "() => ['setReservationConfirmOpen', 'setDestinationDetailsOpen'].filter((k) => typeof window[k] === 'function')")
+            dest = page.locator(".destination h2")
+            name_on_screen = (await dest.inner_text()) if await dest.count() else None
+            rec(s, f"{lang} {w}px: a real command selected a real destination from the authority payload",
+                resp.status == 200 and bool(seen) and name_on_screen is not None,
+                f"status={resp.status} facility_ids={[d.get('facility_id') for d in (seen[-1] or [])]} "
+                f"destination={name_on_screen!r}")
+            rec(s, f"{lang} {w}px: the dev-only openers exist and every overlay is shut (measurement setup)",
+                sorted(hooks) == ["setDestinationDetailsOpen", "setReservationConfirmOpen"]
+                and not await page.locator("#command-input").is_visible() and not await page.evaluate(OPEN_DIALOGS),
+                f"hooks={sorted(hooks)} openDialogs={await page.evaluate(OPEN_DIALOGS)}")
+            authority = authority_words(asked[-1] if asked else None, seen[-1] if seen else None,
+                                        await page.evaluate(RENDERED_NAMES))
+
+            await reserve_visible(page)
+            if await page.locator('[data-action="directions-close"]').count():
+                await page.locator('[data-action="directions-close"]').first.click()
+            await settle(page, 800)
+            await page.wait_for_selector('[data-action="arrival-open"]', timeout=20000)
+
+            for name, sel, close_sel, hook, via in DIALOGS:
+                if hook:
+                    await page.evaluate(hook)
+                else:
+                    await page.locator('[data-action="arrival-open"]').first.click()
+                dlg = page.locator(sel).first
+                await dlg.wait_for(state="visible", timeout=5000)
+                await settle(page, 300)
+                text = await dlg.inner_text()  # read while the dialog is open
+                shot = os.path.join(SHOTS, f"layout-dialogs-{lang}-{w}-{name}.png")
+                await page.screenshot(path=shot)
+                box = await dlg.bounding_box()
+                sw = await page.evaluate("document.documentElement.scrollWidth")
+                scrolls = await page.evaluate(DIALOG_SCROLLS, sel)
+                inside = bool(box) and box["x"] >= 0 and box["x"] + box["width"] <= w + 0.5
+                # A dialog may be taller than the viewport only if it scrolls internally.
+                rec(s, f"{lang} {w}px {name} ({via}): no horizontal overflow, dialog inside the viewport",
+                    sw <= w and inside and (box["height"] <= h + 0.5 or scrolls),
+                    f"scrollWidth={sw} box={box} scrolls={scrolls} shot={shot}")
+
+                hit = await page.evaluate(CLOSE_HIT, close_sel)
+                cbox = await page.locator(close_sel).first.bounding_box()
+                visible = await page.locator(close_sel).first.is_visible()
+                on_screen = bool(cbox) and cbox["x"] >= 0 and cbox["y"] >= 0 \
+                    and cbox["x"] + cbox["width"] <= w + 0.5 and cbox["y"] + cbox["height"] <= h + 0.5
+                await page.locator(close_sel).first.click()
+                await settle(page, 300)
+                closed = await dlg.count() == 0
+                rec(s, f"{lang} {w}px {name} ({via}): the close control is on-screen, hit-tests to itself, and closes the dialog",
+                    on_screen and visible and hit == "self" and closed,
+                    f"box={cbox} visible={visible} hit={hit} closed={closed}")
+
+                left = sorted(latin_tokens(text) - authority - LATIN_ALLOW)
+                rec(s, f"{lang} {w}px {name} ({via}): no untranslated Latin words beyond the authority ids and the allowlist",
+                    not left, f"leftovers={left} text={text[:90]!r}")
+                rec(s, f"{lang} {w}px {name} ({via}): no uncaught page errors", not page.errors,
+                    "; ".join(page.errors))
+            await ctx.close()
+
+
 SECTIONS = {
     "draft": (section_draft, []),
     "destination-identity": (section_destination_identity, []),
@@ -1457,6 +1809,8 @@ SECTIONS = {
     "offline-reservation": (section_offline_reservation, []),
     "modal": (section_modal, []),
     "queued-voice": (section_queued_voice, []),
+    "status-live": (section_status_live, []),
+    "layout-dialogs": (section_layout_dialogs, []),
     "core": (section_core, []),
     "outage": (section_outage, []),
     "language": (section_language, []),
