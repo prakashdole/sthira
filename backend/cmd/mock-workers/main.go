@@ -95,6 +95,35 @@ func main() {
 	wavHash := sha256.Sum256(wavBytes)
 	wavChecksum := hex.EncodeToString(wavHash[:])
 
+	mux := newMux(sc, wavB64, wavChecksum)
+
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+	defer listener.Close()
+
+	actualPort := listener.Addr().(*net.TCPAddr).Port
+	fmt.Printf("WORKER_URL=http://127.0.0.1:%d\n", actualPort)
+
+	srv := &http.Server{Handler: mux}
+	go func() {
+		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
+			log.Printf("worker serve error: %v", err)
+		}
+	}()
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	<-sig
+	_ = srv.Close()
+}
+
+// newMux builds the private worker protocol routes (health, ASR, middle model
+// and TTS) for one demo scenario. The WAV audio and its SHA-256 are supplied
+// by the caller so the served responses are byte-identical to the audio the
+// process generated.
+func newMux(sc scenario, wavB64, wavChecksum string) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -196,26 +225,7 @@ func main() {
 		})
 	})
 
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-	defer listener.Close()
-
-	actualPort := listener.Addr().(*net.TCPAddr).Port
-	fmt.Printf("WORKER_URL=http://127.0.0.1:%d\n", actualPort)
-
-	srv := &http.Server{Handler: mux}
-	go func() {
-		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
-			log.Printf("worker serve error: %v", err)
-		}
-	}()
-
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	<-sig
-	_ = srv.Close()
+	return mux
 }
 
 func buildMiddleResponse(sc scenario, requestID, dataVer, lang string) contracts.MiddleWorkerResponse {
