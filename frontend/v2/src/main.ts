@@ -6,6 +6,7 @@ import { words, type Language } from './i18n';
 import {
   validateVoiceResponse,
   executeMapActions,
+  routeCameraPitch,
   type MapAction as VoiceMapAction,
   type VoiceProposal,
   type Panel,
@@ -1904,7 +1905,7 @@ function recenterMap() {
 function focusRoute() {
   map?.fitBounds(mapData.routeBounds as [[number, number], [number, number]], {
     padding: window.innerWidth < 768 ? { top: 140, bottom: 290, left: 40, right: 40 } : 90,
-    pitch: mapTilted ? 65 : 0,
+    pitch: routeCameraPitch(mapTilted, savedCamera.pitch),
     bearing: mapTilted ? -18 : 0,
     duration: motionDuration(),
   });

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   validateVoiceResponse,
   executeMapActions,
+  routeCameraPitch,
   type MapAction,
   type VoiceProposal,
 } from './mapActions.ts';
@@ -730,3 +731,23 @@ test('executeMapActions: opening confirmation panels does not trigger external a
 
 
 
+test('routeCameraPitch: tilted map always uses the 3D pitch, ignoring the saved pitch', () => {
+  assert.equal(routeCameraPitch(true, 0), 65);
+  assert.equal(routeCameraPitch(true, 30), 65);
+});
+
+test('routeCameraPitch: untilted map keeps a manually set pitch', () => {
+  assert.equal(routeCameraPitch(false, 30), 30);
+});
+
+test('routeCameraPitch: untilted map clamps an over-steep saved pitch to 60', () => {
+  assert.equal(routeCameraPitch(false, 80), 60);
+});
+
+test('routeCameraPitch: untilted map clamps a negative saved pitch to 0', () => {
+  assert.equal(routeCameraPitch(false, -5), 0);
+});
+
+test('routeCameraPitch: untilted map falls back to a flat camera for a non-finite saved pitch', () => {
+  assert.equal(routeCameraPitch(false, Number.NaN), 0);
+});
