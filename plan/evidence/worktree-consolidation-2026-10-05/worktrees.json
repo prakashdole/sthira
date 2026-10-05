@@ -1,0 +1,67 @@
+[
+  {
+    "worktree": "/Users/apple/.loop-worktrees/MonitoringZ-fd3da397/_integration",
+    "HEAD": "ced0df42152f817de0289617c1fc4fd13f4e2a6d",
+    "branch": "refs/heads/loop/integration",
+    "disk_kib": 9600,
+    "ignored_paths": []
+  },
+  {
+    "worktree": "/Users/apple/.loop-worktrees/MonitoringZ-fd3da397/T001",
+    "HEAD": "0541a9175a29bbdba3b54baef6ac8ce85964fd1c",
+    "branch": "refs/heads/loop/T001",
+    "disk_kib": 9580,
+    "ignored_paths": []
+  },
+  {
+    "worktree": "/Users/apple/.loop-worktrees/MonitoringZ-fd3da397/T002",
+    "HEAD": "a73177f7cf60f13ad72dc1d5f43f1dffc2139f8b",
+    "branch": "refs/heads/loop/T002",
+    "disk_kib": 102896,
+    "ignored_paths": [
+      "frontend/v2/node_modules/",
+      "frontend/v2/dist/"
+    ]
+  },
+  {
+    "worktree": "/Users/apple/.loop-worktrees/MonitoringZ-fd3da397/T003",
+    "HEAD": "3af99b1552b8b289ef5335b420a3edf9409c49ea",
+    "branch": "refs/heads/loop/T003",
+    "disk_kib": 9600,
+    "ignored_paths": []
+  },
+  {
+    "worktree": "/Users/apple/.loop-worktrees/MonitoringZ-fd3da397/T004",
+    "HEAD": "636efffbc645d371d5b9db0b85e9ca8245b1463c",
+    "branch": "refs/heads/loop/T004",
+    "disk_kib": 9580,
+    "ignored_paths": []
+  },
+  {
+    "worktree": "/Users/apple/.loop-worktrees/MonitoringZ-fd3da397/T005",
+    "HEAD": "8323d26478e487353dbe563cbbbc26922c6749da",
+    "branch": "refs/heads/loop/T005",
+    "disk_kib": 9600,
+    "ignored_paths": []
+  },
+  {
+    "worktree": "/Users/apple/Documents/Projects/MonitoringZ-lane1",
+    "HEAD": "2caa85adf97b580ef7ae668759df0fc69e10454f",
+    "branch": "refs/heads/lane1-frontend",
+    "disk_kib": 101248,
+    "ignored_paths": [
+      "frontend/v2/node_modules/",
+      "frontend/v2/dist/"
+    ]
+  },
+  {
+    "worktree": "/Users/apple/Documents/Projects/MonitoringZ-lane2",
+    "HEAD": "6a685240c7723822cec47651f0438f11a861e7fb",
+    "branch": "refs/heads/lane2-demo",
+    "disk_kib": 97760,
+    "ignored_paths": [
+      "frontend/v2/node_modules/",
+      "frontend/v2/dist/"
+    ]
+  }
+]

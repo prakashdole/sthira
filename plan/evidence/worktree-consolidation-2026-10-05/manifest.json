@@ -1,0 +1,86 @@
+[
+  {
+    "branch": "lane1-frontend",
+    "commit": "2caa85adf97b580ef7ae668759df0fc69e10454f",
+    "path": "frontend/v2/src/main.ts",
+    "sha256": "918534fd5856df1dc52a05ef73a045ef58757de9d955f5789029cbb116194e83"
+  },
+  {
+    "branch": "lane1-frontend",
+    "commit": "2caa85adf97b580ef7ae668759df0fc69e10454f",
+    "path": "plan/TODO.md",
+    "sha256": "a2d186e3ab7a04021a4cbe12a9bb02387385f79ce9f45fd0d31fb70dfb27ce87"
+  },
+  {
+    "branch": "lane1-frontend",
+    "commit": "2caa85adf97b580ef7ae668759df0fc69e10454f",
+    "path": "plan/evidence/prototype-browser-verification.md",
+    "sha256": "646d5d3c0dea42ce261c4dd8ed954a7d8c3defc18e6684ba41be0af3a14418d7"
+  },
+  {
+    "branch": "lane2-demo",
+    "commit": "6a685240c7723822cec47651f0438f11a861e7fb",
+    "path": "plan/evidence/lane2-post-integration-report.md",
+    "sha256": "cf01ca26006d3338846c96d9851a77d2a677cba0097c29bf7b83edbd6f49e81e"
+  },
+  {
+    "branch": "lane2-demo",
+    "commit": "6a685240c7723822cec47651f0438f11a861e7fb",
+    "path": "plan/evidence/middleworker-health-design.md",
+    "sha256": "2dc9c00529f341f5ed85385e7f5a519a84443b45019ea06ccc9e24577cad49d1"
+  },
+  {
+    "branch": "lane2-demo",
+    "commit": "6a685240c7723822cec47651f0438f11a861e7fb",
+    "path": "plan/evidence/presenter-fallback-script.md",
+    "sha256": "bba05547e116fdc07f57815946f82d7c8319872d64b0479b0a1081258a3b2ff5"
+  },
+  {
+    "branch": "lane2-demo",
+    "commit": "6a685240c7723822cec47651f0438f11a861e7fb",
+    "path": "plan/evidence/prototype-browser-verification.md",
+    "sha256": "84b2e7e5690990f4780aa1e60d267ba682c45c386bb507597815f1baded9677d"
+  },
+  {
+    "branch": "lane2-demo",
+    "commit": "6a685240c7723822cec47651f0438f11a861e7fb",
+    "path": "plan/evidence/prototype-presenter-guide.md",
+    "sha256": "f2571cc1332c09a883da07e8a4fb8f11ddba4f714d67597c347aff80193c46d4"
+  },
+  {
+    "branch": "lane2-demo",
+    "commit": "6a685240c7723822cec47651f0438f11a861e7fb",
+    "path": "plan/evidence/worker21-no-change.md",
+    "sha256": "a1a8dab75dd588994cab570972a000c58b324abe5e08e1518480ecc0db6120aa"
+  },
+  {
+    "branch": "lane2-demo",
+    "commit": "6a685240c7723822cec47651f0438f11a861e7fb",
+    "path": "plan/prompt.md",
+    "sha256": "379f6767c27bf9782a303c555ba12ce794e6181ebb453c1215d924f351fe0940"
+  },
+  {
+    "branch": "loop/T001",
+    "commit": "0541a9175a29bbdba3b54baef6ac8ce85964fd1c",
+    "path": "backend/internal/middleworker/lifecycle_test.go",
+    "sha256": "0aad14402b0f32ab22f31afe547d053c8a2dc273a0cce1387e2ecc7967fa920e"
+  },
+  {
+    "branch": "loop/T001",
+    "commit": "0541a9175a29bbdba3b54baef6ac8ce85964fd1c",
+    "path": "backend/internal/middleworker/worker.go",
+    "sha256": "2306281bad3061ed2cc91713d7ab9bd17b021d7165145d983b4da0fa7cfa0165"
+  },
+  {
+    "branch": "loop/T004",
+    "commit": "636efffbc645d371d5b9db0b85e9ca8245b1463c",
+    "path": "backend/internal/middleworker/lifecycle_test.go",
+    "sha256": "705102242c66e5bb7ad72ea1ce8b4023f07693a2847c71abfed232145750dc83"
+  },
+  {
+    "branch": "loop/T004",
+    "commit": "636efffbc645d371d5b9db0b85e9ca8245b1463c",
+    "path": "backend/internal/middleworker/worker.go",
+    "sha256": "7fbb7039b59c8ec359b9e7905f15e0f2cb5910cd7e59bbaf0a1efd78fbd3067a"
+  }
+]
