@@ -1,0 +1,32 @@
+# loop config — every key has a default; delete a key to fall back to it.
+# A "round" is one orchestrator call. Every _min value also accepts an explicit
+# _sec override (task_timeout_sec, stall_sec, orch_timeout_sec, tick_sec,
+# kill_grace_sec) which wins over it; the tests rely on those.
+[workers]   # slot -> model; w1 and w4 share the provider key minimax-1
+w1 = "minimax-1/MiniMax-M3.1-Flash-Preview"
+w2 = "minimax-2/MiniMax-M3.1-Flash-Preview"
+w3 = "minimax-3/MiniMax-M3.1-Flash-Preview"
+w4 = "minimax-1/MiniMax-M3.1-Flash-Preview"
+[limits]
+task_timeout_min = 45
+stall_min = 10
+max_attempts = 3
+max_rounds = 200            # a round = one orchestrator call
+no_progress_rounds = 12      # orchestrator calls in a row with no new merge
+max_parallel_reviews = 2
+max_worker_tokens = 0       # 0 = unlimited
+max_orch_calls = 0          # 0 = unlimited
+orch_timeout_min = 20
+cooldown_base_sec = 30.0    # first rate-limit backoff; doubles per hit, capped at 15 min
+[project]
+integration_branch = "loop/integration"
+setup_cmd = ""              # run once in each newly created worktree
+check_cmd = ""              # full suite, run after each merge
+plan_files = ["plan.md", "architecture.md", "prd.md", "trd.md", "rules.md", "decisions.md"]
+always_allowed = ["package-lock.json", "pnpm-lock.yaml"]
+arch_review_every = 5       # merges
+refill_when_ready_below = 4
+[orchestrator]
+agent = "loop-orchestrator"
+effort = "high"             # must never exceed high, and --model is never passed
+orch_extra_args = []
